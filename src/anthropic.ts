@@ -103,11 +103,42 @@ export interface AnthropicAdapterOptions {
   model?: string;
   /** Max tokens for the extraction response. Defaults to 2048. */
   maxTokens?: number;
+  /**
+   * Base URL for Anthropic-compatible endpoints (e.g. Z.AI's Anthropic-compatible
+   * API, or a proxy). Passed through as the SDK's `baseURL` constructor option
+   * when set. When unset, this adapter does NOT read any env var itself — the
+   * `@anthropic-ai/sdk` constructor already falls back to `ANTHROPIC_BASE_URL`
+   * on its own, so that fallback is preserved without duplicating it here.
+   */
+  baseUrl?: string;
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 const DEFAULT_MAX_TOKENS = 2048;
 const TOOL_NAME = "submit_extraction_proposals";
+
+/**
+ * Resolve the `{ apiKey, baseURL? }` object passed to the `@anthropic-ai/sdk`
+ * constructor. Pulled out as a pure, exported function so the pass-through of
+ * `opts.baseUrl` -> constructor `baseURL` is unit-testable without a network
+ * call or a real SDK instance (see tests/anthropic.test.ts).
+ *
+ * `baseURL` is only included in the returned object when `opts.baseUrl` is
+ * set — when omitted, the SDK constructor's own `ANTHROPIC_BASE_URL` env
+ * fallback applies (its default parameter triggers on an absent OR
+ * `undefined` key alike), so this adapter never reads that env var itself.
+ */
+export function resolveSdkClientOptions(
+  opts: AnthropicAdapterOptions,
+): { apiKey: string; baseURL?: string } {
+  const apiKey = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"];
+  if (!apiKey) {
+    throw new Error(
+      "AnthropicExtractionProvider: no API key. Provide opts.apiKey, set ANTHROPIC_API_KEY, or inject opts.client.",
+    );
+  }
+  return opts.baseUrl ? { apiKey, baseURL: opts.baseUrl } : { apiKey };
+}
 
 /**
  * Build or return a messages client from options.
@@ -123,17 +154,10 @@ async function resolveClient(opts: AnthropicAdapterOptions): Promise<AnthropicMe
   const sdkModule = "@anthropic-ai/sdk";
   const sdkImport = await (Function("m", "return import(m)")(sdkModule) as Promise<unknown>);
   const { default: Anthropic } = sdkImport as {
-    default: new (opts: { apiKey: string }) => { messages: AnthropicMessagesClient };
+    default: new (opts: { apiKey: string; baseURL?: string }) => { messages: AnthropicMessagesClient };
   };
 
-  const apiKey = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"];
-  if (!apiKey) {
-    throw new Error(
-      "AnthropicExtractionProvider: no API key. Provide opts.apiKey, set ANTHROPIC_API_KEY, or inject opts.client.",
-    );
-  }
-
-  const sdk = new Anthropic({ apiKey });
+  const sdk = new Anthropic(resolveSdkClientOptions(opts));
   return sdk.messages;
 }
 
@@ -299,6 +323,24 @@ export function parseProposals(
 // ---------------------------------------------------------------------------
 
 /**
+ * Derive a `"@<host>"` suffix for `provider.name` when a custom `baseUrl` is
+ * set, so parity reports show which backend (e.g. `api.z.ai` vs Anthropic's
+ * default) produced a given set of proposals. Returns "" for the default
+ * (unset) case — `provider.name` is unchanged from before this option existed.
+ * An unparseable `baseUrl` falls back to the raw string rather than throwing,
+ * since a malformed value should still surface in the name, not blow up
+ * provider construction.
+ */
+function hostSuffix(baseUrl: string | undefined): string {
+  if (!baseUrl) return "";
+  try {
+    return `@${new URL(baseUrl).host}`;
+  } catch {
+    return `@${baseUrl}`;
+  }
+}
+
+/**
  * Create an ExtractionProvider backed by Anthropic's API using forced tool-use.
  *
  * Proposals-only (ADR 0001 §4): returns PROPOSALS only — each carries provenance
@@ -313,7 +355,7 @@ export function createAnthropicExtractionProvider(
 ): ExtractionProvider {
   const model = opts.model ?? DEFAULT_MODEL;
   const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
-  const name = `anthropic-extraction-provider:${model}`;
+  const name = `anthropic-extraction-provider:${model}${hostSuffix(opts.baseUrl)}`;
 
   return {
     name,
