@@ -222,6 +222,114 @@ endpoint maps Claude model names to GLM equivalents rather than erroring, which
 can silently swap the model actually used, so pin `model` explicitly (e.g.
 `glm-4.6`) rather than relying on that mapping.
 
+## Fetching & snapshots (`@kontourai/traverse/fetch`)
+
+Traverse's **fetch side** is a standalone-first capability: configurable
+single-page fetching with **snapshot capture** so a fetch can be **replayed**
+offline (CI never needs the network). It is exported from the
+`@kontourai/traverse/fetch` subpath — mirroring the `/anthropic` discipline, the
+package root stays focused on extraction and re-exports none of it. Like
+`extract()`, `fetchSource()` **never throws**: timeouts, retries, robots denial,
+HTTP errors, and bad config surface as a typed `FetchError` on the result. It
+has **zero runtime dependencies** (global `fetch` + `node:crypto`/`node:fs`).
+
+Out of scope for this layer (see
+[`docs/slice-3-candidates.md`](docs/slice-3-candidates.md)): multi-page
+link-following / crawl frontier, headless-browser rendering, and scheduling.
+
+### Standalone fetch
+
+```ts
+import { fetchSource } from "@kontourai/traverse/fetch";
+
+const result = await fetchSource({
+  id: "listing-1",
+  url: "https://example.com/listing",
+  // politeness, timeout, and bounded jittered retries all have sane defaults:
+  minDelayMs: 1000, // per-host min gap between requests (default 1000)
+  timeoutMs: 15000, // per-request timeout (default 15000)
+  retries: 2,       // retryable failures only (network/timeout/429/5xx), capped at 5
+  respectRobots: true, // default — fetch & honor /robots.txt for our User-Agent
+  // Identify honestly. The default UA is an honest bot string with a CONTACT
+  // PLACEHOLDER — override it with a real contact when hitting real sites:
+  userAgent: "my-crawler/1.0 (+https://example.com/bot; contact: ops@example.com)",
+});
+
+if (result.error) {
+  // typed, never thrown: "timeout" | "network" | "http-error" | "robots-denied"
+  //   | "too-many-redirects" | "invalid-url" | "invalid-config" | "no-snapshot"
+  console.error(result.error.kind, result.error.message);
+} else {
+  const s = result.snapshot!;
+  // s.url (final, post-redirect), s.status, s.contentType, s.body,
+  // s.bodyHash (sha256), s.redirects?, s.fetchedAt
+}
+```
+
+**Robots & politeness.** With `respectRobots` (default `true`), `/robots.txt` is
+fetched for your `User-Agent` before the request and any redirect hop; a
+disallowed path returns `kind: "robots-denied"` and the page is never fetched.
+If `/robots.txt` is itself unreachable or 5xx, the fetch **fails open** with a
+warning (a single-page fetch should not be blocked by robots *infra* problems —
+see [`docs/adr/0002`](docs/adr/0002-fetch-snapshot-slice2.md)). Politeness is a
+per-host minimum delay, enforced in-process.
+
+### Capture & replay
+
+Snapshots persist to a `SnapshotStore` (a filesystem implementation is bundled;
+inject any other). `replaySource()` returns the latest snapshot as the **same**
+`FetchResult` shape a live call returns, so downstream code is identical live vs.
+replay:
+
+```ts
+import {
+  fetchSource,
+  createFilesystemSnapshotStore,
+  replaySource,
+} from "@kontourai/traverse/fetch";
+
+const store = createFilesystemSnapshotStore({ root: ".snapshots" });
+
+// Capture once (e.g. in a maintainer run):
+const live = await fetchSource({ id: "listing-1", url: "https://example.com/listing" });
+if (live.snapshot) await store.put(live.snapshot);
+
+// Replay anywhere (e.g. in CI) — no network:
+const replayed = await replaySource(store, "listing-1");
+// replayed.snapshot!.fromCache === true; byte-identical body & bodyHash.
+```
+
+### One-call composition with provenance continuity
+
+`fetchAndExtract()` wires fetch → content-prep → `extract()` in one call, and
+threads a **snapshot-anchored `sourceRef`** into the extraction so every proposal
+is traceable back to the exact bytes it came from:
+
+```ts
+import { fetchAndExtract, parseSnapshotSourceRef } from "@kontourai/traverse/fetch";
+
+const result = await fetchAndExtract(
+  { id: "listing-1", url: "https://example.com/listing" },
+  {
+    targetSchema,
+    provider,                    // any ExtractionProvider (mock/Anthropic/...)
+    store,                       // required for "replay" / "live-with-capture"
+    mode: "live-with-capture",   // "live" | "replay" | "live-with-capture"
+  },
+);
+
+// result.fetch       — the FetchResult (snapshot or typed error)
+// result.extraction  — the ExtractionResult (absent if the fetch failed)
+// result.sourceRef   — "traverse-snapshot:<id>?url=...&sha256=<bodyHash>&fetchedAt=<iso>"
+
+const ref = parseSnapshotSourceRef(result.sourceRef!);      // { sourceId, url, bodyHash, fetchedAt }
+const exactBytes = await store.get(ref!.sourceId, ref!.bodyHash); // the snapshot the proposals came from
+```
+
+Use `mode: "replay"` to run the identical extraction against a stored snapshot
+with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a
+handy non-persistent store for tests and single-process capture-then-replay.
+
 ## PDF is deferred
 
 `ContentType` already includes `"pdf"` so callers can pass it through a stable

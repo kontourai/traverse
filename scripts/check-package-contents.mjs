@@ -36,6 +36,8 @@ try {
     "dist/src/index.d.ts",
     "dist/src/anthropic.js",
     "dist/src/anthropic.d.ts",
+    "dist/src/fetch/index.js",
+    "dist/src/fetch/index.d.ts",
   ];
 
   for (const requiredFile of requiredFiles) {
