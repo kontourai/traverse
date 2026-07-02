@@ -56,7 +56,7 @@ export function createMockExtractionProvider(
 export function fakeAnthropicMessage(
   toolName: string,
   input: unknown,
-  opts: { model?: string; inputTokens?: number; outputTokens?: number } = {},
+  opts: { model?: string; inputTokens?: number; outputTokens?: number; stopReason?: string | null } = {},
 ): AnthropicMessage {
   return {
     id: "msg_fake",
@@ -64,7 +64,7 @@ export function fakeAnthropicMessage(
     role: "assistant",
     content: [{ type: "tool_use", id: "tool_fake_1", name: toolName, input }],
     model: opts.model ?? "claude-sonnet-4-6",
-    stop_reason: "tool_use",
+    stop_reason: opts.stopReason ?? "tool_use",
     usage: {
       input_tokens: opts.inputTokens ?? 120,
       output_tokens: opts.outputTokens ?? 64,

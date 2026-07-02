@@ -9,6 +9,14 @@
  *
  * `prepareContent` never throws: unsupported/deferred paths return a typed
  * `{ error }` instead.
+ *
+ * IMPORTANT for provenance: the string this module returns is the CONTENT-
+ * PREPARED text — the exact text `extract()` hands to the provider, and the
+ * exact text a proposal's `provenance.excerpt` is verified against (via
+ * `indexOf`) and `provenance.locator`'s `"chars:<start>-<end>"` offsets are
+ * anchored to (see src/types.ts, src/extract.ts). It is NOT the caller's raw
+ * HTML/source document — tags are stripped, entities are decoded, and
+ * whitespace is collapsed before this text ever reaches a provider.
  */
 
 import type { ContentType } from "./types.js";
@@ -26,7 +34,24 @@ const ENTITY_MAP: Record<string, string> = {
   "&#39;": "'",
   "&apos;": "'",
   "&nbsp;": " ",
+  "&#160;": " ",
+  "&#xa0;": " ",
+  // Common typographic entities — smart quotes, dashes, ellipsis.
+  "&ndash;": "–",
+  "&mdash;": "—",
+  "&lsquo;": "‘",
+  "&rsquo;": "’",
+  "&ldquo;": "“",
+  "&rdquo;": "”",
+  "&hellip;": "…",
 };
+
+const ENTITY_RE = new RegExp(
+  Object.keys(ENTITY_MAP)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|"),
+  "gi",
+);
 
 /**
  * Strip HTML to meaningful text without any runtime dependency.
@@ -51,8 +76,8 @@ export function htmlToText(html: string, maxChars: number = DEFAULT_MAX_CHARS): 
   // Strip all remaining tags.
   text = text.replace(/<[^>]+>/g, " ");
 
-  // Decode common entities.
-  text = text.replace(/&amp;|&lt;|&gt;|&quot;|&#39;|&apos;|&nbsp;/gi, (m) => ENTITY_MAP[m.toLowerCase()] ?? m);
+  // Decode common entities (case-insensitive; ENTITY_RE is derived from ENTITY_MAP's keys).
+  text = text.replace(ENTITY_RE, (m) => ENTITY_MAP[m.toLowerCase()] ?? m);
 
   // Collapse whitespace: trim each line, drop blank lines, collapse inline runs.
   text = text

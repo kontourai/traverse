@@ -40,10 +40,20 @@ supplied; the package defines zero field names of its own.
 
 Nothing in Traverse may resolve a value or bypass review. Concretely:
 
-1. Every emitted item is an `ExtractionProposal` carrying **required
-   provenance** — a verbatim `excerpt` and a `locator`. Provenance is required
-   on the type itself, so a proposal without it cannot exist. `extract()`
-   drops any provider output lacking an excerpt.
+1. Every emitted item is an `ExtractionProposal` carrying **required,
+   ENFORCED provenance** — a verbatim `excerpt` and a `locator`. Provenance is
+   required on the type itself, so a proposal without it cannot exist —
+   `extract()` drops any provider output lacking an excerpt. Presence alone is
+   not enough: `excerpt` is verbatim against the CONTENT-PREPARED text
+   `extract()` hands to the provider (not the caller's raw HTML/source), and
+   `extract()`'s normalization step VERIFIES this — via `indexOf` against that
+   same prepared text — before trusting it. An excerpt that cannot be found is
+   dropped, never accepted on trust. On a verified hit, `extract()` derives
+   `locator` itself as `"chars:<start>-<end>"` (code-unit offsets of the
+   matched excerpt within the prepared text), overwriting any locator a
+   provider/adapter supplied — only `extract()` holds the prepared text needed
+   to verify one, so it is the sole owner of the final value. This is what
+   makes the provenance contract ENFORCED, not merely a prompted convention.
 2. `confidence` is an honest `0..1` signal for the reviewer, never a gate
    Traverse acts on. Traverse does not accept, reject, or select based on it; it
    only clamps out-of-range values into range and reports the adjustment.

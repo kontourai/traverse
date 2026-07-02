@@ -6,6 +6,14 @@
  * (excerpt + locator) that flows through the caller's own review path before it
  * counts. Nothing here resolves a value.
  *
+ * `provenance.locator` returned here is PROVISIONAL: `extract()`'s
+ * normalization step is the sole owner of the final `locator` value — it
+ * verifies `excerpt` against the prepared content and derives/overwrites
+ * `locator` with the `"chars:<start>-<end>"` scheme (see src/types.ts,
+ * src/extract.ts). This adapter's own synthesized `"<contentType>:field:
+ * <fieldPath>"` fallback exists only so `ProviderExtractionOutput.proposals`
+ * satisfies the `ExtractionProposal` shape before normalization runs.
+ *
  * Subpath export: import from "@kontourai/traverse/anthropic" — this module is
  * NOT re-exported from the main index.ts, so consumers without @anthropic-ai/sdk
  * pay nothing.
@@ -14,6 +22,11 @@
  * inject a fake without hitting the network. If none is provided, one is built
  * from opts.apiKey (falling back to process.env.ANTHROPIC_API_KEY) via a dynamic
  * import of the optional peer dep.
+ *
+ * Nothing is dropped or noticed silently: every malformed tool-output item this
+ * adapter drops, and a response truncated at `maxTokens`, is reported via
+ * `ProviderExtractionOutput.warnings` — `extract()` merges these into
+ * `ExtractionResult.warnings` alongside its own normalization notes.
  */
 
 import type {
@@ -225,32 +238,48 @@ interface RawProposalItem {
 
 /**
  * Parse the tool output into ExtractionProposal[]. Malformed items — missing
- * fieldPath, missing/blank excerpt (no provenance), or out-of-range/absent
- * confidence — are dropped, never silently accepted. A missing locator is
- * synthesized deterministically as "field:<fieldPath>".
+ * fieldPath, missing/blank excerpt (no provenance), missing `value`, or
+ * out-of-range/absent confidence — are dropped, never silently accepted; each
+ * drop is reported in `warnings` (never silent). A missing locator is
+ * synthesized deterministically as "<contentType>:field:<fieldPath>" — a
+ * provisional value only; `extract()`'s normalization overwrites it once the
+ * excerpt is verified against the prepared content (see src/extract.ts).
  */
 export function parseProposals(
   rawToolInput: unknown,
   extractorName: string,
   contentType: ContentType,
-): ExtractionProposal[] {
-  if (!isRecord(rawToolInput)) return [];
+): { proposals: ExtractionProposal[]; warnings: string[] } {
+  const warnings: string[] = [];
+
+  if (!isRecord(rawToolInput)) return { proposals: [], warnings };
   const rawProposals = rawToolInput["proposals"];
-  if (!isArray(rawProposals)) return [];
+  if (!isArray(rawProposals)) return { proposals: [], warnings };
 
   const results: ExtractionProposal[] = [];
-  for (const item of rawProposals) {
-    if (!isRecord(item)) continue;
+  rawProposals.forEach((item, index) => {
+    if (!isRecord(item)) {
+      warnings.push(`dropped malformed tool item at index ${index}: not an object`);
+      return;
+    }
     const raw = item as RawProposalItem;
 
     const fieldPath = stringOrUndefined(raw.fieldPath);
     const excerpt = stringOrUndefined(raw.excerpt);
     const confidence = numberInRange(raw.confidence, 0, 1);
+    const hasValue = "value" in raw;
 
-    // Required: fieldPath, provenance excerpt, and a valid confidence.
-    if (!fieldPath || !excerpt || confidence === undefined) continue;
-    // A value key must be present (may be any JSON value, including falsey).
-    if (!("value" in raw)) continue;
+    if (!fieldPath || !excerpt || confidence === undefined || !hasValue) {
+      const reasons: string[] = [];
+      if (!fieldPath) reasons.push("missing fieldPath");
+      if (!excerpt) reasons.push("missing/blank excerpt");
+      if (confidence === undefined) reasons.push("missing/out-of-range confidence");
+      if (!hasValue) reasons.push("missing value");
+      warnings.push(
+        `dropped malformed tool item at index ${index}${fieldPath ? ` (fieldPath "${fieldPath}")` : ""}: ${reasons.join(", ")}`,
+      );
+      return;
+    }
 
     const locator = stringOrUndefined(raw.locator) ?? `${contentType}:field:${fieldPath}`;
 
@@ -261,8 +290,8 @@ export function parseProposals(
       provenance: { excerpt, locator },
       extractor: extractorName,
     });
-  }
-  return results;
+  });
+  return { proposals: results, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +303,10 @@ export function parseProposals(
  *
  * Proposals-only (ADR 0001 §4): returns PROPOSALS only — each carries provenance
  * and flows through the caller's review path before counting. Tool output is
- * validated strictly; malformed items are dropped.
+ * validated strictly; malformed items are dropped (with a warning — see
+ * `parseProposals`), and a `stop_reason === "max_tokens"` response is flagged
+ * with a warning so a truncated proposal set is never silently mistaken for a
+ * complete one.
  */
 export function createAnthropicExtractionProvider(
   opts: AnthropicAdapterOptions = {},
@@ -317,7 +349,11 @@ export function createAnthropicExtractionProvider(
       });
 
       const toolInput = extractToolUseInput(message, TOOL_NAME);
-      const proposals = parseProposals(toolInput, name, input.contentType);
+      const { proposals, warnings } = parseProposals(toolInput, name, input.contentType);
+
+      if (message.stop_reason === "max_tokens") {
+        warnings.push("response truncated at maxTokens; proposals may be incomplete");
+      }
 
       return {
         proposals,
@@ -326,6 +362,7 @@ export function createAnthropicExtractionProvider(
           model: message.model || model,
           tokensUsed: message.usage.input_tokens + message.usage.output_tokens,
         },
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     },
   };

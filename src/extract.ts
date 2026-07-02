@@ -6,13 +6,33 @@
  * failure — every stage error surfaces as `ExtractionResult.error` with an
  * empty `proposals` array.
  *
- * Normalization discipline (proposals-only, ADR 0001 §4):
- *  - a proposal MUST carry provenance (a non-empty `excerpt`); those lacking it
- *    are dropped with a warning,
- *  - `confidence` is clamped into 0..1 (a non-finite confidence drops the item),
- *  - `fieldPath` MUST exist in the caller's `targetSchema`; unknown fields are
- *    dropped with a warning,
- *  - `extractor` MUST be a non-empty string.
+ * Normalization discipline (proposals-only, ADR 0001 §4). A proposal survives
+ * normalization only if ALL of the following hold — anything else is dropped
+ * (or, for confidence, clamped) with a warning, never silently:
+ *  - `fieldPath` MUST be a non-empty string present in the caller's
+ *    `targetSchema`; missing or unknown fields are dropped with a warning,
+ *  - `extractor` MUST be a non-empty string; a blank one drops the item,
+ *  - the proposal MUST carry provenance with a non-empty `excerpt`; a missing
+ *    excerpt drops the item,
+ *  - that `excerpt` MUST OCCUR VERBATIM in the prepared content handed to the
+ *    provider (checked via `String.prototype.indexOf` against the exact text
+ *    `provider.extract()` was called with — never the caller's raw
+ *    HTML/source). A miss drops the item with the warning "excerpt not found
+ *    in prepared content"; this is what turns the provenance contract from a
+ *    prompted convention into an ENFORCED one. A hit sets/overwrites
+ *    `provenance.locator` to the defined `"chars:<start>-<end>"` scheme —
+ *    0-based UTF-16 code-unit offsets of the matched excerpt within the
+ *    prepared text — regardless of any locator a provider/adapter supplied
+ *    (only `extract()` holds the prepared text needed to verify one, so it is
+ *    the sole owner of the final `locator` value),
+ *  - `confidence` MUST be a finite number; a non-finite (or missing)
+ *    confidence drops the item. An in-range value passes through; an
+ *    out-of-range value is CLAMPED into `0..1` (never dropped) with a warning.
+ *
+ * `warnings` on the final `ExtractionResult` merges BOTH of the above
+ * normalization notes AND any `warnings` the provider itself returned (e.g.
+ * the Anthropic adapter's malformed-tool-item / maxTokens-truncation notes) —
+ * nothing either stage notices is silent.
  */
 
 import { prepareContent } from "./content-prep.js";
@@ -49,7 +69,13 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       fieldHints: input.fieldHints,
     });
 
-    const { proposals, warnings } = normalizeProposals(output.proposals, input);
+    const providerWarnings = output.warnings ?? [];
+    const { proposals, warnings: normalizationWarnings } = normalizeProposals(
+      output.proposals,
+      input,
+      prepared.text,
+    );
+    const warnings = [...providerWarnings, ...normalizationWarnings];
 
     const result: ExtractionResult = {
       proposals,
@@ -71,6 +97,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 function normalizeProposals(
   raw: unknown,
   input: ExtractInput,
+  preparedContent: string,
 ): { proposals: ExtractionProposal[]; warnings: string[] } {
   const warnings: string[] = [];
   const proposals: ExtractionProposal[] = [];
@@ -113,10 +140,17 @@ function normalizeProposals(
       warnings.push(`dropped proposal for "${fieldPath}": missing provenance excerpt`);
       continue;
     }
-    const locator =
-      provenance && typeof provenance.locator === "string" && provenance.locator.trim().length > 0
-        ? provenance.locator.trim()
-        : `${input.contentType}:field:${fieldPath}`;
+
+    // Provenance contract enforcement: the excerpt must actually occur, verbatim,
+    // in the SAME prepared text the provider was given — never merely asserted.
+    // A miss is dropped (never accepted on trust); a hit derives the locator from
+    // the verified offset, overwriting anything the provider/adapter supplied.
+    const excerptIndex = preparedContent.indexOf(excerpt);
+    if (excerptIndex === -1) {
+      warnings.push(`dropped proposal for "${fieldPath}": excerpt not found in prepared content`);
+      continue;
+    }
+    const locator = `chars:${excerptIndex}-${excerptIndex + excerpt.length}`;
 
     const rawConfidence = candidate.confidence;
     if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {

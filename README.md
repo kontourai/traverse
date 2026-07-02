@@ -27,20 +27,37 @@ Traverse has **zero runtime dependencies** of its own.
 
 ## The provenance contract
 
-Every `ExtractionProposal` carries required `provenance`:
+Every `ExtractionProposal` carries required `provenance`, and `extract()`
+**enforces** it — not just requires its presence:
 
-- **`excerpt`** — the verbatim span of source text the value was drawn from. A
-  proposal without an excerpt is not something Traverse emits; `extract()` drops
-  any provider output that lacks one.
-- **`locator`** — a source locator string. The scheme intentionally reuses
-  Survey's `LocatorScheme` vocabulary (`"html"` / `"text"` / `"pdf"`), so a
-  caller building a Survey `RawSource.locatorScheme` or `Extraction.locator`
-  from `provenance.locator` needs **no translation table**. When a provider
-  omits a locator, Traverse synthesizes `"<contentType>:field:<fieldPath>"`.
+- **`excerpt`** — a verbatim quote against the **CONTENT-PREPARED text**
+  `extract()` hands to the provider (the output of `content-prep.ts`: tags
+  stripped, entities decoded, whitespace collapsed, truncated to
+  `maxContentChars`) — **not** the caller's raw HTML/source document. A
+  proposal without an excerpt is not something Traverse emits.
+- **Occurrence is checked, not assumed.** `extract()`'s normalization step
+  verifies `excerpt` actually occurs in that prepared text via
+  `String.prototype.indexOf`. A proposal whose excerpt cannot be found there is
+  **dropped** with the warning `"excerpt not found in prepared content"` — an
+  LLM that paraphrases, translates, or reformats instead of quoting verbatim
+  produces no proposal, not a false one.
+- **`locator`** — a fixed, defined scheme: `"chars:<start>-<end>"`, where
+  `<start>`/`<end>` are 0-based UTF-16 code-unit offsets of the *first*
+  `indexOf` match of `excerpt` within the prepared text. `extract()` always
+  derives/overwrites `locator` itself from the verified offset — a
+  provider/adapter-supplied `locator` is never trusted as-is, because only
+  `extract()` holds the prepared text needed to verify one.
 
-Because provenance is required on the type itself, the whole package is
-structurally a provenance-bearing-proposal producer — this is its identity, not
-a convention.
+Because the excerpt and the offsets it implies are anchored to the
+**prepared** text and not the caller's original document, a consumer that
+wants to highlight/locate an excerpt in the raw source must re-run the same
+content-prep step (or an equivalent) to reproduce the text those offsets refer
+to, or map prepared-text offsets back to raw-document offsets itself. Traverse
+does not do that mapping.
+
+Because provenance is required on the type itself AND enforced by
+normalization, the whole package is structurally a provenance-bearing-proposal
+producer — this is its identity, not a convention.
 
 ## Quickstart
 
@@ -64,7 +81,9 @@ const provider: ExtractionProvider = {
           fieldPath: "title",
           candidateValue: "Beginner Bouldering Session",
           confidence: 0.9,
-          provenance: { excerpt: "Beginner Bouldering Session", locator: "html:field:title" },
+          // A provider-supplied `locator` is provisional — extract() overwrites
+          // it with the verified "chars:<start>-<end>" scheme below.
+          provenance: { excerpt: "Beginner Bouldering Session", locator: "provisional" },
           extractor: "mock",
         },
       ],
@@ -81,10 +100,13 @@ const result = await extract({
   provider,
 });
 
+// result.proposals[0].provenance.locator === "chars:0-27" — extract() verified
+// the excerpt against the prepared text ("Beginner Bouldering Session", the
+// <h1> stripped to text) and derived the offset itself.
 // result.proposals — normalized, provenance-bearing proposals
 // result.raw       — the provider's raw response, for audit
 // result.error     — set (never thrown) if a stage failed
-// result.warnings  — notes for any dropped/clamped proposals
+// result.warnings  — merged provider + normalization notes (dropped/adjusted proposals)
 ```
 
 `extract()` **never throws** for provider, parse, or content-prep failure. Any
@@ -93,14 +115,24 @@ stage error surfaces as `result.error` with an empty `proposals` array.
 ## Normalization semantics
 
 `extract()` runs content-prep, calls `provider.extract()`, then strictly
-normalizes proposals:
+normalizes proposals. A proposal survives only if ALL of the following hold:
 
-- proposals lacking a provenance `excerpt` are dropped (with a warning),
-- `confidence` is clamped into `0..1` (a non-finite confidence drops the item),
-- a `fieldPath` not present in your `targetSchema` is dropped (with a warning),
-- an empty `extractor` identity drops the item.
+- `fieldPath` is a non-empty string present in your `targetSchema` (otherwise
+  dropped, with a warning),
+- `extractor` is a non-empty string (otherwise dropped),
+- it carries a provenance `excerpt` (otherwise dropped, with a warning),
+- that `excerpt` **occurs verbatim in the prepared content** handed to the
+  provider — checked via `indexOf`, not merely assumed (a miss is dropped with
+  `"excerpt not found in prepared content"`; a hit derives/overwrites
+  `provenance.locator` as `"chars:<start>-<end>"` — see "The provenance
+  contract" above),
+- `confidence` is a finite number (otherwise dropped) — an out-of-range value
+  is **clamped** into `0..1` (never dropped), with a warning.
 
-Dropped/adjusted items are reported in `result.warnings`.
+`result.warnings` merges BOTH of the above normalization notes AND any
+`warnings` the provider itself returned (e.g. the Anthropic adapter's
+malformed-tool-item or maxTokens-truncation notes) — nothing either stage
+notices is silent.
 
 ## Anthropic adapter
 
@@ -130,9 +162,20 @@ const result = await extract({
 The adapter builds a forced tool-use schema **dynamically** from your
 `targetSchema` and instructs the model to return a verbatim `excerpt` per field
 — that is how provenance gets populated. Tool output is parsed defensively:
-malformed items (no excerpt, out-of-range confidence, missing field) are
-dropped, never silently accepted. For tests, inject a client:
-`createAnthropicExtractionProvider({ client })`.
+malformed items (no excerpt, out-of-range confidence, missing field, missing
+value) are dropped, never silently accepted — each drop is reported in
+`ProviderExtractionOutput.warnings`, which `extract()` merges into
+`result.warnings`. The adapter also warns (rather than staying silent) when
+the model's response is truncated: `stop_reason === "max_tokens"` adds
+`"response truncated at maxTokens; proposals may be incomplete"` to
+`warnings`, so a truncated proposal set is never mistaken for a complete one.
+For tests, inject a client: `createAnthropicExtractionProvider({ client })`.
+
+The adapter's own synthesized/provided `locator` on each proposal is
+**provisional** — `extract()`'s normalization step is the sole owner of the
+final `locator` value, which it derives from a verified excerpt offset (see
+"The provenance contract" above). This applies to any provider, not just the
+Anthropic adapter: `extract()` re-derives every proposal's locator itself.
 
 ### Model override
 

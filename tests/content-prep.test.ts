@@ -30,7 +30,24 @@ describe("htmlToText", () => {
   it("decodes common entities", () => {
     const text = htmlToText("<p>Shoes &amp; chalk 6:00pm&ndash;7:30pm &lt;ok&gt;</p>");
     assert.match(text, /Shoes & chalk/);
+    assert.match(text, /6:00pm–7:30pm/);
     assert.match(text, /<ok>/);
+  });
+
+  it("decodes typographic entities (dashes, smart quotes, ellipsis) and nbsp variants", () => {
+    const text = htmlToText(
+      "<p>Coach&rsquo;s note&mdash;&ldquo;bring&nbsp;chalk&rdquo;&hellip; details&#160;below&#xA0;here&#39;s more.</p>",
+    );
+    assert.match(text, /Coach’s note/);
+    assert.match(text, /—/); // &mdash;
+    assert.match(text, /“bring/); // &ldquo;
+    assert.match(text, /chalk”/); // &nbsp; between "bring" and "chalk", &rdquo; after
+    assert.match(text, /details below here/); // &#160; and &#xA0; both decode to a space
+    assert.match(text, /…/); // &hellip;
+    assert.match(text, /here's more/); // &#39;
+    // No raw entity markers survive.
+    assert.doesNotMatch(text, /&\w+;/);
+    assert.doesNotMatch(text, /&#/);
   });
 
   it("truncates to maxChars", () => {

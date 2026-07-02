@@ -1,8 +1,10 @@
 // Anthropic adapter tests. All tests use an injected fake client — no network,
 // no ANTHROPIC_API_KEY. They assert the request shape (dynamic tool schema built
-// from the caller's TargetFieldSchema, forced tool_choice, model) and the
-// response parsing (provenance-bearing proposals, raw.model/raw.tokensUsed, and
-// defensive handling of malformed output).
+// from the caller's TargetFieldSchema, forced tool_choice, model), the response
+// parsing (provenance-bearing proposals, raw.model/raw.tokensUsed, and defensive
+// handling of malformed output), and the adapter's warnings channel (malformed
+// tool items, maxTokens truncation) — nothing the adapter drops or notices is
+// silent.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -55,9 +57,10 @@ describe("createAnthropicExtractionProvider", () => {
     assert.equal(out.proposals.length, 2);
     assert.equal(out.proposals[0].fieldPath, "title");
     assert.equal(out.proposals[0].provenance.excerpt, "Beginner Bouldering Session");
-    // Missing locator synthesized deterministically.
+    // Missing locator synthesized deterministically (provisional — extract()'s
+    // normalization is the sole owner of the final locator value).
     assert.equal(out.proposals[0].provenance.locator, "html:field:title");
-    // Provided locator preserved.
+    // Provided locator preserved at the adapter layer.
     assert.equal(out.proposals[1].provenance.locator, "html:field:priceAmount");
     // extractor identity stamped from the provider name.
     assert.equal(out.proposals[0].extractor, "anthropic-extraction-provider:claude-sonnet-4-6");
@@ -65,6 +68,9 @@ describe("createAnthropicExtractionProvider", () => {
     // raw carries model + token usage.
     assert.equal(out.raw.model, "claude-sonnet-4-6");
     assert.equal(out.raw.tokensUsed, 280);
+
+    // Well-formed, non-truncated response: no warnings key at all.
+    assert.equal(out.warnings, undefined);
   });
 
   it("sends a forced tool-use request whose tool schema is built from the target schema", async () => {
@@ -103,7 +109,7 @@ describe("createAnthropicExtractionProvider", () => {
     assert.equal(out.raw.response, "");
   });
 
-  it("drops malformed tool items (missing excerpt / out-of-range confidence)", async () => {
+  it("drops malformed tool items (missing excerpt / out-of-range confidence) and reports each drop as a warning", async () => {
     const client = fakeAnthropicClient(
       fakeAnthropicMessage(TOOL_NAME, {
         proposals: [
@@ -121,6 +127,28 @@ describe("createAnthropicExtractionProvider", () => {
     });
     assert.equal(out.proposals.length, 1);
     assert.equal(out.proposals[0].candidateValue, "z");
+    // Both drops are reported — nothing is silently discarded.
+    assert.equal(out.warnings?.length, 2);
+    assert.ok(out.warnings?.some((w) => /index 0/.test(w) && /missing\/blank excerpt/.test(w)));
+    assert.ok(out.warnings?.some((w) => /index 1/.test(w) && /missing\/out-of-range confidence/.test(w)));
+  });
+
+  it("warns when the response is truncated at maxTokens, without discarding whatever proposals parsed", async () => {
+    const client = fakeAnthropicClient(
+      fakeAnthropicMessage(
+        TOOL_NAME,
+        { proposals: [{ fieldPath: "title", value: "z", confidence: 0.7, excerpt: "z" }] },
+        { stopReason: "max_tokens" },
+      ),
+    );
+    const provider = createAnthropicExtractionProvider({ client });
+    const out = await provider.extract({
+      content: "prepared text",
+      contentType: "html",
+      targetSchema: genericTargetSchema,
+    });
+    assert.equal(out.proposals.length, 1);
+    assert.ok(out.warnings?.includes("response truncated at maxTokens; proposals may be incomplete"));
   });
 
   it("defaults the model to claude-sonnet-4-6 and reflects it in provider.name", () => {
@@ -152,9 +180,9 @@ describe("buildExtractionTool / parseProposals (units)", () => {
     assert.deepEqual([...itemRequired].sort(), ["confidence", "excerpt", "fieldPath", "value"]);
   });
 
-  it("returns [] for non-record / missing proposals input", () => {
-    assert.deepEqual(parseProposals(undefined, "x", "html"), []);
-    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), []);
-    assert.deepEqual(parseProposals("string", "x", "html"), []);
+  it("returns empty proposals/warnings for non-record / missing proposals input", () => {
+    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [] });
+    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), { proposals: [], warnings: [] });
+    assert.deepEqual(parseProposals("string", "x", "html"), { proposals: [], warnings: [] });
   });
 });

@@ -16,12 +16,19 @@ function proposal(overrides: Partial<ExtractionProposal> = {}): ExtractionPropos
   };
 }
 
-function output(proposals: ExtractionProposal[]): ProviderExtractionOutput {
-  return { proposals, raw: { response: "{}", model: "mock-model", tokensUsed: 42 } };
+function output(
+  proposals: ExtractionProposal[],
+  warnings?: string[],
+): ProviderExtractionOutput {
+  return {
+    proposals,
+    raw: { response: "{}", model: "mock-model", tokensUsed: 42 },
+    ...(warnings ? { warnings } : {}),
+  };
 }
 
 describe("extract()", () => {
-  it("returns well-formed proposals with provenance excerpt and locator intact", async () => {
+  it("returns well-formed proposals with a verified excerpt and a derived chars: locator", async () => {
     const provider = createMockExtractionProvider(output([proposal()]));
     const result = await extract({
       content: "<p>Beginner Bouldering Session</p>",
@@ -34,7 +41,11 @@ describe("extract()", () => {
     assert.equal(result.error, undefined);
     assert.equal(result.proposals.length, 1);
     assert.equal(result.proposals[0].provenance.excerpt, "Beginner Bouldering Session");
-    assert.equal(result.proposals[0].provenance.locator, "html:field:title");
+    // "Beginner Bouldering Session" occurs at offset 0 in the prepared text
+    // ("<p>...</p>" strips to exactly that string), length 27 — normalization
+    // always derives/overwrites the locator from the verified offset, ignoring
+    // whatever the provider supplied ("html:field:title" in `proposal()`).
+    assert.equal(result.proposals[0].provenance.locator, "chars:0-27");
     assert.equal(result.raw.model, "mock-model");
     assert.equal(result.raw.tokensUsed, 42);
     assert.match(result.extractedAt, /\dT\d/);
@@ -116,12 +127,64 @@ describe("extract()", () => {
     assert.ok(result.warnings?.some((w) => /missing provenance excerpt/.test(w)));
   });
 
+  it("drops a proposal whose excerpt does not occur in the prepared content, with a warning", async () => {
+    // The prepared content never mentions "Beginner Bouldering Session" — the
+    // provenance contract is ENFORCED (indexOf against the prepared text), not
+    // merely trusted because the field is present and non-empty.
+    const provider = createMockExtractionProvider(output([proposal()]));
+    const result = await extract({
+      content: "This page describes an entirely different activity.",
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 0);
+    assert.ok(
+      result.warnings?.some((w) => w === 'dropped proposal for "title": excerpt not found in prepared content'),
+    );
+  });
+
+  it("derives provenance.locator from the verified excerpt offset (non-zero offset)", async () => {
+    const content = "Intro noise before the real content. Beginner Bouldering Session. Trailing notes.";
+    const expectedIndex = content.indexOf("Beginner Bouldering Session");
+    const provider = createMockExtractionProvider(output([proposal()]));
+    const result = await extract({
+      content,
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 1);
+    assert.equal(
+      result.proposals[0].provenance.locator,
+      `chars:${expectedIndex}-${expectedIndex + "Beginner Bouldering Session".length}`,
+    );
+  });
+
+  it("anchors the locator to the FIRST occurrence when the excerpt appears more than once", async () => {
+    const content = "Beginner Bouldering Session (repeat: Beginner Bouldering Session).";
+    const provider = createMockExtractionProvider(output([proposal()]));
+    const result = await extract({
+      content,
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 1);
+    // indexOf finds the first match (offset 0), not the later repeated one.
+    assert.equal(result.proposals[0].provenance.locator, "chars:0-27");
+  });
+
   it("clamps out-of-range confidence into 0..1 and warns", async () => {
+    const content = "Beginner Bouldering Session — full details for this listing.";
     const provider = createMockExtractionProvider(
       output([proposal({ confidence: 1.7 }), proposal({ fieldPath: "priceAmount", confidence: -0.5 })]),
     );
     const result = await extract({
-      content: "text",
+      content,
       contentType: "text",
       sourceRef: "ref",
       targetSchema: genericTargetSchema,
@@ -132,5 +195,40 @@ describe("extract()", () => {
     assert.equal(byField["title"], 1);
     assert.equal(byField["priceAmount"], 0);
     assert.ok(result.warnings?.some((w) => /clamped out-of-range confidence/.test(w)));
+  });
+
+  it("omits `warnings` entirely when there is nothing to report", async () => {
+    const content = "Beginner Bouldering Session details.";
+    const provider = createMockExtractionProvider(output([proposal()]));
+    const result = await extract({
+      content,
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 1);
+    assert.equal(result.warnings, undefined);
+  });
+
+  it("merges provider warnings with normalization warnings on the final result", async () => {
+    const content = "Beginner Bouldering Session details.";
+    const provider = createMockExtractionProvider(
+      output([proposal({ fieldPath: "notInSchema" })], ["response truncated at maxTokens; proposals may be incomplete"]),
+    );
+    const result = await extract({
+      content,
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 0);
+    // Provider-side warning survives end-to-end...
+    assert.ok(result.warnings?.includes("response truncated at maxTokens; proposals may be incomplete"));
+    // ...alongside extract()'s own normalization warning for the same call.
+    assert.ok(result.warnings?.some((w) => /unknown fieldPath "notInSchema"/.test(w)));
+    // Provider warnings are surfaced ahead of normalization warnings.
+    assert.equal(result.warnings?.[0], "response truncated at maxTokens; proposals may be incomplete");
   });
 });

@@ -37,15 +37,33 @@ export interface TargetFieldSchema {
 }
 
 /**
- * Provenance is required on every proposal. `excerpt` is the verbatim source
- * quote the value was drawn from; `locator` is a Survey `LocatorScheme`-
- * compatible string (e.g. "html:field:title") so a caller building a Survey
- * `RawSource.locatorScheme`/`Extraction.locator` needs no translation table.
+ * Provenance is required on every proposal. `excerpt` is a verbatim quote
+ * against the CONTENT-PREPARED text `extract()` hands to the provider — i.e.
+ * the output of `content-prep.ts` (tags stripped, entities decoded, whitespace
+ * collapsed, truncated to `maxContentChars`), NOT the caller's raw HTML/source
+ * document. `extract()`'s normalization step ENFORCES this: it verifies
+ * `excerpt` occurs verbatim in the prepared text (via `indexOf`) and drops any
+ * proposal whose excerpt cannot be found there.
+ *
+ * `locator` uses a fixed, defined scheme: `"chars:<start>-<end>"`, where
+ * `<start>`/`<end>` are 0-based UTF-16 code-unit offsets of `excerpt` within
+ * that SAME prepared text (`start` = the first `indexOf` match, `end` = `start
+ * + excerpt.length`). `extract()` always derives/overwrites `locator` itself
+ * from the verified excerpt offset — a provider- or adapter-supplied `locator`
+ * is never trusted as-is, because only `extract()` holds the prepared text
+ * needed to verify it.
+ *
+ * Consequence for consumers: because offsets are anchored to prepared text,
+ * NOT the original raw document, a consumer that wants to highlight/locate an
+ * excerpt in the raw source must either re-run the same content-prep step (or
+ * an equivalent) to reproduce the prepared text the offsets refer to, or map
+ * prepared-text offsets back to raw-document offsets itself. Traverse does not
+ * do this mapping.
  */
 export interface ExtractionProvenance {
-  /** Verbatim quote from the source — maps to Survey Extraction.excerpt. */
+  /** Verbatim quote against the prepared text — maps to Survey Extraction.excerpt. */
   excerpt: string;
-  /** Survey LocatorScheme-compatible locator string, e.g. "html:field:name". */
+  /** "chars:<start>-<end>" — code-unit offsets of `excerpt` within the prepared text. */
   locator: string;
 }
 
@@ -76,8 +94,11 @@ export interface RawProviderResponse {
 /**
  * The result of `extract()`. Traverse never throws for provider/parse failure —
  * any stage error surfaces here as `error` with `proposals` empty. `warnings`
- * collects non-fatal normalization notes (e.g. a proposal dropped because its
- * `fieldPath` was not in the target schema).
+ * collects non-fatal notes from BOTH the provider (e.g. a truncated response,
+ * malformed tool items dropped by an adapter) and `extract()`'s own
+ * normalization step (e.g. a proposal dropped because its excerpt was not
+ * found in the prepared content, or its `fieldPath` was not in the target
+ * schema) — nothing is dropped or adjusted silently.
  */
 export interface ExtractionResult {
   proposals: ExtractionProposal[];
@@ -86,7 +107,7 @@ export interface ExtractionResult {
   extractedAt: string;
   /** never throws for provider/parse failure — populated instead. */
   error?: string;
-  /** non-fatal normalization notes (dropped/adjusted proposals). */
+  /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */
   warnings?: string[];
 }
 
@@ -102,6 +123,13 @@ export interface ExtractionResult {
 export interface ProviderExtractionOutput {
   proposals: ExtractionProposal[];
   raw: RawProviderResponse;
+  /**
+   * Non-fatal provider-side notes — e.g. a malformed tool-output item the
+   * adapter dropped, or a response truncated at `maxTokens`. Nothing an
+   * adapter drops or notices should be silent: `extract()` merges these into
+   * `ExtractionResult.warnings` alongside its own normalization warnings.
+   */
+  warnings?: string[];
 }
 
 /**
