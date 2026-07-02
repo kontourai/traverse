@@ -12,6 +12,7 @@ import {
   buildExtractionTool,
   createAnthropicExtractionProvider,
   parseProposals,
+  resolveSdkClientOptions,
 } from "../src/anthropic.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 import {
@@ -168,6 +169,45 @@ describe("createAnthropicExtractionProvider", () => {
       targetSchema: genericTargetSchema,
     });
     assert.equal(client.calls[0].model, "claude-opus-4-1");
+  });
+
+  it("does not reflect baseUrl in provider.name when unset (default behavior unchanged)", () => {
+    const provider = createAnthropicExtractionProvider({ client: fakeAnthropicClient(fakeAnthropicMessage(TOOL_NAME, { proposals: [] })) });
+    assert.equal(provider.name, "anthropic-extraction-provider:claude-sonnet-4-6");
+  });
+
+  it("reflects a custom baseUrl's host as a name suffix, for parity reports to distinguish backends", () => {
+    const provider = createAnthropicExtractionProvider({
+      client: fakeAnthropicClient(fakeAnthropicMessage(TOOL_NAME, { proposals: [] })),
+      model: "glm-4.6",
+      baseUrl: "https://api.z.ai/api/anthropic",
+    });
+    assert.equal(provider.name, "anthropic-extraction-provider:glm-4.6@api.z.ai");
+  });
+});
+
+describe("resolveSdkClientOptions (unit)", () => {
+  it("passes opts.baseUrl through to the SDK constructor options as baseURL", () => {
+    assert.deepEqual(
+      resolveSdkClientOptions({ apiKey: "k", baseUrl: "https://api.z.ai/api/anthropic" }),
+      { apiKey: "k", baseURL: "https://api.z.ai/api/anthropic" },
+    );
+  });
+
+  it("omits baseURL entirely when opts.baseUrl is unset, preserving the SDK's own ANTHROPIC_BASE_URL env fallback", () => {
+    const result = resolveSdkClientOptions({ apiKey: "k" });
+    assert.deepEqual(result, { apiKey: "k" });
+    assert.ok(!("baseURL" in result));
+  });
+
+  it("throws when no apiKey is available from opts or ANTHROPIC_API_KEY", () => {
+    const savedKey = process.env["ANTHROPIC_API_KEY"];
+    delete process.env["ANTHROPIC_API_KEY"];
+    try {
+      assert.throws(() => resolveSdkClientOptions({}), /no API key/);
+    } finally {
+      if (savedKey !== undefined) process.env["ANTHROPIC_API_KEY"] = savedKey;
+    }
   });
 });
 

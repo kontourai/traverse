@@ -183,6 +183,45 @@ Anthropic adapter: `extract()` re-derives every proposal's locator itself.
 change, and is reflected in `provider.name`
 (`anthropic-extraction-provider:<model>`).
 
+### Anthropic-compatible endpoints (Z.AI, proxies)
+
+`opts.baseUrl` targets any Anthropic-compatible endpoint — Z.AI's
+Anthropic-compatible API, an internal proxy, etc. — instead of
+`api.anthropic.com`. It is passed straight through as the `@anthropic-ai/sdk`
+constructor's `baseURL` option; when unset, this adapter does not read any env
+var itself, so the SDK's own `ANTHROPIC_BASE_URL` fallback still applies. When
+`opts.baseUrl` is set, `provider.name` gets an `@<host>` suffix
+(e.g. `anthropic-extraction-provider:glm-4.6@api.z.ai`), so parity reports show
+which backend produced a given set of proposals.
+
+**Env-only recipe** (no code change — the SDK reads both vars itself):
+
+```sh
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export ANTHROPIC_API_KEY="$ZAI_API_KEY"   # your Z.AI key, from your own secret store
+```
+
+```ts
+const provider = createAnthropicExtractionProvider();
+```
+
+**Explicit opts recipe:**
+
+```ts
+const provider = createAnthropicExtractionProvider({
+  baseUrl: "https://api.z.ai/api/anthropic",
+  apiKey: process.env.ZAI_API_KEY, // your Z.AI key, from your own secret store
+  model: "glm-4.6",
+});
+```
+
+Either way, **pass an explicit `model` your backend actually serves** — the
+default alias (`claude-sonnet-4-6`) is an Anthropic model ID and is not
+guaranteed to resolve on a third-party endpoint. Z.AI's Anthropic-compatible
+endpoint maps Claude model names to GLM equivalents rather than erroring, which
+can silently swap the model actually used, so pin `model` explicitly (e.g.
+`glm-4.6`) rather than relying on that mapping.
+
 ## PDF is deferred
 
 `ContentType` already includes `"pdf"` so callers can pass it through a stable
