@@ -104,10 +104,13 @@ const result = await extract({
 // result.proposals[0].provenance.locator === "chars:0-27" — extract() verified
 // the excerpt against the prepared text ("Beginner Bouldering Session", the
 // <p> converted to Markdown text) and derived the offset itself.
-// result.proposals — normalized, provenance-bearing proposals
-// result.raw       — the provider's raw response, for audit
-// result.error     — set (never thrown) if a stage failed
-// result.warnings  — merged provider + normalization notes (dropped/adjusted proposals)
+// result.proposals      — normalized, provenance-bearing proposals
+// result.raw            — the provider's raw response, for audit
+// result.error          — set (never thrown) if a stage failed
+// result.warnings       — merged provider + normalization notes (dropped/adjusted proposals)
+// result.providerCalls  — provider.extract() calls issued this run, always populated
+// result.totalTokensUsed — accumulated raw.tokensUsed from successful calls, always populated
+// see "Cost guards" below for the maxProviderCalls/maxTotalTokens options that bound these
 ```
 
 `extract()` **never throws** for provider, parse, or content-prep failure. Any
@@ -213,6 +216,10 @@ highest confidence.
 | `maxChunks` | `40` | cap on chunks; extras dropped with a warning |
 | `maxContentChars` | `32_000` | **per-chunk** provider content budget (each chunk truncated to it) |
 
+These bound CONTENT (how much is prepared/chunked). To bound provider SPEND
+(how many calls / how many tokens one run issues), see
+[Cost guards](#cost-guards) below — an independent, composable set of options.
+
 `result.warnings` aggregates per-run chunking notes: the chunk count and
 detection mode, cards detected, any `maxChunks` truncation, dropped duplicates,
 and any per-chunk provider failure. A provider error on **one** chunk is a
@@ -222,6 +229,88 @@ chunk's call fails does `result.error` get set.
 > Why not `@mozilla/readability`? It extracts the one main article and strips
 > repeated sibling blocks as boilerplate — which is exactly what listing cards
 > are. It solves the opposite problem and would discard the content we need.
+
+## Cost guards
+
+`extract()` takes two optional per-run ceilings to bound provider spend on a
+large or many-chunk page:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `maxProviderCalls` | unset (unbounded) | cap on `provider.extract()` calls issued in ONE `extract()` run, across all chunks |
+| `maxTotalTokens` | unset (unbounded) | cap on accumulated `raw.tokensUsed`, summed across every SUCCESSFUL call in that run |
+
+```ts
+const result = await extract({
+  content: html,
+  contentType: "html",
+  sourceRef,
+  targetSchema,
+  provider,
+  maxProviderCalls: 5,
+  maxTotalTokens: 20_000,
+});
+```
+
+**Stop-issuing, never mid-call, never throws.** Once a configured ceiling is
+reached, `extract()` stops issuing further `provider.extract()` calls (it
+never aborts a call already in flight), keeps whatever proposals were
+already collected from calls that did run, and appends a warning to
+`result.warnings` naming the ceiling and how much was consumed, e.g.:
+
+```
+stopped after 5 provider call(s): maxProviderCalls (5) reached; 3 chunk(s) not processed
+stopped after 3 provider call(s): maxTotalTokens (20000) reached (21500 tokens used); 4 chunk(s) not processed
+```
+
+This mirrors the existing `maxChunks` truncation warning shape. The very
+first provider call is always attempted, regardless of how small a valid
+ceiling is configured — a single-chunk page always gets exactly one real
+attempt. If both ceilings are set, `maxProviderCalls` is checked first;
+whichever one is actually reached first is the only one to emit a warning
+for that stop. **Invalid config never throws either**: a non-positive,
+non-integer, or non-finite ceiling surfaces as `result.error` (a plain
+string) with zero provider calls issued, exactly like any other stage
+error.
+
+**Not a hard spend cap.** `maxTotalTokens` can only be checked using tokens
+already spent by calls that have already *completed* — a call's cost is
+unknown until it returns — so actual total tokens consumed by a run CAN
+exceed the configured ceiling by up to one call's usage. Treat it as "stop
+issuing further calls once this much has been spent," not "never cross this
+number."
+
+**Independent of `maxChunks`.** `maxChunks` (see
+[Large pages & chunking](#large-pages--chunking)) truncates how many chunks
+*exist* before the loop even starts; `maxProviderCalls`/`maxTotalTokens`
+independently bound how many of those already-capped chunks the loop
+actually *processes*. Both can fire in the same run, and both warnings can
+appear together in `result.warnings`.
+
+**Not the same as the Anthropic adapter's `maxTokens`.** These are per-RUN
+ceilings enforced by `extract()` itself across every chunk. They are a
+different option, on a different interface, from
+`AnthropicAdapterOptions.maxTokens` (default `2048`) — that one is a
+per-CALL cap on a single model response's OUTPUT tokens, passed straight to
+the provider. Setting `maxTotalTokens` does not change what any individual
+call is allowed to generate; setting the adapter's `maxTokens` does not
+bound how many calls a run issues.
+
+**Usage is always observable, ceiling or not.** `ExtractionResult` carries
+two REQUIRED fields, `providerCalls` and `totalTokensUsed`, populated on
+every return path — a plain success, a ceiling-stopped partial run,
+invalid-config, a deferred PDF, or an all-chunks-failed run — so spend is
+visible even when no ceiling is configured at all.
+
+**Graceful degrade without `tokensUsed`.** A provider that never sets
+`raw.tokensUsed` on its response still gets full, correct protection from
+`maxProviderCalls` (call counting is provider-independent). `maxTotalTokens`
+simply never fires for such a provider (`totalTokensUsed` stays `0`) — this
+is not treated as an error, just a ceiling that has nothing to measure
+against.
+
+See [`docs/decisions/extraction-cost-guard.md`](docs/decisions/extraction-cost-guard.md)
+for the full decision record.
 
 ## SPA / JS-rendered pages
 

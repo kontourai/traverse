@@ -34,6 +34,17 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   normalized `proposals`, the provider's `raw` response for audit, an
   `extractedAt` timestamp, an optional `error` (Traverse never throws for
   provider/parse failure), and optional `warnings` for dropped proposals.
+- **Extraction Cost Guard**: `extract()`'s optional
+  `ExtractInput.maxProviderCalls` / `maxTotalTokens` ceilings on a single
+  run's provider spend. Once a configured ceiling is reached, `extract()`
+  stops issuing further `provider.extract()` calls (never mid-call), returns
+  the proposals already collected, and records a warning naming which
+  ceiling fired and how much was consumed — mirroring the `maxChunks`
+  truncation precedent, never throwing. Accumulated spend
+  (`ExtractionResult.providerCalls` / `totalTokensUsed`) is always surfaced,
+  even with no ceiling configured. Token accounting degrades gracefully for a
+  provider that does not report `raw.tokensUsed` — the call-count ceiling
+  still works; the token ceiling simply never fires.
 - **Fetch and Snapshot**: the `@kontourai/traverse/fetch` subpath's
   standalone-first capability for getting content in the first place —
   configurable single-page fetch (`fetchSource`) plus snapshot capture for

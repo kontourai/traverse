@@ -160,6 +160,24 @@ export interface ExtractionResult {
   /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */
   warnings?: string[];
   /**
+   * Number of `provider.extract()` calls actually issued during this run
+   * (attempted, whether they succeeded or threw) — REQUIRED, always populated,
+   * even on an early return where zero calls were made (invalid-config,
+   * pdf-deferred) and even with no `ExtractInput.maxProviderCalls`/
+   * `maxTotalTokens` ceiling configured, so spend is observable by default.
+   * See `ExtractInput.maxProviderCalls`.
+   */
+  providerCalls: number;
+  /**
+   * Sum of `raw.tokensUsed` across every SUCCESSFUL provider call this run
+   * (a call that threw contributes nothing) — REQUIRED, always populated,
+   * same "populated on every return path" guarantee as `providerCalls`. A
+   * provider that never reports `raw.tokensUsed` contributes `0` per call
+   * (this stays `0`, not `undefined`, for such a provider). See
+   * `ExtractInput.maxTotalTokens`.
+   */
+  totalTokensUsed: number;
+  /**
    * Machine-readable state harvested from the raw HTML (JSON-LD, `__NEXT_DATA__`,
    * hydration blobs) — present ONLY for `"html"` content that carried some. This
    * is a structured sidecar the caller can prefer over LLM proposals; it is
@@ -236,4 +254,40 @@ export interface ExtractInput {
   chunkOverlap?: number;
   /** Cap on number of chunks; extras are dropped with a warning (default 40). */
   maxChunks?: number;
+  /**
+   * Ceiling on the number of `provider.extract()` calls issued in ONE
+   * `extract()` run (across all chunks). Default unset = unbounded. Once
+   * reached, `extract()` stops issuing further calls (never mid-call), keeps
+   * whatever proposals were already collected, and records a warning naming
+   * the ceiling and how many calls were made — mirroring the `maxChunks`
+   * truncation precedent, never throwing (`extract()`'s never-throws
+   * contract is unchanged). Must be a positive integer when set; a
+   * non-positive/non-integer/NaN value surfaces as `ExtractionResult.error`
+   * instead of running. Distinct from `maxContentChars`/`maxChunks` (which
+   * bound CONTENT, not provider spend) and from the Anthropic adapter's own
+   * `AnthropicAdapterOptions.maxTokens` (a different interface entirely — a
+   * per-call OUTPUT cap, not a per-run call-count ceiling).
+   */
+  maxProviderCalls?: number;
+  /**
+   * Ceiling on accumulated `raw.tokensUsed` (summed across every successful
+   * `provider.extract()` call) in ONE `extract()` run. Default unset =
+   * unbounded. This is a STOP-ISSUING bound, not a hard spend cap: it is
+   * checked BEFORE each call using only tokens already spent by calls that
+   * have already completed, because a call's cost is unknown until it
+   * returns — actual total tokens consumed by a run can therefore exceed
+   * this ceiling by up to one call's usage. Once reached, `extract()` stops
+   * issuing further calls (never mid-call), keeps proposals already
+   * collected, and records a warning naming the ceiling and tokens
+   * consumed — same never-throws contract as `maxProviderCalls`. Must be a
+   * positive finite number when set (need not be an integer); invalid
+   * values surface as `ExtractionResult.error`. A provider that never sets
+   * `raw.tokensUsed` degrades gracefully: this ceiling simply never fires
+   * for it (contributes `0` per call), while `maxProviderCalls` keeps
+   * working independently. Distinct from the Anthropic adapter's own
+   * `AnthropicAdapterOptions.maxTokens` (a different interface — that one is
+   * a per-call OUTPUT token cap passed to the model, default `2048`; this
+   * one is a per-run cumulative ceiling `extract()` enforces across calls).
+   */
+  maxTotalTokens?: number;
 }

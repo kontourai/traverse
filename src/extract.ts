@@ -86,6 +86,36 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
+    // Invalid-config validation: pure input validation independent of
+    // content, so it runs before prepareAndChunk (before any content-prep or
+    // provider work). maxProviderCalls is validated first.
+    if (input.maxProviderCalls !== undefined) {
+      const v = input.maxProviderCalls;
+      if (!(Number.isInteger(v) && v > 0)) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: `invalid maxProviderCalls: must be a positive integer (got ${JSON.stringify(v)})`,
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+    }
+    if (input.maxTotalTokens !== undefined) {
+      const v = input.maxTotalTokens;
+      if (!(Number.isFinite(v) && v > 0)) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: `invalid maxTotalTokens: must be a positive finite number (got ${JSON.stringify(v)})`,
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+    }
+
     const prepared = prepareAndChunk(input.content, input.contentType, {
       prep: input.prep,
       chunkSize: input.chunkSize,
@@ -93,7 +123,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       maxChunks: input.maxChunks,
     });
     if (prepared.error !== undefined) {
-      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: prepared.error };
+      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: prepared.error, providerCalls: 0, totalTokensUsed: 0 };
     }
 
     const { fullText, chunks } = prepared;
@@ -102,15 +132,41 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
     let chunksSucceeded = 0;
+    // Cost-guard accumulators: providerCalls counts every ISSUED call
+    // (attempted, success or throw); totalTokensUsed sums raw.tokensUsed from
+    // SUCCESSFUL calls only (a provider that omits tokensUsed contributes 0).
+    let providerCalls = 0;
+    let totalTokensUsed = 0;
 
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
+
+      // In-loop cost-guard checks, at the top of each iteration, before the
+      // content slice or provider call below. Both ceilings are validated
+      // > 0 above, so on i = 0 both checks are always false (providerCalls
+      // and totalTokensUsed start at 0) — the first call is never blocked.
+      // maxProviderCalls is checked first; whichever check trips first is
+      // the only one to emit a warning for that stop.
+      if (input.maxProviderCalls !== undefined && providerCalls >= input.maxProviderCalls) {
+        warnings.push(
+          `stopped after ${providerCalls} provider call(s): maxProviderCalls (${input.maxProviderCalls}) reached; ${chunks.length - i} chunk(s) not processed`,
+        );
+        break;
+      }
+      if (input.maxTotalTokens !== undefined && totalTokensUsed >= input.maxTotalTokens) {
+        warnings.push(
+          `stopped after ${providerCalls} provider call(s): maxTotalTokens (${input.maxTotalTokens}) reached (${totalTokensUsed} tokens used); ${chunks.length - i} chunk(s) not processed`,
+        );
+        break;
+      }
+
       // Per-chunk provider budget: the provider sees at most `maxChars` of this
       // chunk. The slice is still a prefix-substring of `fullText` at
       // `chunk.start`, so verified offsets stay correct against `fullText`.
       const chunkContent = chunk.text.slice(0, maxChars);
 
       let output: ProviderExtractionOutput;
+      providerCalls++;
       try {
         output = await input.provider.extract({
           content: chunkContent,
@@ -127,7 +183,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
       chunksSucceeded++;
       if (output.warnings) warnings.push(...output.warnings);
-      if (output.raw) lastRaw = output.raw;
+      if (output.raw) {
+        lastRaw = output.raw;
+        if (typeof output.raw.tokensUsed === "number") totalTokensUsed += output.raw.tokensUsed;
+      }
 
       // Isolate normalization per chunk too: a misbehaving provider (e.g. a
       // proposal with a throwing getter) must not discard proposals already
@@ -156,7 +215,14 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       // The embedded-state sidecar is prep-derived, not provider-derived, so it
       // survives even when every provider call fails — a shell page with rich
       // `__NEXT_DATA__` is still extractable from the sidecar without a render.
-      const failed: ExtractionResult = { proposals: [], raw: EMPTY_RAW, extractedAt, error: providerErrors[0] };
+      const failed: ExtractionResult = {
+        proposals: [],
+        raw: EMPTY_RAW,
+        extractedAt,
+        error: providerErrors[0],
+        providerCalls,
+        totalTokensUsed,
+      };
       if (prepared.embedded) failed.embedded = prepared.embedded;
       return failed;
     }
@@ -181,7 +247,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       );
     }
 
-    const result: ExtractionResult = { proposals, raw: lastRaw, extractedAt };
+    const result: ExtractionResult = { proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed };
     if (warnings.length > 0) result.warnings = warnings;
     // Attach the whole-page embedded-state sidecar once (never per chunk).
     if (prepared.embedded) result.embedded = prepared.embedded;
@@ -192,6 +258,8 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       raw: EMPTY_RAW,
       extractedAt,
       error: err instanceof Error ? err.message : String(err),
+      providerCalls: 0,
+      totalTokensUsed: 0,
     };
   }
 }
