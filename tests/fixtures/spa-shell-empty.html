@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Loading…</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="/assets/runtime.js"></script>
+    <script>
+      // Minified-ish framework bootstrap padding so the document is script-dominated,
+      // exactly the shape of a client-rendered SPA whose HTML carries no content.
+      (function () {
+        var routes = ["/", "/sessions", "/sessions/:id", "/about", "/contact", "/account"];
+        var store = { user: null, sessions: [], filters: {}, ui: { loading: true } };
+        function h(tag, props, children) { return { tag: tag, props: props || {}, children: children || [] }; }
+        function render(node, host) { host.__vnode = node; return node; }
+        function hydrate() { for (var i = 0; i < routes.length; i++) { store.sessions.push({}); } }
+        window.__APP__ = { h: h, render: render, hydrate: hydrate, store: store, routes: routes };
+        window.addEventListener("DOMContentLoaded", function () { window.__APP__.hydrate(); });
+        var t = 0; for (var k = 0; k < 400; k++) { t += k * 3; store.filters["f" + k] = t; }
+      })();
+    </script>
+    <script src="/assets/vendor-abcdef1234567890.js"></script>
+    <script src="/assets/main-0987654321fedcba.js"></script>
+  </body>
+</html>

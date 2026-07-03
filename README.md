@@ -223,6 +223,61 @@ chunk's call fails does `result.error` get set.
 > repeated sibling blocks as boilerplate — which is exactly what listing cards
 > are. It solves the opposite problem and would discard the content we need.
 
+## SPA / JS-rendered pages
+
+Many sites ship an almost-empty HTML shell and hydrate the real content in the
+browser. Traverse never renders (it stays fetch-agnostic), but the prep layer
+does two things so JS-heavy sources are still useful:
+
+### 1. Embedded-state sidecar
+
+Before prep strips `<script>` blocks, Traverse harvests any machine-readable
+state the page carries and returns it, parsed and size-capped, as a structured
+sidecar on the result — `ExtractionResult.embedded` and
+`prepareContent().embedded`:
+
+```ts
+const result = await extract({ content: html, contentType: "html", /* … */ });
+
+result.embedded?.jsonLd;      // parsed <script type="application/ld+json"> blocks
+result.embedded?.nextData;    // parsed Next.js <script id="__NEXT_DATA__">
+result.embedded?.initialState;// parsed window.__INITIAL_STATE__ / __PRELOADED_STATE__
+```
+
+`jsonLd` covers schema.org markup (Event / Course / Product are common for
+activity listings) and is near-perfect precision with no LLM cost. The sidecar
+is harvested **once** per page (never duplicated across chunks) and is attached
+even if every provider call fails — a shell page with rich `__NEXT_DATA__` is
+extractable from the sidecar alone.
+
+This is a **sidecar, not proposals**: proposals carry `chars:<start>-<end>`
+provenance into the prepared text, and embedded state is not in the prepared
+text (it lives in stripped scripts). Mapping the sidecar onto your field names is
+your job — Traverse owns zero field vocabulary. See
+[`docs/adr/0005-embedded-state-sidecar.md`](docs/adr/0005-embedded-state-sidecar.md).
+
+### 2. JS-shell warning (render upstream, then retry)
+
+When the prepared text is suspiciously small relative to the HTML **and** the
+page is script-dominated or has an empty client-render mount (`#root` / `#__next`
+/ `#app`), Traverse emits a machine-actionable warning through `result.warnings`.
+The warning starts with a stable code and carries the ratio numbers:
+
+- `js-shell-suspected: …` — likely an un-rendered shell with no usable embedded
+  state. Render the page upstream (e.g. a headless browser) and retry.
+- `js-shell-suspected-embedded-state-available: …` — same shell shape, but usable
+  embedded state was harvested, so **prefer the sidecar and skip the render**.
+
+```ts
+const needsRender = (result.warnings ?? []).some((w) => w === "js-shell-suspected");
+// (a coarse `w.startsWith("js-shell-suspected")` catches both variants)
+```
+
+A content-rich page is never flagged, even with heavy analytics/framework
+scripts: the heuristic gates on an absolute prepared-text floor, not a bare
+ratio (a real 2.7MB listing prepares to ~23k chars — a 0.85% ratio — and is
+correctly left alone).
+
 ## Anthropic adapter
 
 The Anthropic adapter is exported from the `@kontourai/traverse/anthropic`

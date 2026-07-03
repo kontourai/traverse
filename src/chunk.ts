@@ -37,7 +37,8 @@ import {
   PDF_PREP_ERROR,
   type PrepMode,
 } from "./content-prep.js";
-import type { ContentType } from "./types.js";
+import { inspectHtml } from "./embedded.js";
+import type { ContentType, EmbeddedState } from "./types.js";
 
 export interface ChunkOptions {
   /** structure-preserving prep. Default "markdown" for html, "text" otherwise. */
@@ -72,6 +73,13 @@ export interface PreparedChunks {
   warnings: string[];
   /** typed prep error (pdf / binary); when set, `chunks` is empty. */
   error?: string;
+  /**
+   * Machine-readable state harvested from the raw HTML before scripts were
+   * pruned (JSON-LD, `__NEXT_DATA__`, hydration blobs) — present only for
+   * `"html"` content that carried some. Harvested ONCE from the whole page, so
+   * it is independent of chunk boundaries. See `src/embedded.ts`.
+   */
+  embedded?: EmbeddedState;
 }
 
 export const DEFAULT_CHUNK_SIZE = 12_000;
@@ -293,6 +301,18 @@ function buildStructuralChunks(
 // ---------------------------------------------------------------------------
 
 /**
+ * Attach the embedded-state sidecar and any prep-layer warnings (embedded
+ * parse notes + JS-shell warning) to a prepared HTML result, in place. Harvest
+ * reads the ORIGINAL `html` (scripts intact); shell detection compares it to the
+ * already-built `result.fullText`. Runs once per page — never per chunk.
+ */
+function augmentHtml(result: PreparedChunks, html: string): void {
+  const { embedded, warnings } = inspectHtml(html, result.fullText);
+  if (embedded) result.embedded = embedded;
+  result.warnings.push(...warnings);
+}
+
+/**
  * Prepare `content` into a single `fullText` plus offset-correct `chunks`.
  * Never throws; returns `{ error }` for deferred/unsupported inputs.
  */
@@ -310,10 +330,14 @@ export function prepareAndChunk(
   if (contentType === "pdf") return emptyError(PDF_PREP_ERROR);
   if (typeof content !== "string") return emptyError(binaryPrepError(contentType));
 
-  // text passthrough or html with the prep:'text' escape hatch
+  // text passthrough or html with the prep:'text' escape hatch. Embedded-state
+  // harvesting + shell detection still apply to html here (they read the raw
+  // source, independent of prep mode).
   if (contentType !== "html" || prep === "text") {
     const fullText = contentType === "html" ? htmlToText(content, SAFETY_CAP) : content.slice(0, SAFETY_CAP);
-    return windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    if (contentType === "html") augmentHtml(result, content);
+    return result;
   }
 
   // html + markdown: try structural, degrade gracefully on any DOM/convert error
@@ -329,7 +353,7 @@ export function prepareAndChunk(
       // Only report `structural` when it actually produced chunks; if the cards
       // converted to nothing, fall through to the whole-page path below.
       if (built.chunks.length > 0) {
-        return {
+        const result: PreparedChunks = {
           fullText: built.fullText,
           chunks: built.chunks,
           structural: true,
@@ -337,6 +361,8 @@ export function prepareAndChunk(
           truncatedChunks: built.truncatedChunks,
           warnings,
         };
+        augmentHtml(result, content);
+        return result;
       }
     }
 
@@ -345,11 +371,15 @@ export function prepareAndChunk(
     // string so Turndown's own parser handles it (see content-prep.htmlToMarkdown).
     const source = doc.body && doc.body.innerHTML.length > 0 ? doc.body.innerHTML : content;
     const fullText = collapseMarkdown(td.turndown(source), SAFETY_CAP);
-    return windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    augmentHtml(result, content);
+    return result;
   } catch (err) {
     warnings.push(
       `markdown/structural prep failed (${err instanceof Error ? err.message : String(err)}); fell back to text chunking`,
     );
-    return windowResult(htmlToText(content, SAFETY_CAP), chunkSize, overlap, maxChunks, warnings);
+    const result = windowResult(htmlToText(content, SAFETY_CAP), chunkSize, overlap, maxChunks, warnings);
+    augmentHtml(result, content);
+    return result;
   }
 }

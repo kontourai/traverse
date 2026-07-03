@@ -153,7 +153,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // preserves the single-shot contract: a 1-chunk page whose only provider
     // call throws is an error, not an empty success.
     if (chunks.length > 0 && chunksSucceeded === 0 && providerErrors.length > 0) {
-      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: providerErrors[0] };
+      // The embedded-state sidecar is prep-derived, not provider-derived, so it
+      // survives even when every provider call fails — a shell page with rich
+      // `__NEXT_DATA__` is still extractable from the sidecar without a render.
+      const failed: ExtractionResult = { proposals: [], raw: EMPTY_RAW, extractedAt, error: providerErrors[0] };
+      if (prepared.embedded) failed.embedded = prepared.embedded;
+      return failed;
     }
 
     const { proposals, dropped } = dedupeProposals(collected);
@@ -178,6 +183,8 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const result: ExtractionResult = { proposals, raw: lastRaw, extractedAt };
     if (warnings.length > 0) result.warnings = warnings;
+    // Attach the whole-page embedded-state sidecar once (never per chunk).
+    if (prepared.embedded) result.embedded = prepared.embedded;
     return result;
   } catch (err) {
     return {

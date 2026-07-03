@@ -21,7 +21,8 @@
 
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
-import type { ContentType } from "./types.js";
+import { inspectHtml } from "./embedded.js";
+import type { ContentType, EmbeddedState } from "./types.js";
 
 /** Prep mode: "text" (regex strip) or "markdown" (structure-preserving). */
 export type PrepMode = "text" | "markdown";
@@ -194,7 +195,7 @@ export function prepareContent(
   contentType: ContentType,
   maxChars: number = DEFAULT_MAX_CHARS,
   prep?: PrepMode,
-): { text?: string; error?: string } {
+): { text?: string; error?: string; embedded?: EmbeddedState; warnings?: string[] } {
   if (contentType === "pdf") {
     return { error: PDF_PREP_ERROR };
   }
@@ -206,15 +207,27 @@ export function prepareContent(
   const mode: PrepMode = prep ?? (contentType === "html" ? "markdown" : "text");
 
   if (contentType === "html") {
-    if (mode === "text") return { text: htmlToText(content, maxChars) };
-    // Preserve the "never throws" contract: a DOM/Turndown failure on adversarial
-    // HTML (e.g. pathological nesting overflowing the stack) degrades to the
-    // regex text strip rather than propagating — mirroring prepareAndChunk.
-    try {
-      return { text: htmlToMarkdown(content, maxChars) };
-    } catch {
-      return { text: htmlToText(content, maxChars) };
+    let text: string;
+    if (mode === "text") {
+      text = htmlToText(content, maxChars);
+    } else {
+      // Preserve the "never throws" contract: a DOM/Turndown failure on adversarial
+      // HTML (e.g. pathological nesting overflowing the stack) degrades to the
+      // regex text strip rather than propagating — mirroring prepareAndChunk.
+      try {
+        text = htmlToMarkdown(content, maxChars);
+      } catch {
+        text = htmlToText(content, maxChars);
+      }
     }
+    // Harvest embedded state (JSON-LD / __NEXT_DATA__ / hydration) from the raw
+    // HTML before scripts were stripped, and flag a JS-shell shape — both surface
+    // on the prep result. See src/embedded.ts.
+    const { embedded, warnings } = inspectHtml(content, text);
+    const result: { text: string; embedded?: EmbeddedState; warnings?: string[] } = { text };
+    if (embedded) result.embedded = embedded;
+    if (warnings.length > 0) result.warnings = warnings;
+    return result;
   }
 
   // "text": truncate-only passthrough.

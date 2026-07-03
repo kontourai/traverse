@@ -23,11 +23,23 @@ export {
   type Chunk,
   type PreparedChunks,
 } from "./chunk.js";
+export {
+  harvestEmbeddedState,
+  detectJsShell,
+  inspectHtml,
+  SHELL_WARNING_CODE,
+  SHELL_WARNING_CODE_EMBEDDED,
+  SHELL_PREPARED_TEXT_FLOOR,
+  SHELL_TEXT_RATIO_MAX,
+  SHELL_SCRIPT_RATIO_MIN,
+  type ShellSignals,
+} from "./embedded.js";
 export type {
   ContentType,
   TargetFieldSchema,
   ExtractionProvenance,
   ExtractionProposal,
+  EmbeddedState,
   RawProviderResponse,
   ExtractionResult,
   ProviderExtractionOutput,
