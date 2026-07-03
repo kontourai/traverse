@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/kontourai/traverse/compare/v0.3.0...v0.4.0) (2026-07-03)
+
+
+### Features
+
+* normalize indexed field paths ([n] -&gt; []) against array schemas ([#6](https://github.com/kontourai/traverse/issues/6)) ([aa39194](https://github.com/kontourai/traverse/commit/aa391944c0bc4b6e11df14b6c5a144e833b8cadc)), closes [#5](https://github.com/kontourai/traverse/issues/5)
+
 ## [0.3.0](https://github.com/kontourai/traverse/compare/v0.2.0...v0.3.0) (2026-07-02)
 
 
