@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/kontourai/traverse/compare/v0.7.0...v0.8.0) (2026-07-03)
+
+
+### Features
+
+* **extract:** cost guards — maxProviderCalls and maxTotalTokens ceilings ([#19](https://github.com/kontourai/traverse/issues/19)) ([e3f9961](https://github.com/kontourai/traverse/commit/e3f99616c40c5376cf5be0a0c175d75173904c0a))
+
 ## [0.7.0](https://github.com/kontourai/traverse/compare/v0.6.0...v0.7.0) (2026-07-03)
 
 
