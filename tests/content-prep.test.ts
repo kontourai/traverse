@@ -91,4 +91,16 @@ describe("prepareContent", () => {
     assert.equal(result.text, undefined);
     assert.match(result.error ?? "", /binary content is not supported/);
   });
+
+  it("never throws on pathological HTML: degrades the markdown default to text", () => {
+    // Deeply nested markup can overflow the DOM/Turndown recursion; prepareContent
+    // must degrade to the regex text strip rather than propagating the throw.
+    const deep = "<div>".repeat(40_000) + "needle" + "</div>".repeat(40_000);
+    let result: ReturnType<typeof prepareContent> | undefined;
+    assert.doesNotThrow(() => {
+      result = prepareContent(deep, "html");
+    });
+    assert.equal(result?.error, undefined);
+    assert.match(result?.text ?? "", /needle/);
+  });
 });

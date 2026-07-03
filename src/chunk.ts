@@ -116,6 +116,18 @@ function emptyError(error: string): PreparedChunks {
   return { fullText: "", chunks: [], structural: false, cardCount: 0, truncatedChunks: 0, warnings: [], error };
 }
 
+/** Non-structural result: character-window `fullText` (single-chunk when small). */
+function windowResult(
+  fullText: string,
+  chunkSize: number,
+  overlap: number,
+  maxChunks: number,
+  warnings: string[],
+): PreparedChunks {
+  const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
+  return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings };
+}
+
 // ---------------------------------------------------------------------------
 // Character-window chunking (fallback + no-structure path)
 // ---------------------------------------------------------------------------
@@ -289,9 +301,9 @@ export function prepareAndChunk(
   contentType: ContentType,
   options: ChunkOptions = {},
 ): PreparedChunks {
-  const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
-  const overlap = Math.min(options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP, Math.max(0, chunkSize - 1));
-  const maxChunks = options.maxChunks ?? DEFAULT_MAX_CHUNKS;
+  const chunkSize = Math.max(1, options.chunkSize ?? DEFAULT_CHUNK_SIZE);
+  const overlap = Math.min(Math.max(0, options.chunkOverlap ?? DEFAULT_CHUNK_OVERLAP), Math.max(0, chunkSize - 1));
+  const maxChunks = Math.max(1, options.maxChunks ?? DEFAULT_MAX_CHUNKS);
   const prep = resolvePrep(contentType, options.prep);
   const warnings: string[] = [];
 
@@ -301,8 +313,7 @@ export function prepareAndChunk(
   // text passthrough or html with the prep:'text' escape hatch
   if (contentType !== "html" || prep === "text") {
     const fullText = contentType === "html" ? htmlToText(content, SAFETY_CAP) : content.slice(0, SAFETY_CAP);
-    const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
-    return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings };
+    return windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
   }
 
   // html + markdown: try structural, degrade gracefully on any DOM/convert error
@@ -314,13 +325,19 @@ export function prepareAndChunk(
 
     const group = findRepeatedCards(doc);
     if (group && group.cards.length >= MIN_CARDS) {
-      const { fullText, chunks, truncatedChunks, cardCount } = buildStructuralChunks(
-        group,
-        doc,
-        chunkSize,
-        maxChunks,
-      );
-      return { fullText, chunks, structural: true, cardCount, truncatedChunks, warnings };
+      const built = buildStructuralChunks(group, doc, chunkSize, maxChunks);
+      // Only report `structural` when it actually produced chunks; if the cards
+      // converted to nothing, fall through to the whole-page path below.
+      if (built.chunks.length > 0) {
+        return {
+          fullText: built.fullText,
+          chunks: built.chunks,
+          structural: true,
+          cardCount: built.cardCount,
+          truncatedChunks: built.truncatedChunks,
+          warnings,
+        };
+      }
     }
 
     const td = createTurndownService();
@@ -328,14 +345,11 @@ export function prepareAndChunk(
     // string so Turndown's own parser handles it (see content-prep.htmlToMarkdown).
     const source = doc.body && doc.body.innerHTML.length > 0 ? doc.body.innerHTML : content;
     const fullText = collapseMarkdown(td.turndown(source), SAFETY_CAP);
-    const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
-    return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings };
+    return windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
   } catch (err) {
     warnings.push(
       `markdown/structural prep failed (${err instanceof Error ? err.message : String(err)}); fell back to text chunking`,
     );
-    const fullText = htmlToText(content, SAFETY_CAP);
-    const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
-    return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings };
+    return windowResult(htmlToText(content, SAFETY_CAP), chunkSize, overlap, maxChunks, warnings);
   }
 }
