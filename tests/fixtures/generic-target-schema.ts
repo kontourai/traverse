@@ -22,4 +22,9 @@ export const genericTargetSchema: TargetFieldSchema[] = [
     type: "string",
     description: "A short human-readable summary of when the activity runs.",
   },
+  {
+    path: "schedules[].startDate",
+    type: "date",
+    description: "The start date of one schedule item in a repeating series.",
+  },
 ];

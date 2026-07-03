@@ -72,6 +72,16 @@ export interface ExtractionProvenance {
  * the package: a proposal is a reviewable record, never a resolved value.
  */
 export interface ExtractionProposal {
+  /**
+   * Always a path declared in the caller's `targetSchema` — never an
+   * indexed source path. When a provider emits an indexed path against an
+   * array field (e.g. "schedules[0].startDate") and the caller only declared
+   * the un-indexed array form (e.g. "schedules[].startDate"),
+   * `extract()`'s normalization step rewrites `fieldPath` to that declared
+   * form and records the stripped index/indices in `pathIndices` (see
+   * below) rather than dropping the proposal. See "Indexed field paths" in
+   * the README and `docs/adr/0003-indexed-path-normalization.md`.
+   */
   fieldPath: string;
   candidateValue: unknown;
   /** 0..1 — clamped by extract() if a provider returns an out-of-range value. */
@@ -80,6 +90,18 @@ export interface ExtractionProposal {
   provenance: ExtractionProvenance;
   /** provider identity string, e.g. "anthropic-extraction-provider:claude-sonnet-4-6". */
   extractor: string;
+  /**
+   * Present ONLY when `fieldPath` was recovered by normalizing an indexed
+   * source path (e.g. "schedules[0].startDate" -> "schedules[].startDate")
+   * against a declared array path in `targetSchema`. Holds the stripped
+   * index for each `[n]` segment, in left-to-right (outermost-first) source
+   * order — e.g. "a[2].b[0].c" -> `pathIndices: [2, 0]`. Absent whenever
+   * `fieldPath` matched the schema as-is (no normalization occurred).
+   * Consumers use this to group/re-associate proposals that came from the
+   * same array item (e.g. multiple `schedules[].*` proposals originating
+   * from the same source `schedules[N]`).
+   */
+  pathIndices?: number[];
 }
 
 /**
