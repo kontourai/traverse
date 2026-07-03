@@ -17,7 +17,7 @@ evidence:
 and `ExtractInput.maxTotalTokens` — so a caller can bound one run's provider
 spend on a large or many-chunk page. Cost control lives **inside the
 `traverse` package itself**, in the existing per-chunk loop in
-`src/extract.ts`, rather than pushed out to each caller (e.g. campfit) to
+`src/extract.ts`, rather than pushed out to each consuming application to
 reimplement per integration. This overrides WS11 Traverse shaping decision
 #3, which had left per-run spend bounding as an out-of-package concern;
 owner-accepted scope override recorded 2026-07-03 in
@@ -74,8 +74,8 @@ owner-accepted scope override recorded 2026-07-03 in
   call throws, and more chunks remain, the ceiling-stop warning would also
   be silently dropped on that same path, even though `providerCalls`/
   `totalTokensUsed` are still reported correctly there.
-- Any campfit-side integration change — campfit was not available to verify
-  against in the session that shipped this decision; the non-breaking claim
+- Any consumer-side integration change — no downstream consumer was available
+  to verify against in the session that shipped this decision; the non-breaking claim
   rests on structural typing (new required fields are additive to an object
   a consumer only reads named fields from) and this repo's own release
   history of two prior additive `ExtractionResult` fields (`embedded`,
