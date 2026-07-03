@@ -129,15 +129,24 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       if (output.warnings) warnings.push(...output.warnings);
       if (output.raw) lastRaw = output.raw;
 
-      const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
-        output.proposals,
-        input,
-        chunkContent,
-        chunk.start,
-        fullText,
-      );
-      warnings.push(...normalizationWarnings);
-      collected.push(...chunkProposals);
+      // Isolate normalization per chunk too: a misbehaving provider (e.g. a
+      // proposal with a throwing getter) must not discard proposals already
+      // collected from earlier chunks — the "partial results survive" guarantee.
+      try {
+        const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
+          output.proposals,
+          input,
+          chunkContent,
+          chunk.start,
+          fullText,
+        );
+        warnings.push(...normalizationWarnings);
+        collected.push(...chunkProposals);
+      } catch (err) {
+        warnings.push(
+          `chunk ${i + 1}/${chunks.length} normalization failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     // Every chunk's provider call failed -> surface as a fatal error. This
@@ -149,7 +158,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const { proposals, dropped } = dedupeProposals(collected);
     if (dropped > 0) {
-      warnings.push(`dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} across chunks`);
+      warnings.push(
+        `dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} (same field + source span)`,
+      );
     }
 
     if (chunks.length > 1) {
@@ -179,9 +190,14 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 }
 
 /**
- * Cross-chunk dedup. Keys a proposal by `fieldPath` + `pathIndices` (so distinct
- * array items are never collapsed) + canonical value, keeping the highest
- * confidence on a collision. First-seen key order is preserved.
+ * Cross-chunk dedup. A duplicate is the SAME field extracted from the SAME
+ * verified source span — i.e. the same `fieldPath` + `pathIndices` + `locator`
+ * (which encodes the `chars:<start>-<end>` offset into `fullText`). This
+ * collapses the true duplicates chunking creates — an overlap window seeing the
+ * same span twice, or the same span landing in two chunks — while NEVER
+ * collapsing two genuinely distinct records that merely share a value (e.g. two
+ * listing cards with the same price), which come from different spans. Keeps the
+ * highest confidence on a collision; first-seen key order is preserved.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
@@ -190,12 +206,12 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
 
   for (const proposal of input) {
     // JSON-encode the tuple so no field's contents can collide with another's
-    // boundary (a value containing a delimiter cannot masquerade as a different
-    // fieldPath/pathIndices combination).
+    // boundary. `locator` is the verified span, so it discriminates distinct
+    // occurrences of the same value.
     const key = JSON.stringify([
       proposal.fieldPath,
       proposal.pathIndices ?? null,
-      canonicalValue(proposal.candidateValue),
+      proposal.provenance.locator,
     ]);
 
     const existing = byKey.get(key);
@@ -209,15 +225,6 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
   }
 
   return { proposals: order.map((k) => byKey.get(k) as ExtractionProposal), dropped };
-}
-
-function canonicalValue(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  try {
-    return JSON.stringify(value) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /**

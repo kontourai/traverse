@@ -206,7 +206,15 @@ export function prepareContent(
   const mode: PrepMode = prep ?? (contentType === "html" ? "markdown" : "text");
 
   if (contentType === "html") {
-    return { text: mode === "text" ? htmlToText(content, maxChars) : htmlToMarkdown(content, maxChars) };
+    if (mode === "text") return { text: htmlToText(content, maxChars) };
+    // Preserve the "never throws" contract: a DOM/Turndown failure on adversarial
+    // HTML (e.g. pathological nesting overflowing the stack) degrades to the
+    // regex text strip rather than propagating — mirroring prepareAndChunk.
+    try {
+      return { text: htmlToMarkdown(content, maxChars) };
+    } catch {
+      return { text: htmlToText(content, maxChars) };
+    }
   }
 
   // "text": truncate-only passthrough.

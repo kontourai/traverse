@@ -167,7 +167,52 @@ describe("extract() chunked path", () => {
     });
     assert.equal(result.proposals.length, 1);
     assert.equal(result.proposals[0].provenance.locator, "chars:85-91");
-    assert.ok(result.warnings?.some((w) => /dropped 1 duplicate proposal across chunks/.test(w)));
+    assert.ok(result.warnings?.some((w) => /dropped 1 duplicate proposal \(same field \+ source span\)/.test(w)));
+  });
+
+  it("keeps two distinct records that share a value but come from different spans", async () => {
+    // Two cards with the SAME title text at DIFFERENT offsets must both survive:
+    // dedup keys on the verified source span, not the value alone.
+    const content = "Alpha Program here. Then later, Alpha Program again.";
+    const first = content.indexOf("Alpha Program");
+    const second = content.indexOf("Alpha Program", first + 1);
+    assert.ok(second > first, "value genuinely repeats at two spans");
+
+    const provider: ExtractionProvider = {
+      name: "two-span-mock",
+      async extract(input): Promise<ProviderExtractionOutput> {
+        // propose the same value grounded at each occurrence's excerpt
+        return {
+          proposals: [
+            {
+              fieldPath: "title",
+              candidateValue: "Alpha Program",
+              confidence: 0.7,
+              provenance: { excerpt: "Alpha Program here", locator: "provisional" },
+              extractor: "two-span-mock",
+            },
+            {
+              fieldPath: "title",
+              candidateValue: "Alpha Program",
+              confidence: 0.7,
+              provenance: { excerpt: "Alpha Program again", locator: "provisional" },
+              extractor: "two-span-mock",
+            },
+          ],
+          raw: { response: "{}", model: "mock" },
+        };
+      },
+    };
+
+    const result = await extract({
+      content,
+      contentType: "text",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+    });
+    assert.equal(result.proposals.length, 2, "both distinct-span records survive");
+    assert.ok(!result.warnings?.some((w) => /duplicate/.test(w)));
   });
 
   it("overlap rescues a value straddling a hard window boundary (not lost, not duplicated)", async () => {
@@ -187,6 +232,56 @@ describe("extract() chunked path", () => {
     assert.equal(result.proposals.length, 1);
     assert.equal(result.proposals[0].provenance.locator, "chars:96-102");
     assert.ok(!result.warnings?.some((w) => /duplicate/.test(w)));
+  });
+
+  it("a proposal that throws during normalization does not discard earlier chunks' results", async () => {
+    // The provider "succeeds" on every chunk, but on the 2nd chunk it returns a
+    // proposal whose fieldPath getter throws. Earlier collected proposals must
+    // survive (partial-results guarantee), and extract() must not throw or error.
+    let call = 0;
+    const provider: ExtractionProvider = {
+      name: "throwing-getter-mock",
+      async extract(input): Promise<ProviderExtractionOutput> {
+        call++;
+        if (call === 2) {
+          const booby = {
+            get fieldPath(): string {
+              throw new Error("boom in getter");
+            },
+            candidateValue: "x",
+            confidence: 0.9,
+            provenance: { excerpt: "x", locator: "provisional" },
+            extractor: "throwing-getter-mock",
+          };
+          return { proposals: [booby as never], raw: { response: "{}", model: "mock" } };
+        }
+        const proposals = [];
+        const re = /Program \d+ Alpha/g;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(input.content)) !== null) {
+          proposals.push({
+            fieldPath: "title",
+            candidateValue: m[0],
+            confidence: 0.9,
+            provenance: { excerpt: m[0], locator: "provisional" },
+            extractor: "throwing-getter-mock",
+          });
+        }
+        return { proposals, raw: { response: "{}", model: "mock" } };
+      },
+    };
+
+    const result = await extract({
+      content: cardsHtml,
+      contentType: "html",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+      chunkSize: 400,
+    });
+    assert.equal(result.error, undefined);
+    assert.ok(result.proposals.length > 0, "earlier chunks' proposals survived");
+    assert.ok(result.warnings?.some((w) => /chunk 2\/\d+ normalization failed: boom in getter/.test(w)));
   });
 
   it("a provider error on one chunk does not kill the others (partial results + warning)", async () => {

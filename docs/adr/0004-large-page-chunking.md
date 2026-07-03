@@ -85,10 +85,19 @@ offsets together and never mutate a chunk afterward.
 
 ### D4 - Cross-chunk dedup
 
-Overlap windows and values repeated across cards can produce the same proposal
-from more than one chunk. Proposals are deduped by `fieldPath` + `pathIndices`
-(so distinct array items are never collapsed) + canonical value, keeping the
-highest confidence; the count dropped is reported in `warnings`.
+Overlap windows and a span landing in two chunks can produce the same proposal
+more than once. A duplicate is the SAME field extracted from the SAME verified
+source span, so proposals are deduped by `fieldPath` + `pathIndices` + `locator`
+(the `chars:<start>-<end>` span into `fullText`), keeping the highest confidence;
+the count dropped is reported in `warnings`.
+
+Keying on the verified span (not the value) is deliberate: two genuinely
+distinct records that merely share a value - e.g. two listing cards with the same
+price - come from different spans and MUST both survive. An earlier draft keyed
+on value alone, which could silently collapse such records (including on
+single-chunk pages); the span key fixes that while still collapsing the true
+overlap/duplicate-span cases (which resolve to an identical offset by
+construction). See 0.5.1.
 
 ### D5 - Per-chunk provider errors -> partial results
 
