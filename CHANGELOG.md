@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/kontourai/traverse/compare/v0.6.0...v0.7.0) (2026-07-03)
+
+
+### Features
+
+* **docs:** freeze ADRs as immutable provenance; seed decision registry ([#17](https://github.com/kontourai/traverse/issues/17)) ([a94c4d6](https://github.com/kontourai/traverse/commit/a94c4d6a20755aa4aeffc27240c5c976a145b583))
+
 ## [0.6.0](https://github.com/kontourai/traverse/compare/v0.5.1...v0.6.0) (2026-07-03)
 
 
