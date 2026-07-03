@@ -568,12 +568,96 @@ Use `mode: "replay"` to run the identical extraction against a stored snapshot
 with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a
 handy non-persistent store for tests and single-process capture-then-replay.
 
-## PDF is deferred
+## PDF content-prep (opt-in seam, no bundled parser)
 
-`ContentType` already includes `"pdf"` so callers can pass it through a stable
-union today, but PDF content-prep is **not implemented at `0.1.0`** — it returns
-a typed error rather than attempting to decode bytes. HTML and text are fully
-supported.
+`ContentType` includes `"pdf"`, but Traverse ships **no default PDF parser**
+and takes **no new dependency** (hard or optional peer) for it — bundling one
+would duplicate a parser a real regulated-document consumer already owns and
+keeps in parity, rather than absorbing genuinely duplicated logic (the reason
+this package absorbed HTML stripping in the first place). Instead, a caller
+supplies a small `PdfTextExtractor` that wraps whatever PDF parser it already
+has:
+
+```ts
+import { extract } from "@kontourai/traverse";
+import type { PdfExtractedText, PdfTextExtractor } from "@kontourai/traverse";
+
+const myExtractor: PdfTextExtractor = {
+  // May be sync or return a Promise; extract() awaits either.
+  async extract(bytes: Uint8Array): Promise<PdfExtractedText> {
+    // Wrap your own parser here (e.g. one built on pdfjs-dist). Return the
+    // WHOLE document's text plus, optionally, each page's 0-based start
+    // offset into that text.
+    const { text, pageOffsets } = await myOwnPdfParser(bytes);
+    return { text, pageOffsets };
+  },
+};
+
+const result = await extract({
+  content: pdfBytes, // Uint8Array — e.g. Buffer.from(fs.readFileSync(path))
+  contentType: "pdf",
+  pdfTextExtractor: myExtractor,
+  sourceRef: "upload:my-document.pdf",
+  targetSchema,
+  provider,
+});
+```
+
+With `pdfTextExtractor` supplied, `extract()` runs it and hands the resulting
+text into the **existing, unmodified** character-window chunker
+(`prepareAndChunk(text, "text", ...)`) — PDF content-prep reuses 100% of the
+already-tested chunking and `chars:<start>-<end>` provenance-verification
+machinery HTML/text already use, with zero new chunking or locator code.
+Proposals come back in the exact same `ExtractionResult` shape as HTML/text
+extraction, with verified `chars:<start>-<end>` locators into the PDF's
+prepared text.
+
+**With no `pdfTextExtractor` supplied, behavior is completely unchanged**:
+`contentType: "pdf"` still returns the pre-existing typed not-implemented
+error, `proposals: []`, `providerCalls: 0`, `totalTokensUsed: 0` — every
+existing caller is unaffected by this option's mere existence.
+
+### `pdfPageOffsets` / `resolvePdfPage()`
+
+When your extractor reports `pageOffsets` (each page's 0-based start offset
+into the extracted text), `extract()` validates and attaches them as a
+structured sidecar — `ExtractionResult.pdfPageOffsets` — mirroring the
+`embedded` sidecar precedent
+([ADR 0005](docs/adr/0005-embedded-state-sidecar.md)). Use `resolvePdfPage()`
+to turn a proposal's verified locator start offset into a 1-based page
+number:
+
+```ts
+import { resolvePdfPage } from "@kontourai/traverse";
+
+const [, start] = result.proposals[0].provenance.locator.match(/^chars:(\d+)-/)!;
+const page = resolvePdfPage(result.pdfPageOffsets, Number(start)); // e.g. 2
+```
+
+This is **not** a new locator scheme — `chars:<start>-<end>` still means
+"offsets into the prepared text," exactly as it does for HTML/text
+([ADR 0001 §4](docs/adr/0001-proposals-only.md)). `pdfPageOffsets` is an
+additive sidecar on top of it. Full page/region locators (a distinct locator
+scheme) remain deferred to a later slice. Note also that `pageOffsets` is
+**trust-not-verify**: unlike `excerpt`, Traverse cannot independently confirm
+page numbers against real PDF structure — it only checks the array is
+well-formed (ascending, in-range) and drops it, with a warning, if not.
+
+### Known asymmetry
+
+Only `extract()` and the standalone `preparePdfText()` support the extractor
+seam. `prepareContent(bytes, "pdf")` still always returns the typed
+not-implemented error, even with an extractor available elsewhere in your
+code — `prepareContent`'s signature was deliberately not changed to accept an
+extractor, to avoid a sync-to-async breaking change to a widely-called
+function. See [`docs/decisions/content-preparation.md`](docs/decisions/content-preparation.md)
+for the full rationale and out-of-scope list.
+
+Called standalone (not through `extract()`), `preparePdfText(bytes, extractor)`
+defaults `maxChars` to 32,000 (the same default every other content-prep
+function uses) — much smaller than the 5,000,000-char cap `extract()` passes
+internally when it calls `preparePdfText` on your behalf, so a direct caller
+who wants the whole document should pass `maxChars` explicitly.
 
 ## Requirements
 

@@ -22,7 +22,7 @@
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
 import { inspectHtml } from "./embedded.js";
-import type { ContentType, EmbeddedState } from "./types.js";
+import type { ContentType, EmbeddedState, PdfTextExtractor } from "./types.js";
 
 /** Prep mode: "text" (regex strip) or "markdown" (structure-preserving). */
 export type PrepMode = "text" | "markdown";
@@ -67,6 +67,11 @@ export const PDF_PREP_ERROR =
 /** Typed binary-input error, shared with the chunker so the message is single-source. */
 export function binaryPrepError(contentType: ContentType): string {
   return `binary content is not supported for contentType "${contentType}"; provide a string`;
+}
+
+/** Typed error for "pdf" content-prep called with a string instead of bytes when an extractor IS supplied. */
+export function pdfBytesRequiredError(): string {
+  return "pdf content-prep requires Uint8Array (bytes), not a string — read the PDF as bytes (e.g. Buffer.from(fs.readFileSync(path)))";
 }
 
 const ENTITY_MAP: Record<string, string> = {
@@ -255,4 +260,119 @@ export function prepareContent(
 
   // "text": truncate-only passthrough.
   return { text: content.slice(0, maxChars) };
+}
+
+/**
+ * Validate a PdfTextExtractor-reported page-offset array against the
+ * (possibly maxChars-truncated) prepared text length. "dropped, never
+ * silently trusted" — mirrors the repo's normalization discipline (ADR 0001
+ * §4): the WHOLE array is dropped (with one warning) unless every entry is a
+ * finite number, the sequence is non-decreasing, and every entry falls
+ * within `[0, textLength]`. `pageOffsets` is trust-not-verify content
+ * (Traverse cannot independently confirm it against real PDF structure —
+ * see docs/decisions/content-preparation.md); this only checks shape.
+ */
+function validatePageOffsets(
+  offsets: number[] | undefined,
+  textLength: number,
+  warnings: string[],
+): number[] | undefined {
+  if (offsets === undefined) return undefined;
+  if (!Array.isArray(offsets)) {
+    warnings.push("dropped pdfPageOffsets: not an array");
+    return undefined;
+  }
+  let prev = -1;
+  for (const offset of offsets) {
+    if (
+      typeof offset !== "number" ||
+      !Number.isFinite(offset) ||
+      offset < 0 ||
+      offset > textLength ||
+      offset < prev
+    ) {
+      warnings.push("dropped pdfPageOffsets: malformed or out-of-range page offsets");
+      return undefined;
+    }
+    prev = offset;
+  }
+  return offsets;
+}
+
+/**
+ * Validate a PdfTextExtractor-reported `warnings` value against the same
+ * "dropped, never silently trusted" discipline {@link validatePageOffsets}
+ * applies to `pageOffsets` (ADR 0001 §4): `warnings` is trust-not-verify
+ * content from a caller-supplied extractor, so a malformed shape (anything
+ * other than `undefined` or an array of strings — e.g. a bare string, which
+ * would otherwise silently spread into one-character "warnings" via
+ * `[...str]`) is dropped wholesale rather than partially trusted. Returns an
+ * empty array (with a warning appended describing the drop) for anything
+ * that isn't `undefined` or `string[]`.
+ */
+function validateWarnings(rawWarnings: unknown): string[] {
+  if (rawWarnings === undefined) return [];
+  if (Array.isArray(rawWarnings) && rawWarnings.every((w) => typeof w === "string")) {
+    return [...rawWarnings];
+  }
+  return ["dropped extractor-reported warnings: not an array of strings"];
+}
+
+/**
+ * Run a caller-supplied {@link PdfTextExtractor} against PDF bytes and
+ * produce prepared text, mirroring {@link htmlToMarkdown}'s degrade-via-
+ * try/catch discipline (see the module docstring) — an extractor that
+ * throws synchronously OR returns a rejected Promise is caught here and
+ * surfaces as a typed `error`, never propagated (ADR 0001 §4 item 4,
+ * never-throw). `text` is truncated to `maxChars` (mirroring every other
+ * prep path's truncation); a `pageOffsets` array reported by the extractor
+ * is shape-validated against the (post-truncation) text length via
+ * {@link validatePageOffsets} and dropped (with a warning) rather than
+ * trusted if malformed or out of range. `warnings` is shape-validated the
+ * same way via {@link validateWarnings}. Called standalone (outside
+ * `extract()`), `maxChars` defaults to `DEFAULT_MAX_CHARS` (32,000) —
+ * `extract()` itself passes its own much larger internal cap
+ * (`PDF_FULL_TEXT_CAP`, 5,000,000) when it calls this function, so a direct
+ * caller who wants more than 32,000 characters must pass `maxChars`
+ * explicitly.
+ */
+export async function preparePdfText(
+  bytes: Uint8Array,
+  extractor: PdfTextExtractor,
+  maxChars: number = DEFAULT_MAX_CHARS,
+): Promise<{ text: string; pageOffsets?: number[]; warnings: string[]; error?: string }> {
+  try {
+    const raw = await extractor.extract(bytes);
+    if (typeof raw?.text !== "string") {
+      return { text: "", warnings: [], error: "pdf text extraction failed: extractor returned no text" };
+    }
+    const text = raw.text.slice(0, maxChars);
+    const warnings = validateWarnings(raw.warnings);
+    const pageOffsets = validatePageOffsets(raw.pageOffsets, text.length, warnings);
+    return { text, ...(pageOffsets ? { pageOffsets } : {}), warnings };
+  } catch (err) {
+    return {
+      text: "",
+      warnings: [],
+      error: `pdf text extraction failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Resolve a 0-based char offset (e.g. a proposal's verified `chars:` locator
+ * start) to a 1-based page number, using a `pdfPageOffsets` sidecar
+ * ({@link ExtractionResult.pdfPageOffsets} / {@link PdfExtractedText.pageOffsets}).
+ * Returns `undefined` when `pageOffsets` is absent/empty or `charOffset` is
+ * negative or precedes every page's start (which should not happen for a
+ * well-formed `pageOffsets[0] === 0`, but is handled defensively).
+ */
+export function resolvePdfPage(pageOffsets: number[] | undefined, charOffset: number): number | undefined {
+  if (!pageOffsets || pageOffsets.length === 0 || charOffset < 0) return undefined;
+  let page = 0;
+  for (let i = 0; i < pageOffsets.length; i++) {
+    if (pageOffsets[i] <= charOffset) page = i + 1;
+    else break;
+  }
+  return page > 0 ? page : undefined;
 }

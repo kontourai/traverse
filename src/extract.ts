@@ -69,6 +69,8 @@
  */
 
 import { prepareAndChunk } from "./chunk.js";
+import type { PreparedChunks } from "./chunk.js";
+import { pdfBytesRequiredError, preparePdfText } from "./content-prep.js";
 import type {
   ExtractInput,
   ExtractionProposal,
@@ -76,6 +78,14 @@ import type {
   ProviderExtractionOutput,
   RawProviderResponse,
 } from "./types.js";
+
+/**
+ * Full-text cap for `preparePdfText`'s extractor output, independent of any
+ * per-chunk budget — mirrors `chunk.ts`'s `SAFETY_CAP` /
+ * `content-prep.ts`'s `SHELL_INSPECT_CAP` (kept as a local const to avoid an
+ * import cycle; see docs/decisions/content-preparation.md, Stop-short risk 5).
+ */
+const PDF_FULL_TEXT_CAP = 5_000_000;
 
 const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
@@ -116,12 +126,55 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       }
     }
 
-    const prepared = prepareAndChunk(input.content, input.contentType, {
-      prep: input.prep,
-      chunkSize: input.chunkSize,
-      chunkOverlap: input.chunkOverlap,
-      maxChunks: input.maxChunks,
-    });
+    // PDF pre-step: with contentType "pdf" and a supplied pdfTextExtractor,
+    // run the extractor and hand the resulting text into the EXISTING,
+    // unmodified character-window chunker (prepareAndChunk(text, "text",
+    // ...)) — PDF content-prep reuses 100% of the already-tested chunking
+    // and chars:<start>-<end> provenance-verification machinery below with
+    // zero new chunking code (see docs/decisions/content-preparation.md).
+    // With NO extractor supplied, contentType "pdf" falls through to the
+    // unchanged prepareAndChunk(input.content, input.contentType, {...})
+    // call below, byte-identical to the pre-existing 0.8.0 PDF_PREP_ERROR
+    // path.
+    let prepared: PreparedChunks;
+    let pdfPageOffsets: number[] | undefined;
+    if (input.contentType === "pdf" && input.pdfTextExtractor) {
+      if (!(input.content instanceof Uint8Array)) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: pdfBytesRequiredError(),
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+      const pdfPrep = await preparePdfText(input.content, input.pdfTextExtractor, PDF_FULL_TEXT_CAP);
+      if (pdfPrep.error !== undefined) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: pdfPrep.error,
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+      pdfPageOffsets = pdfPrep.pageOffsets;
+      prepared = prepareAndChunk(pdfPrep.text, "text", {
+        chunkSize: input.chunkSize,
+        chunkOverlap: input.chunkOverlap,
+        maxChunks: input.maxChunks,
+      });
+      prepared.warnings = [...pdfPrep.warnings, ...prepared.warnings];
+    } else {
+      prepared = prepareAndChunk(input.content, input.contentType, {
+        prep: input.prep,
+        chunkSize: input.chunkSize,
+        chunkOverlap: input.chunkOverlap,
+        maxChunks: input.maxChunks,
+      });
+    }
     if (prepared.error !== undefined) {
       return { proposals: [], raw: EMPTY_RAW, extractedAt, error: prepared.error, providerCalls: 0, totalTokensUsed: 0 };
     }
@@ -224,6 +277,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         totalTokensUsed,
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
+      if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
       return failed;
     }
 
@@ -251,6 +305,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     if (warnings.length > 0) result.warnings = warnings;
     // Attach the whole-page embedded-state sidecar once (never per chunk).
     if (prepared.embedded) result.embedded = prepared.embedded;
+    if (pdfPageOffsets) result.pdfPageOffsets = pdfPageOffsets;
     return result;
   } catch (err) {
     return {

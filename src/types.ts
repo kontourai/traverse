@@ -185,6 +185,18 @@ export interface ExtractionResult {
    * See `src/embedded.ts` and `docs/adr/0005-embedded-state-sidecar.md`.
    */
   embedded?: EmbeddedState;
+  /**
+   * Page-boundary sidecar for PDF content — present ONLY when contentType
+   * was "pdf", ExtractInput.pdfTextExtractor was supplied, and the extractor
+   * reported page boundaries. 0-based char offsets into the SAME prepared
+   * text every proposal's chars:<start>-<end> locator is anchored to. A
+   * consumer resolves a proposal's page via resolvePdfPage(). NOT a new
+   * locator scheme (ADR 0001's chars:<start>-<end> contract is unchanged) —
+   * a structured sidecar alongside it, mirroring `embedded` (ADR 0005). Full
+   * page/region locators are deferred — see
+   * docs/decisions/content-preparation.md.
+   */
+  pdfPageOffsets?: number[];
 }
 
 /**
@@ -225,6 +237,38 @@ export interface ExtractionProvider {
 }
 
 /**
+ * Extracted text from one PDF document, produced by a caller-supplied
+ * {@link PdfTextExtractor}.
+ */
+export interface PdfExtractedText {
+  /** extracted text for the WHOLE document, all pages concatenated. */
+  text: string;
+  /**
+   * 0-based char offsets into `text` where each page begins, in page order
+   * (pageOffsets[0] is page 1's start — normally 0). Length equals the
+   * detected page count. OPTIONAL: an extractor that cannot report page
+   * boundaries may omit this — Traverse still produces valid
+   * chars:<start>-<end> locators either way; pageOffsets only adds
+   * page-resolution on top (see docs/decisions/content-preparation.md).
+   */
+  pageOffsets?: number[];
+  /** non-fatal notes from extraction (e.g. an unreadable page skipped). */
+  warnings?: string[];
+}
+
+/**
+ * Injected seam for PDF text extraction. Traverse ships NO default
+ * implementation and takes NO parser dependency (pdfjs-dist, pdf-parse,
+ * etc.) — a caller that needs "pdf" content-prep supplies one, typically
+ * wrapping a parser it already has. See src/content-prep.ts
+ * `preparePdfText` and docs/decisions/content-preparation.md.
+ */
+export interface PdfTextExtractor {
+  /** May be sync or return a Promise; callers of this seam await either. */
+  extract(bytes: Uint8Array): PdfExtractedText | Promise<PdfExtractedText>;
+}
+
+/**
  * Input to the top-level `extract()` orchestration.
  */
 export interface ExtractInput {
@@ -235,6 +279,14 @@ export interface ExtractInput {
   targetSchema: TargetFieldSchema[];
   fieldHints?: Record<string, string>;
   provider: ExtractionProvider;
+  /**
+   * Injected PDF text extractor. With this UNSET, contentType: "pdf" keeps
+   * returning the pre-existing typed not-implemented error (unchanged since
+   * 0.1.0) — every existing caller's behavior is unaffected by this option's
+   * existence. See src/content-prep.ts `preparePdfText` and
+   * docs/decisions/content-preparation.md.
+   */
+  pdfTextExtractor?: PdfTextExtractor;
   /**
    * Per-chunk provider content budget (default 32_000). Each chunk handed to the
    * provider is truncated to this length. In the common single-chunk case this

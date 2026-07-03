@@ -18,9 +18,14 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   the schema is 100% supplied by the caller, so no domain vocabulary lives in
   this package.
 - **Content Preparation**: the step that turns raw input into extractor-ready
-  text. `html` is stripped to text dependency-free; `text` passes through; `pdf`
-  is a declared-but-deferred content type that returns a typed error (not yet
-  implemented at `0.1.0`).
+  text. `html` is stripped to text dependency-free; `text` passes through;
+  `pdf` is an **opt-in injected seam** — a caller supplies a small
+  `PdfTextExtractor` (`ExtractInput.pdfTextExtractor`) wrapping a parser it
+  already owns, and `extract()` runs it and hands the resulting text into the
+  existing character-window chunker, unchanged. Traverse ships no default PDF
+  parser and takes no new dependency for this. With no extractor supplied,
+  `pdf` still returns the original typed not-implemented error, unchanged
+  since `0.1.0`. See `docs/decisions/content-preparation.md`.
 - **Extraction Provider** (`ExtractionProvider`): a pluggable backend that
   receives prepared content plus the target schema and returns
   `{ proposals, raw }`. The bundled Anthropic adapter (subpath
