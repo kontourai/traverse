@@ -181,6 +181,23 @@ export interface ExtractInput {
   targetSchema: TargetFieldSchema[];
   fieldHints?: Record<string, string>;
   provider: ExtractionProvider;
-  /** default 32_000. */
+  /**
+   * Per-chunk provider content budget (default 32_000). Each chunk handed to the
+   * provider is truncated to this length. In the common single-chunk case this
+   * is identical to the pre-0.5.0 whole-text truncation. See
+   * `docs/adr/0004-large-page-chunking.md`.
+   */
   maxContentChars?: number;
+  /**
+   * Structure-preserving prep mode. Default `"markdown"` for `"html"` content
+   * (links/headings/lists survive), `"text"` otherwise. Pass `"text"` for the
+   * legacy regex strip. The `"html"` default flipped to `"markdown"` in 0.5.0.
+   */
+  prep?: "text" | "markdown";
+  /** Target max characters per chunk (default 12_000). */
+  chunkSize?: number;
+  /** Character-window overlap for the fallback chunker (default 200). */
+  chunkOverlap?: number;
+  /** Cap on number of chunks; extras are dropped with a warning (default 40). */
+  maxChunks?: number;
 }

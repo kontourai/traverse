@@ -41,8 +41,16 @@ export interface FetchAndExtractOptions {
   mode?: FetchMode;
   /** optional per-field hints forwarded to `extract()`. */
   fieldHints?: Record<string, string>;
-  /** optional content-prep truncation forwarded to `extract()`. */
+  /** optional per-chunk provider budget forwarded to `extract()`. */
   maxContentChars?: number;
+  /** structure-preserving prep mode forwarded to `extract()` (default markdown for html). */
+  prep?: "text" | "markdown";
+  /** target max characters per chunk forwarded to `extract()` (default 12_000). */
+  chunkSize?: number;
+  /** character-window overlap forwarded to `extract()` (default 200). */
+  chunkOverlap?: number;
+  /** cap on number of chunks forwarded to `extract()` (default 40). */
+  maxChunks?: number;
   /** injectable fetch/time seams forwarded to `fetchSource()` (network-free tests). */
   fetchOptions?: FetchSourceOptions;
 }
@@ -131,6 +139,10 @@ export async function fetchAndExtract(
     provider: opts.provider,
     fieldHints: opts.fieldHints,
     maxContentChars: opts.maxContentChars,
+    prep: opts.prep,
+    chunkSize: opts.chunkSize,
+    chunkOverlap: opts.chunkOverlap,
+    maxChunks: opts.maxChunks,
   });
 
   return { fetch: fetchResult, extraction, sourceRef };

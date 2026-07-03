@@ -8,7 +8,21 @@
  */
 
 export { extract } from "./extract.js";
-export { prepareContent, htmlToText } from "./content-prep.js";
+export {
+  prepareContent,
+  htmlToText,
+  htmlToMarkdown,
+  type PrepMode,
+} from "./content-prep.js";
+export {
+  prepareAndChunk,
+  DEFAULT_CHUNK_SIZE,
+  DEFAULT_CHUNK_OVERLAP,
+  DEFAULT_MAX_CHUNKS,
+  type ChunkOptions,
+  type Chunk,
+  type PreparedChunks,
+} from "./chunk.js";
 export type {
   ContentType,
   TargetFieldSchema,

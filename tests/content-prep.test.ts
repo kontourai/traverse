@@ -57,10 +57,20 @@ describe("htmlToText", () => {
 });
 
 describe("prepareContent", () => {
-  it("prepares html to text", () => {
+  it("prepares html as markdown by default (structure-preserving), preserving headings", () => {
     const { text, error } = prepareContent(fixtureHtml, "html");
     assert.equal(error, undefined);
     assert.match(text ?? "", /Beginner Bouldering Session/);
+    // Default flipped to markdown in 0.5.0: the <h1> survives as an ATX heading
+    // rather than being flattened to a bare line.
+    assert.match(text ?? "", /^# Beginner Bouldering Session/m);
+  });
+
+  it("honors prep:'text' as the legacy regex-strip escape hatch (no markdown syntax)", () => {
+    const { text, error } = prepareContent(fixtureHtml, "html", 32_000, "text");
+    assert.equal(error, undefined);
+    assert.match(text ?? "", /Beginner Bouldering Session/);
+    assert.doesNotMatch(text ?? "", /^#/m);
   });
 
   it("passes text through, truncating only", () => {

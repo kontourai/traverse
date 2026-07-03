@@ -31,10 +31,11 @@ Every `ExtractionProposal` carries required `provenance`, and `extract()`
 **enforces** it — not just requires its presence:
 
 - **`excerpt`** — a verbatim quote against the **CONTENT-PREPARED text**
-  `extract()` hands to the provider (the output of `content-prep.ts`: tags
-  stripped, entities decoded, whitespace collapsed, truncated to
-  `maxContentChars`) — **not** the caller's raw HTML/source document. A
-  proposal without an excerpt is not something Traverse emits.
+  `extract()` hands to the provider — **not** the caller's raw HTML/source
+  document. Since 0.5.0 HTML is prepared as **Markdown** by default (links,
+  headings, and lists survive; see [Large pages & chunking](#large-pages--chunking));
+  pass `prep: "text"` for the legacy flat-text strip. A proposal without an
+  excerpt is not something Traverse emits.
 - **Occurrence is checked, not assumed.** `extract()`'s normalization step
   verifies `excerpt` actually occurs in that prepared text via
   `String.prototype.indexOf`. A proposal whose excerpt cannot be found there is
@@ -93,7 +94,7 @@ const provider: ExtractionProvider = {
 };
 
 const result = await extract({
-  content: "<h1>Beginner Bouldering Session</h1>",
+  content: "<p>Beginner Bouldering Session</p>",
   contentType: "html",
   sourceRef: "https://example.test/schedule",
   targetSchema,
@@ -102,7 +103,7 @@ const result = await extract({
 
 // result.proposals[0].provenance.locator === "chars:0-27" — extract() verified
 // the excerpt against the prepared text ("Beginner Bouldering Session", the
-// <h1> stripped to text) and derived the offset itself.
+// <p> converted to Markdown text) and derived the offset itself.
 // result.proposals — normalized, provenance-bearing proposals
 // result.raw       — the provider's raw response, for audit
 // result.error     — set (never thrown) if a stage failed
@@ -163,6 +164,64 @@ unambiguous, so `extract()` **normalizes it rather than dropping it**:
 
 See [`docs/adr/0003-indexed-path-normalization.md`](docs/adr/0003-indexed-path-normalization.md)
 for why this is accept-and-normalize rather than reject.
+
+## Large pages & chunking
+
+Since 0.5.0 Traverse prepares and extracts **large listing pages** without
+losing records or link URLs. See
+[`docs/adr/0004-large-page-chunking.md`](docs/adr/0004-large-page-chunking.md).
+
+**Structure-preserving prep.** HTML is converted to **Markdown** by default
+(via Turndown), so `[text](href)` links, headings, and lists survive and the
+prepared text is far denser than the old flat-text strip. Pass `prep: "text"`
+for the legacy regex strip:
+
+```ts
+await extract({ content: html, contentType: "html", sourceRef, targetSchema, provider }); // markdown (default)
+await extract({ content: html, contentType: "html", sourceRef, targetSchema, provider, prep: "text" }); // legacy flat text
+```
+
+> **Behavior change (0.5.0):** HTML now prepares as Markdown by default, so
+> `provenance.excerpt`/`locator` are anchored to Markdown, not flat text. If you
+> pinned to the old output, pass `prep: "text"`.
+
+**Structural chunking.** For a page larger than one chunk, Traverse parses the
+DOM (via linkedom), prunes chrome (`script`/`style`/`nav`/`footer`/…), and
+detects the repeated-sibling "card" container of a listing, cutting chunk
+boundaries **on card boundaries** so a card is never split. When no repeated
+structure is found (or for `text` / `prep: "text"`), it falls back to a
+character window with overlap so a value straddling a boundary is not lost.
+Each chunk is sent to the provider **sequentially** (rate-limit friendly;
+concurrency is future work).
+
+**Offset-correct provenance across chunks.** Each chunk is an exact contiguous
+substring of one `fullText`. A proposal's `excerpt` is verified against the
+chunk the provider saw, its offset shifted into `fullText`, and re-verified
+there before `locator = "chars:<start>-<end>"` is trusted — the `"chars:"`
+scheme still means "offsets into the full prepared text." Proposals repeated
+across chunks (overlap windows, or a value repeated across cards) are
+**deduped** by `fieldPath` + `pathIndices` + canonical value, keeping the
+highest confidence.
+
+**Options** (all optional, on `extract()`):
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `prep` | `"markdown"` for html, else `"text"` | structure-preserving prep vs. legacy flat text |
+| `chunkSize` | `12_000` | target max characters per chunk |
+| `chunkOverlap` | `200` | character-window overlap (fallback path) |
+| `maxChunks` | `40` | cap on chunks; extras dropped with a warning |
+| `maxContentChars` | `32_000` | **per-chunk** provider content budget (each chunk truncated to it) |
+
+`result.warnings` aggregates per-run chunking notes: the chunk count and
+detection mode, cards detected, any `maxChunks` truncation, dropped duplicates,
+and any per-chunk provider failure. A provider error on **one** chunk is a
+warning and the other chunks still run (partial results); only if **every**
+chunk's call fails does `result.error` get set.
+
+> Why not `@mozilla/readability`? It extracts the one main article and strips
+> repeated sibling blocks as boilerplate — which is exactly what listing cards
+> are. It solves the opposite problem and would discard the content we need.
 
 ## Anthropic adapter
 
