@@ -204,6 +204,17 @@ describe("detectJsShell — heuristic", () => {
     assert.equal(warning, undefined);
     assert.equal(signals.suspected, false);
   });
+
+  it("stays linear (no quadratic blowup) on adversarial script-heavy HTML", () => {
+    // 80k unterminated `<script>` tags (~640KB). The prior lazy-regex script scan
+    // was O(n^2) and took ~6.6s here; the indexOf scan is O(n) and finishes in ms.
+    const html = "<html><body>" + "<script>".repeat(80_000) + "</body></html>";
+    const t0 = Date.now();
+    const { signals } = detectJsShell(html, "", false);
+    const elapsed = Date.now() - t0;
+    assert.ok(signals.scriptRatio > 0, "unterminated scripts are still counted");
+    assert.ok(elapsed < 2_000, `script-char scan must be linear; took ${elapsed}ms`);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -225,6 +236,17 @@ describe("prepareContent — embedded sidecar", () => {
     assert.equal(result.embedded.jsonLd.length, 1);
     const noShell = (result.warnings ?? []).every((w) => !w.startsWith("js-shell-suspected"));
     assert.ok(noShell, "content-rich page must not carry a shell warning");
+  });
+
+  it("does not false-flag a content-rich page as a shell when the caller sets a small maxChars", () => {
+    // Regression: shell detection must run against the FULL prepared text, not the
+    // caller's maxChars-truncated `text`. A tiny maxChars (a lightweight preview)
+    // must not turn a genuinely content-rich page into a js-shell false positive.
+    const html = fixture("content-rich-heavy-scripts.html");
+    const result = prepareContent(html, "html", 300);
+    assert.equal(result.text?.length, 300, "returned text is still truncated to maxChars");
+    const noShell = (result.warnings ?? []).every((w) => !w.startsWith("js-shell-suspected"));
+    assert.ok(noShell, "small maxChars must not induce a shell false positive");
   });
 });
 

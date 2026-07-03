@@ -131,8 +131,89 @@ function extractBalancedJson(source: string, fromIndex: number): string | undefi
 }
 
 /**
+ * Parse one raw JSON blob under a raw-length cap and a serialized-size cap.
+ * NEVER throws: an oversized-raw, malformed, or oversized-serialized blob is
+ * dropped with a warning and `{ value: undefined }` is returned. Shared by every
+ * embedded-state kind so the cap/parse scaffolding stays single-source.
+ */
+function parseCapped(
+  raw: string,
+  opts: { failCode: string; capLabel: string; maxSerializedChars: number; warnings: string[] },
+): { value?: unknown } {
+  if (raw.length > MAX_RAW_BLOCK_CHARS) {
+    opts.warnings.push(
+      `embedded-state-size-capped: skipped an oversized ${opts.capLabel} (${raw.length} chars > ${MAX_RAW_BLOCK_CHARS})`,
+    );
+    return {};
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch (err) {
+    opts.warnings.push(`${opts.failCode}: ${msg(err)}`);
+    return {};
+  }
+  if (serializedSize(value) > opts.maxSerializedChars) {
+    opts.warnings.push(`embedded-state-size-capped: ${opts.capLabel} exceeded ${opts.maxSerializedChars} chars`);
+    return {};
+  }
+  return { value };
+}
+
+/**
+ * Harvest every `<script type="application/ld+json">` block, in document order,
+ * under a per-block raw cap, a block-count cap, and a cumulative serialized cap.
+ */
+function harvestJsonLd(scripts: AttrEl[], warnings: string[]): unknown[] {
+  const jsonLd: unknown[] = [];
+  let totalChars = 0;
+  for (const el of scripts) {
+    if ((el.getAttribute("type") ?? "").trim().toLowerCase() !== "application/ld+json") continue;
+    const raw = (el.textContent ?? "").trim();
+    if (!raw) continue;
+    if (jsonLd.length >= MAX_JSONLD_BLOCKS) {
+      warnings.push(`embedded-state-size-capped: dropped JSON-LD blocks beyond ${MAX_JSONLD_BLOCKS}`);
+      break;
+    }
+    const { value } = parseCapped(raw, {
+      failCode: "embedded-jsonld-parse-failed",
+      capLabel: "JSON-LD block",
+      maxSerializedChars: MAX_JSONLD_TOTAL_CHARS,
+      warnings,
+    });
+    if (value === undefined) continue;
+    const size = serializedSize(value);
+    if (totalChars + size > MAX_JSONLD_TOTAL_CHARS) {
+      warnings.push(`embedded-state-size-capped: JSON-LD total exceeded ${MAX_JSONLD_TOTAL_CHARS} chars`);
+      break;
+    }
+    totalChars += size;
+    jsonLd.push(value);
+  }
+  return jsonLd;
+}
+
+/** Harvest the Next.js `<script id="__NEXT_DATA__">` payload, if any. */
+function harvestNextData(scripts: AttrEl[], warnings: string[]): unknown | undefined {
+  for (const el of scripts) {
+    if ((el.getAttribute("id") ?? "").trim() !== "__NEXT_DATA__") continue;
+    const raw = (el.textContent ?? "").trim();
+    if (!raw) continue;
+    // There is only one __NEXT_DATA__ per page; a malformed/oversized one is
+    // already warned by parseCapped — don't keep scanning for another.
+    return parseCapped(raw, {
+      failCode: "embedded-nextdata-parse-failed",
+      capLabel: "__NEXT_DATA__ block",
+      maxSerializedChars: MAX_NEXTDATA_CHARS,
+      warnings,
+    }).value;
+  }
+  return undefined;
+}
+
+/**
  * Harvest a generic hydration blob (`window.__INITIAL_STATE__` /
- * `__PRELOADED_STATE__`) from any inline script. First non-empty match wins.
+ * `__PRELOADED_STATE__`) from any inline script. First usable match wins.
  */
 function harvestInitialState(scriptTexts: string[], warnings: string[]): unknown | undefined {
   const assignRe = /(?:window\s*\.\s*)?__(?:INITIAL_STATE|PRELOADED_STATE)__\s*=\s*/;
@@ -141,24 +222,13 @@ function harvestInitialState(scriptTexts: string[], warnings: string[]): unknown
     if (!m) continue;
     const jsonText = extractBalancedJson(text, m.index + m[0].length);
     if (!jsonText) continue;
-    if (jsonText.length > MAX_RAW_BLOCK_CHARS) {
-      warnings.push(
-        `embedded-state-size-capped: skipped an oversized hydration blob (${jsonText.length} chars > ${MAX_RAW_BLOCK_CHARS})`,
-      );
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch (err) {
-      warnings.push(`embedded-initialstate-parse-failed: ${msg(err)}`);
-      continue;
-    }
-    if (serializedSize(parsed) > MAX_INITIAL_STATE_CHARS) {
-      warnings.push(`embedded-state-size-capped: hydration blob exceeded ${MAX_INITIAL_STATE_CHARS} chars`);
-      continue;
-    }
-    return parsed;
+    const { value } = parseCapped(jsonText, {
+      failCode: "embedded-initialstate-parse-failed",
+      capLabel: "hydration blob",
+      maxSerializedChars: MAX_INITIAL_STATE_CHARS,
+      warnings,
+    });
+    if (value !== undefined) return value;
   }
   return undefined;
 }
@@ -179,66 +249,12 @@ export function harvestEmbeddedState(html: string): { embedded?: EmbeddedState; 
     return { warnings };
   }
 
-  const jsonLd: unknown[] = [];
-  let jsonLdChars = 0;
-  let nextData: unknown | undefined;
-  const inlineScriptTexts: string[] = [];
-
-  for (const el of scripts) {
-    const type = (el.getAttribute("type") ?? "").trim().toLowerCase();
-    const id = (el.getAttribute("id") ?? "").trim();
-    const raw = (el.textContent ?? "").trim();
-    if (el.getAttribute("src") === null && raw) inlineScriptTexts.push(raw);
-    if (!raw) continue;
-
-    if (type === "application/ld+json") {
-      if (jsonLd.length >= MAX_JSONLD_BLOCKS) {
-        warnings.push(`embedded-state-size-capped: dropped JSON-LD blocks beyond ${MAX_JSONLD_BLOCKS}`);
-        continue;
-      }
-      if (raw.length > MAX_RAW_BLOCK_CHARS) {
-        warnings.push(
-          `embedded-state-size-capped: skipped an oversized JSON-LD block (${raw.length} chars > ${MAX_RAW_BLOCK_CHARS})`,
-        );
-        continue;
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (err) {
-        warnings.push(`embedded-jsonld-parse-failed: ${msg(err)}`);
-        continue;
-      }
-      const size = serializedSize(parsed);
-      if (jsonLdChars + size > MAX_JSONLD_TOTAL_CHARS) {
-        warnings.push(`embedded-state-size-capped: JSON-LD total exceeded ${MAX_JSONLD_TOTAL_CHARS} chars`);
-        continue;
-      }
-      jsonLdChars += size;
-      jsonLd.push(parsed);
-      continue;
-    }
-
-    if (id === "__NEXT_DATA__" && nextData === undefined) {
-      if (raw.length > MAX_RAW_BLOCK_CHARS) {
-        warnings.push(
-          `embedded-state-size-capped: skipped an oversized __NEXT_DATA__ block (${raw.length} chars > ${MAX_RAW_BLOCK_CHARS})`,
-        );
-        continue;
-      }
-      try {
-        const parsed = JSON.parse(raw);
-        if (serializedSize(parsed) > MAX_NEXTDATA_CHARS) {
-          warnings.push(`embedded-state-size-capped: __NEXT_DATA__ exceeded ${MAX_NEXTDATA_CHARS} chars`);
-        } else {
-          nextData = parsed;
-        }
-      } catch (err) {
-        warnings.push(`embedded-nextdata-parse-failed: ${msg(err)}`);
-      }
-    }
-  }
-
+  const jsonLd = harvestJsonLd(scripts, warnings);
+  const nextData = harvestNextData(scripts, warnings);
+  const inlineScriptTexts = scripts
+    .filter((el) => el.getAttribute("src") === null)
+    .map((el) => (el.textContent ?? "").trim())
+    .filter((t) => t.length > 0);
   const initialState = harvestInitialState(inlineScriptTexts, warnings);
 
   if (jsonLd.length === 0 && nextData === undefined && initialState === undefined) {
@@ -250,12 +266,49 @@ export function harvestEmbeddedState(html: string): { embedded?: EmbeddedState; 
   return { embedded, warnings };
 }
 
-/** Total characters occupied by `<script>...</script>` blocks in the raw HTML. */
+const SCRIPT_OPEN = "<script";
+const SCRIPT_CLOSE = "</script>";
+
+/**
+ * Total characters occupied by `<script>...</script>` blocks in the raw HTML.
+ *
+ * Deliberately a LINEAR `indexOf` scan, not a `/<script\b[^>]*>[\s\S]*?<\/script>/`
+ * regex: that lazy dot-all scan backtracks quadratically when the document has
+ * many `<script` occurrences with no matching `</script>` (adversarial or merely
+ * script-heavy pages), which is a DoS vector because this runs on the raw,
+ * untruncated HTML of every HTML page through `prepareContent`/`extract`. Every
+ * `indexOf` here advances a monotonically increasing cursor, so the whole scan is
+ * O(n) regardless of how pathological the input is.
+ */
 function totalScriptChars(html: string): number {
+  const lower = html.toLowerCase();
   let total = 0;
-  const re = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) total += m[0].length;
+  let i = 0;
+  while (i < lower.length) {
+    const open = lower.indexOf(SCRIPT_OPEN, i);
+    if (open === -1) break;
+    // Guard against `<scriptfoo>`: the char after "<script" must end the tag name.
+    const after = lower[open + SCRIPT_OPEN.length];
+    if (after !== undefined && after >= "a" && after <= "z") {
+      i = open + SCRIPT_OPEN.length;
+      continue;
+    }
+    const tagEnd = lower.indexOf(">", open);
+    if (tagEnd === -1) {
+      // Unterminated opening tag: count the rest and stop.
+      total += html.length - open;
+      break;
+    }
+    const close = lower.indexOf(SCRIPT_CLOSE, tagEnd);
+    if (close === -1) {
+      // No closing tag: count from here to the end and stop (an SPA shell shape).
+      total += html.length - open;
+      break;
+    }
+    const end = close + SCRIPT_CLOSE.length;
+    total += end - open;
+    i = end;
+  }
   return total;
 }
 

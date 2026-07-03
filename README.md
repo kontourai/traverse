@@ -268,9 +268,14 @@ The warning starts with a stable code and carries the ratio numbers:
 - `js-shell-suspected-embedded-state-available: …` — same shell shape, but usable
   embedded state was harvested, so **prefer the sidecar and skip the render**.
 
+Every warning is `"<code>: <details>"`, so match on the code with `startsWith`:
+
 ```ts
-const needsRender = (result.warnings ?? []).some((w) => w === "js-shell-suspected");
-// (a coarse `w.startsWith("js-shell-suspected")` catches both variants)
+const warnings = result.warnings ?? [];
+// Coarse check — true for either shell variant:
+const looksLikeShell = warnings.some((w) => w.startsWith("js-shell-suspected"));
+// Only render when there is NO usable embedded state to fall back on:
+const needsRender = warnings.some((w) => w.startsWith("js-shell-suspected:"));
 ```
 
 A content-rich page is never flagged, even with heavy analytics/framework
