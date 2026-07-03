@@ -41,7 +41,10 @@
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:pack": "node scripts/check-package-contents.mjs"
   },
-  "dependencies": {},
+  "dependencies": {
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4"
+  },
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.20.0",
     "typescript": ">=5.0.0"
@@ -58,6 +61,7 @@
     "@anthropic-ai/sdk": "^0.54.0",
     "@kontourai/survey": "^1.2.1",
     "@types/node": "^25.6.0",
+    "@types/turndown": "^5.0.6",
     "typescript": "^5.8.0"
   },
   "engines": {

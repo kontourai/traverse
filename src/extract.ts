@@ -1,10 +1,31 @@
 /**
  * Top-level extraction orchestration.
  *
- * Pipeline: content-prep -> provider.extract() -> strict proposal
- * normalization -> ExtractionResult. It NEVER throws for provider/parse/prep
- * failure — every stage error surfaces as `ExtractionResult.error` with an
- * empty `proposals` array.
+ * Pipeline: prepareAndChunk -> per-chunk provider.extract() -> strict proposal
+ * normalization (offset-adjusted, re-verified provenance) -> cross-chunk dedup
+ * -> ExtractionResult. It NEVER throws for provider/parse/prep failure — every
+ * stage error surfaces as `ExtractionResult.error` with an empty `proposals`
+ * array.
+ *
+ * Large-page chunking (0.5.0). `prepareAndChunk` turns the input into one
+ * `fullText` plus offset-correct `chunks` (structural card boundaries for a
+ * repeated-card listing, else a character window with overlap — see
+ * src/chunk.ts and docs/adr/0004-large-page-chunking.md). Chunks are sent to the
+ * provider SEQUENTIALLY (rate-limit friendly; concurrency is future work).
+ * `maxContentChars` is the PER-CHUNK provider budget: each chunk handed to the
+ * provider is truncated to it (identical to the pre-0.5.0 whole-text truncation
+ * in the common single-chunk case).
+ *
+ * Provenance across chunks. A proposal's `excerpt` is verified against the chunk
+ * text the provider saw (via `indexOf`), then re-anchored to the FULL prepared
+ * text: `locator = "chars:<start>-<end>"` with `start = chunk.start + localIndex`,
+ * re-verified at that offset against `fullText`. The `"chars:"` scheme therefore
+ * still means "offsets into the full prepared text" even though a provider only
+ * ever saw one chunk.
+ *
+ * Per-chunk provider errors are recorded as warnings and the other chunks still
+ * run (partial results survive); only if EVERY chunk's call fails does
+ * `extract()` surface a `result.error`.
  *
  * Normalization discipline (proposals-only, ADR 0001 §4). A proposal survives
  * normalization only if ALL of the following hold — anything else is dropped
@@ -47,11 +68,12 @@
  * nothing either stage notices is silent.
  */
 
-import { prepareContent } from "./content-prep.js";
+import { prepareAndChunk } from "./chunk.js";
 import type {
   ExtractInput,
   ExtractionProposal,
   ExtractionResult,
+  ProviderExtractionOutput,
   RawProviderResponse,
 } from "./types.js";
 
@@ -64,36 +86,86 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
-    const prepared = prepareContent(input.content, input.contentType, maxChars);
-    if (prepared.error !== undefined || prepared.text === undefined) {
-      return {
-        proposals: [],
-        raw: EMPTY_RAW,
-        extractedAt,
-        error: prepared.error ?? "content preparation produced no text",
-      };
+    const prepared = prepareAndChunk(input.content, input.contentType, {
+      prep: input.prep,
+      chunkSize: input.chunkSize,
+      chunkOverlap: input.chunkOverlap,
+      maxChunks: input.maxChunks,
+    });
+    if (prepared.error !== undefined) {
+      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: prepared.error };
     }
 
-    const output = await input.provider.extract({
-      content: prepared.text,
-      contentType: input.contentType,
-      targetSchema: input.targetSchema,
-      fieldHints: input.fieldHints,
-    });
+    const { fullText, chunks } = prepared;
+    const warnings: string[] = [...prepared.warnings];
+    const collected: ExtractionProposal[] = [];
+    let lastRaw: RawProviderResponse = EMPTY_RAW;
+    const providerErrors: string[] = [];
+    let chunksSucceeded = 0;
 
-    const providerWarnings = output.warnings ?? [];
-    const { proposals, warnings: normalizationWarnings } = normalizeProposals(
-      output.proposals,
-      input,
-      prepared.text,
-    );
-    const warnings = [...providerWarnings, ...normalizationWarnings];
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      // Per-chunk provider budget: the provider sees at most `maxChars` of this
+      // chunk. The slice is still a prefix-substring of `fullText` at
+      // `chunk.start`, so verified offsets stay correct against `fullText`.
+      const chunkContent = chunk.text.slice(0, maxChars);
 
-    const result: ExtractionResult = {
-      proposals,
-      raw: output.raw ?? EMPTY_RAW,
-      extractedAt,
-    };
+      let output: ProviderExtractionOutput;
+      try {
+        output = await input.provider.extract({
+          content: chunkContent,
+          contentType: input.contentType,
+          targetSchema: input.targetSchema,
+          fieldHints: input.fieldHints,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        providerErrors.push(msg);
+        warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${msg}`);
+        continue;
+      }
+
+      chunksSucceeded++;
+      if (output.warnings) warnings.push(...output.warnings);
+      if (output.raw) lastRaw = output.raw;
+
+      const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
+        output.proposals,
+        input,
+        chunkContent,
+        chunk.start,
+        fullText,
+      );
+      warnings.push(...normalizationWarnings);
+      collected.push(...chunkProposals);
+    }
+
+    // Every chunk's provider call failed -> surface as a fatal error. This
+    // preserves the single-shot contract: a 1-chunk page whose only provider
+    // call throws is an error, not an empty success.
+    if (chunks.length > 0 && chunksSucceeded === 0 && providerErrors.length > 0) {
+      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: providerErrors[0] };
+    }
+
+    const { proposals, dropped } = dedupeProposals(collected);
+    if (dropped > 0) {
+      warnings.push(`dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} across chunks`);
+    }
+
+    if (chunks.length > 1) {
+      warnings.push(
+        prepared.structural
+          ? `chunked into ${chunks.length} chunks by repeated-card structure (${prepared.cardCount} cards detected)`
+          : `chunked into ${chunks.length} chunks by character window`,
+      );
+    }
+    if (prepared.truncatedChunks > 0) {
+      warnings.push(
+        `dropped ${prepared.truncatedChunks} chunk${prepared.truncatedChunks === 1 ? "" : "s"} beyond maxChunks; content truncated`,
+      );
+    }
+
+    const result: ExtractionResult = { proposals, raw: lastRaw, extractedAt };
     if (warnings.length > 0) result.warnings = warnings;
     return result;
   } catch (err) {
@@ -106,10 +178,60 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   }
 }
 
-function normalizeProposals(
+/**
+ * Cross-chunk dedup. Keys a proposal by `fieldPath` + `pathIndices` (so distinct
+ * array items are never collapsed) + canonical value, keeping the highest
+ * confidence on a collision. First-seen key order is preserved.
+ */
+function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
+  const byKey = new Map<string, ExtractionProposal>();
+  const order: string[] = [];
+  let dropped = 0;
+
+  for (const proposal of input) {
+    // JSON-encode the tuple so no field's contents can collide with another's
+    // boundary (a value containing a delimiter cannot masquerade as a different
+    // fieldPath/pathIndices combination).
+    const key = JSON.stringify([
+      proposal.fieldPath,
+      proposal.pathIndices ?? null,
+      canonicalValue(proposal.candidateValue),
+    ]);
+
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, proposal);
+      order.push(key);
+    } else {
+      dropped++;
+      if (proposal.confidence > existing.confidence) byKey.set(key, proposal);
+    }
+  }
+
+  return { proposals: order.map((k) => byKey.get(k) as ExtractionProposal), dropped };
+}
+
+function canonicalValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Normalize one chunk's proposals. Identical discipline to the pre-0.5.0
+ * single-shot normalizer, except the provenance excerpt is verified against the
+ * chunk text (`chunkContent`) the provider saw and the locator offset is shifted
+ * by `chunkStart` and re-verified against `fullText` before it is trusted.
+ */
+function normalizeChunkProposals(
   raw: unknown,
   input: ExtractInput,
-  preparedContent: string,
+  chunkContent: string,
+  chunkStart: number,
+  fullText: string,
 ): { proposals: ExtractionProposal[]; warnings: string[] } {
   const warnings: string[] = [];
   const proposals: ExtractionProposal[] = [];
@@ -166,16 +288,22 @@ function normalizeProposals(
       continue;
     }
 
-    // Provenance contract enforcement: the excerpt must actually occur, verbatim,
-    // in the SAME prepared text the provider was given — never merely asserted.
-    // A miss is dropped (never accepted on trust); a hit derives the locator from
-    // the verified offset, overwriting anything the provider/adapter supplied.
-    const excerptIndex = preparedContent.indexOf(excerpt);
-    if (excerptIndex === -1) {
+    // Provenance contract enforcement. The excerpt must occur verbatim in the
+    // chunk text the provider actually saw (never merely asserted); the offset is
+    // then shifted into `fullText` and re-verified there before the locator is
+    // trusted. Anchoring to the chunk (not `fullText.indexOf`) keeps a value that
+    // repeats across cards pinned to the specific card/chunk it was drawn from.
+    const localIndex = chunkContent.indexOf(excerpt);
+    if (localIndex === -1) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
-    const locator = `chars:${excerptIndex}-${excerptIndex + excerpt.length}`;
+    const globalIndex = chunkStart + localIndex;
+    if (fullText.slice(globalIndex, globalIndex + excerpt.length) !== excerpt) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
+      continue;
+    }
+    const locator = `chars:${globalIndex}-${globalIndex + excerpt.length}`;
 
     const rawConfidence = candidate.confidence;
     if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
