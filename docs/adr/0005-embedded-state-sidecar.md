@@ -1,3 +1,5 @@
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0005 - Embedded-state extraction: structured sidecar + JS-shell warning
 
 Status: Accepted (2026-07-02). Shipped in 0.6.0.

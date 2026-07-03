@@ -1,3 +1,5 @@
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0001 — Traverse is a proposer only
 
 Status: Accepted (2026-07-02). This is an original decision record for Traverse

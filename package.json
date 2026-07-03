@@ -37,8 +37,11 @@
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
-    "verify": "npm run check:content-boundary && npm run typecheck && npm test && npm run check:pack",
+    "verify": "npm run check:content-boundary && npm run check:decisions && npm run typecheck && npm test && npm run check:pack",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
+    "check:decisions": "node scripts/check-decisions.cjs check",
+    "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
+    "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "check:pack": "node scripts/check-package-contents.mjs"
   },
   "dependencies": {
