@@ -108,6 +108,164 @@ describe("extract()", () => {
     assert.ok(result.warnings?.some((w) => /unknown fieldPath "notInSchema"/.test(w)));
   });
 
+  describe("indexed fieldPath normalization (against declared array paths)", () => {
+    it("accepts an indexed fieldPath that normalizes to a declared array path, warning-free", async () => {
+      // genericTargetSchema declares "schedules[].startDate"; the provider emits
+      // the indexed form a real model (glm-5.2, observed in a pilot adjudication)
+      // produces.
+      const content = "Session begins March 3.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "schedules[0].startDate",
+            candidateValue: "2026-03-03",
+            provenance: { excerpt: "March 3", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      // Rewritten to the declared (un-indexed) schema path...
+      assert.equal(result.proposals[0].fieldPath, "schedules[].startDate");
+      // ...with the stripped index preserved for grouping.
+      assert.deepEqual(result.proposals[0].pathIndices, [0]);
+      // Excerpt/locator enforcement still ran, unchanged, against the normalized proposal.
+      const expectedIndex = content.indexOf("March 3");
+      assert.equal(
+        result.proposals[0].provenance.locator,
+        `chars:${expectedIndex}-${expectedIndex + "March 3".length}`,
+      );
+      // Happy path: normalization itself never produces a warning.
+      assert.equal(result.warnings, undefined);
+    });
+
+    it("preserves distinct indices for multiple proposals from different array items", async () => {
+      const content = "First session March 3. Second session April 4.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "schedules[0].startDate",
+            candidateValue: "2026-03-03",
+            provenance: { excerpt: "March 3", locator: "provisional" },
+          }),
+          proposal({
+            fieldPath: "schedules[1].startDate",
+            candidateValue: "2026-04-04",
+            provenance: { excerpt: "April 4", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 2);
+      const byIndex = Object.fromEntries(
+        result.proposals.map((p) => [p.pathIndices?.[0], p]),
+      );
+      assert.equal(byIndex[0]?.fieldPath, "schedules[].startDate");
+      assert.equal(byIndex[0]?.candidateValue, "2026-03-03");
+      assert.equal(byIndex[1]?.fieldPath, "schedules[].startDate");
+      assert.equal(byIndex[1]?.candidateValue, "2026-04-04");
+      assert.equal(result.warnings, undefined);
+    });
+
+    it("normalizes multi-level indexed paths consistently (a[2].b[0].c -> a[].b[].c)", async () => {
+      const multiLevelSchema = [
+        {
+          path: "a[].b[].c",
+          type: "string" as const,
+          description: "A doubly-nested array field, for multi-level index normalization.",
+        },
+      ];
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "a[2].b[0].c",
+            candidateValue: "nested value",
+            provenance: { excerpt: "nested value", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content: "The nested value appears here.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: multiLevelSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].fieldPath, "a[].b[].c");
+      // Outermost-first source order: the "a[2]" index before the "b[0]" index.
+      assert.deepEqual(result.proposals[0].pathIndices, [2, 0]);
+      assert.equal(result.warnings, undefined);
+    });
+
+    it("drops a proposal whose normalized fieldPath still doesn't match the schema, with a warning", async () => {
+      const provider = createMockExtractionProvider(
+        output([proposal({ fieldPath: "notDeclared[0].startDate" })]),
+      );
+      const result = await extract({
+        content: "text",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 0);
+      assert.ok(
+        result.warnings?.some((w) => /unknown fieldPath "notDeclared\[0\]\.startDate"/.test(w)),
+      );
+    });
+
+    it("still drops a normalized-and-matched proposal whose excerpt is not found, with a warning naming the normalized path", async () => {
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "schedules[0].startDate",
+            provenance: { excerpt: "not anywhere in the content", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content: "Completely unrelated text.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 0);
+      assert.ok(
+        result.warnings?.some(
+          (w) => w === 'dropped proposal for "schedules[].startDate": excerpt not found in prepared content',
+        ),
+      );
+    });
+
+    it("leaves an already-declared, non-indexed fieldPath untouched (no pathIndices)", async () => {
+      const provider = createMockExtractionProvider(output([proposal()]));
+      const result = await extract({
+        content: "Beginner Bouldering Session details.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].fieldPath, "title");
+      assert.equal(result.proposals[0].pathIndices, undefined);
+    });
+  });
+
   it("drops proposals lacking a provenance excerpt", async () => {
     const bad = proposal();
     // Simulate a provider that violated the contract at runtime.

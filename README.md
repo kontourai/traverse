@@ -134,6 +134,36 @@ normalizes proposals. A proposal survives only if ALL of the following hold:
 malformed-tool-item or maxTokens-truncation notes) — nothing either stage
 notices is silent.
 
+### Indexed field paths against array schemas
+
+Some providers echo back an **indexed** path for an array field — e.g.
+`"schedules[0].startDate"` — instead of the un-indexed declared form your
+`targetSchema` uses, e.g. `"schedules[].startDate"`. This mapping is
+unambiguous, so `extract()` **normalizes it rather than dropping it**:
+
+- Every `[n]` (integer) segment in `fieldPath` is stripped to `[]`,
+  consistently at every level — `"a[2].b[0].c"` normalizes to `"a[].b[].c"`.
+- If the normalized path matches a declared `targetSchema` path, the proposal
+  is accepted: `fieldPath` is rewritten to the declared (normalized) form, and
+  the stripped index/indices survive on the new
+  `ExtractionProposal.pathIndices?: number[]` field, in left-to-right
+  (outermost-first) source order — `"a[2].b[0].c"` yields `pathIndices: [2, 0]`.
+  This is silent on the happy path (no warning) — it is supported input, not a
+  defect.
+- Use `pathIndices` to regroup proposals that came from the same source array
+  item, e.g. multiple `"schedules[].*"` proposals that all carry
+  `pathIndices: [0]` came from the same `schedules[0]` entry.
+- If the **normalized** path still doesn't match anything in `targetSchema`,
+  the proposal is dropped with the same `"unknown fieldPath"` warning as any
+  other unrecognized path — normalization recovers one specific, unambiguous
+  shape; it does not loosen fieldPath membership in general.
+- Every other normalization rule (extractor identity, verified excerpt,
+  finite/clamped confidence) still runs unchanged against the normalized
+  proposal.
+
+See [`docs/adr/0003-indexed-path-normalization.md`](docs/adr/0003-indexed-path-normalization.md)
+for why this is accept-and-normalize rather than reject.
+
 ## Anthropic adapter
 
 The Anthropic adapter is exported from the `@kontourai/traverse/anthropic`

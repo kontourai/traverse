@@ -10,7 +10,19 @@
  * normalization only if ALL of the following hold — anything else is dropped
  * (or, for confidence, clamped) with a warning, never silently:
  *  - `fieldPath` MUST be a non-empty string present in the caller's
- *    `targetSchema`; missing or unknown fields are dropped with a warning,
+ *    `targetSchema`; missing or unknown fields are dropped with a warning.
+ *    EXCEPTION: an indexed path against a declared array field (e.g.
+ *    `"schedules[0].startDate"` when the schema declares
+ *    `"schedules[].startDate"`) is ACCEPTED, not dropped — `[n]` segments are
+ *    stripped to `[]` (consistently at every level, e.g.
+ *    `"a[2].b[0].c"` -> `"a[].b[].c"`) and checked against `targetSchema`
+ *    again; a match rewrites `fieldPath` to the declared form and records the
+ *    stripped index/indices on `pathIndices` (silently — no warning; this is
+ *    a supported input shape, not a defect). A fieldPath whose normalized
+ *    form STILL doesn't match `targetSchema` is dropped with a warning, same
+ *    as any other unknown fieldPath. See
+ *    `docs/adr/0003-indexed-path-normalization.md` for why this is
+ *    accept-and-normalize rather than reject,
  *  - `extractor` MUST be a non-empty string; a blank one drops the item,
  *  - the proposal MUST carry provenance with a non-empty `excerpt`; a missing
  *    excerpt drops the item,
@@ -122,14 +134,27 @@ function normalizeProposals(
       continue;
     }
 
+    let effectiveFieldPath = fieldPath;
+    let pathIndices: number[] | undefined;
     if (!knownFieldPaths.has(fieldPath)) {
-      warnings.push(`dropped proposal for unknown fieldPath "${fieldPath}" (not in targetSchema)`);
-      continue;
+      // Not a direct match — try normalizing indexed segments ("[0]" -> "[]",
+      // consistently at every level) against a declared array path before
+      // giving up. This recovers proposals like "schedules[0].startDate"
+      // against a schema that only declares "schedules[].startDate" — see
+      // docs/adr/0003-indexed-path-normalization.md.
+      const { normalized, indices } = normalizeIndexedFieldPath(fieldPath);
+      if (indices.length > 0 && knownFieldPaths.has(normalized)) {
+        effectiveFieldPath = normalized;
+        pathIndices = indices;
+      } else {
+        warnings.push(`dropped proposal for unknown fieldPath "${fieldPath}" (not in targetSchema)`);
+        continue;
+      }
     }
 
     const extractor = typeof candidate.extractor === "string" ? candidate.extractor.trim() : "";
     if (!extractor) {
-      warnings.push(`dropped proposal for "${fieldPath}": missing extractor identity`);
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": missing extractor identity`);
       continue;
     }
 
@@ -137,7 +162,7 @@ function normalizeProposals(
     const excerpt =
       provenance && typeof provenance.excerpt === "string" ? provenance.excerpt.trim() : "";
     if (!excerpt) {
-      warnings.push(`dropped proposal for "${fieldPath}": missing provenance excerpt`);
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": missing provenance excerpt`);
       continue;
     }
 
@@ -147,30 +172,53 @@ function normalizeProposals(
     // the verified offset, overwriting anything the provider/adapter supplied.
     const excerptIndex = preparedContent.indexOf(excerpt);
     if (excerptIndex === -1) {
-      warnings.push(`dropped proposal for "${fieldPath}": excerpt not found in prepared content`);
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
     const locator = `chars:${excerptIndex}-${excerptIndex + excerpt.length}`;
 
     const rawConfidence = candidate.confidence;
     if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
-      warnings.push(`dropped proposal for "${fieldPath}": non-numeric confidence`);
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
       continue;
     }
     let confidence = rawConfidence;
     if (confidence < 0 || confidence > 1) {
       confidence = Math.max(0, Math.min(1, confidence));
-      warnings.push(`clamped out-of-range confidence for "${fieldPath}" to ${confidence}`);
+      warnings.push(`clamped out-of-range confidence for "${effectiveFieldPath}" to ${confidence}`);
     }
 
-    proposals.push({
-      fieldPath,
+    const proposal: ExtractionProposal = {
+      fieldPath: effectiveFieldPath,
       candidateValue: candidate.candidateValue,
       confidence,
       provenance: { excerpt, locator },
       extractor,
-    });
+    };
+    if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
+    proposals.push(proposal);
   }
 
   return { proposals, warnings };
+}
+
+/**
+ * Strips `[n]` (integer) segments from a caller/provider-supplied fieldPath
+ * down to `[]`, consistently at every level — `"a[2].b[0].c"` normalizes to
+ * `"a[].b[].c"` with `indices: [2, 0]` (left-to-right, outermost-first source
+ * order). Used ONLY as a fallback when the raw fieldPath does not already
+ * match a declared `targetSchema` path — see the EXCEPTION note in the
+ * module docstring above and `docs/adr/0003-indexed-path-normalization.md`.
+ *
+ * `indices` is empty when `path` has no `[n]` segments, in which case
+ * `normalized === path` and the caller should treat this as "nothing to
+ * normalize" rather than a match.
+ */
+function normalizeIndexedFieldPath(path: string): { normalized: string; indices: number[] } {
+  const indices: number[] = [];
+  const normalized = path.replace(/\[(\d+)\]/g, (_match, digits: string) => {
+    indices.push(Number(digits));
+    return "[]";
+  });
+  return { normalized, indices };
 }
