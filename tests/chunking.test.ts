@@ -5,44 +5,13 @@ import { prepareAndChunk } from "../src/chunk.js";
 import { extract } from "../src/extract.js";
 import { prepareContent } from "../src/content-prep.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "../src/types.js";
+import { createRegexScanProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 
 const cardsHtml = readFileSync(
   new URL("../../tests/fixtures/repeated-cards-page.html", import.meta.url),
   "utf8",
 );
-
-// A provider that proposes one "title" per "Program NN Alpha" it can see in the
-// chunk it is handed, grounding each in a verbatim excerpt. Optionally throws on
-// a given (1-based) call to model a single failing chunk.
-function titleScanProvider(opts: { throwOnCall?: number } = {}): ExtractionProvider & {
-  callContents: string[];
-} {
-  const callContents: string[] = [];
-  return {
-    name: "title-scan-mock",
-    callContents,
-    async extract(input): Promise<ProviderExtractionOutput> {
-      callContents.push(input.content);
-      if (opts.throwOnCall === callContents.length) {
-        throw new Error(`boom on call ${callContents.length}`);
-      }
-      const proposals = [];
-      const re = /Program \d+ Alpha/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(input.content)) !== null) {
-        proposals.push({
-          fieldPath: "title",
-          candidateValue: m[0],
-          confidence: 0.9,
-          provenance: { excerpt: m[0], locator: "provisional" },
-          extractor: "title-scan-mock",
-        });
-      }
-      return { proposals, raw: { response: "{}", model: "mock" } };
-    },
-  };
-}
 
 // A provider that proposes a fixed "title" whenever `marker` occurs in the chunk.
 function markerProvider(marker: string): ExtractionProvider {
@@ -122,7 +91,7 @@ describe("extract() chunked path", () => {
   it("adjusts locators to the full prepared text (non-zero offset from a later chunk)", async () => {
     const chunkSize = 400;
     const prepared = prepareAndChunk(cardsHtml, "html", { chunkSize });
-    const provider = titleScanProvider();
+    const provider = createRegexScanProvider();
     const result = await extract({
       content: cardsHtml,
       contentType: "html",
@@ -285,7 +254,7 @@ describe("extract() chunked path", () => {
   });
 
   it("a provider error on one chunk does not kill the others (partial results + warning)", async () => {
-    const provider = titleScanProvider({ throwOnCall: 2 });
+    const provider = createRegexScanProvider({ throwOnCall: 2 });
     const result = await extract({
       content: cardsHtml,
       contentType: "html",

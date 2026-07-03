@@ -11,6 +11,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | Topic | Status | Decision |
 | --- | --- | --- |
 | [content-preparation](./content-preparation.md) | needs-decision | Content preparation |
+| [extraction-cost-guard](./extraction-cost-guard.md) | current | Extraction cost guard |
 | [extraction-proposals](./extraction-proposals.md) | needs-decision | Extraction proposals |
 | [fetch-and-snapshot](./fetch-and-snapshot.md) | needs-decision | Fetch and snapshot |
 | [field-path-normalization](./field-path-normalization.md) | needs-decision | Indexed field path normalization |
