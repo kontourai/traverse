@@ -184,8 +184,10 @@ function harvestJsonLd(scripts: AttrEl[], warnings: string[]): unknown[] {
     if (value === undefined) continue;
     const size = serializedSize(value);
     if (totalChars + size > MAX_JSONLD_TOTAL_CHARS) {
+      // `continue`, not `break`: best-effort inclusion — a later, smaller block may
+      // still fit under the cumulative budget even though this one does not.
       warnings.push(`embedded-state-size-capped: JSON-LD total exceeded ${MAX_JSONLD_TOTAL_CHARS} chars`);
-      break;
+      continue;
     }
     totalChars += size;
     jsonLd.push(value);
@@ -287,9 +289,14 @@ function totalScriptChars(html: string): number {
   while (i < lower.length) {
     const open = lower.indexOf(SCRIPT_OPEN, i);
     if (open === -1) break;
-    // Guard against `<scriptfoo>`: the char after "<script" must end the tag name.
+    // Guard against `<scriptfoo>` / `<script2>` / `<script_x>`: the char after
+    // "<script" must end the tag name (a `\b` word boundary — not a letter,
+    // digit, or underscore).
     const after = lower[open + SCRIPT_OPEN.length];
-    if (after !== undefined && after >= "a" && after <= "z") {
+    if (
+      after !== undefined &&
+      ((after >= "a" && after <= "z") || (after >= "0" && after <= "9") || after === "_")
+    ) {
       i = open + SCRIPT_OPEN.length;
       continue;
     }

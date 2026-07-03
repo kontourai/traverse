@@ -197,6 +197,13 @@ export function htmlToMarkdown(html: string, maxChars: number = DEFAULT_MAX_CHAR
  *
  * Binary (`Uint8Array`) input is only meaningful for `"pdf"` today, which is
  * deferred; passing bytes for `"html"`/`"text"` returns a typed `error`.
+ *
+ * `maxChars` bounds the returned `text`. For `"html"`, the text is prepared in
+ * full first (so JS-shell detection sees the true prepared length, not a
+ * `maxChars`-shrunk one) and then sliced to `maxChars`; that full-prep stage is
+ * itself capped at {@link SHELL_INSPECT_CAP} (5,000,000), so a `maxChars` larger
+ * than that ceiling is effectively clamped to it. The 32,000 default and any
+ * realistic value are unaffected.
  */
 export function prepareContent(
   content: string | Uint8Array,

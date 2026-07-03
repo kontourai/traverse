@@ -142,6 +142,27 @@ describe("harvestEmbeddedState — size caps", () => {
     assert.equal(warnings.filter((w) => w.startsWith("embedded-state-size-capped")).length, 1);
   });
 
+  it("best-effort: a later small JSON-LD block still fits after an over-budget one is skipped", () => {
+    // Two big blocks that together blow the cumulative serialized budget, then a
+    // tiny block that DOES fit under the budget once the second big one is skipped.
+    // The cumulative cap must `continue` (skip just the over-budget block), not
+    // `break` (which would wrongly drop the trailing block that fits).
+    const big = "x".repeat(140_000); // ~140k serialized each; 2x > 256k budget
+    const html =
+      `<html><body>` +
+      `<script type="application/ld+json">{"@type":"Event","name":"${big}"}</script>` +
+      `<script type="application/ld+json">{"@type":"Event","name":"${big}"}</script>` +
+      `<script type="application/ld+json">{"@type":"Course","name":"tiny"}</script>` +
+      `</body></html>`;
+    const { embedded, warnings } = harvestEmbeddedState(html);
+    assert.ok(embedded);
+    // First big block + the trailing tiny block survive; the second big one is skipped.
+    assert.equal(embedded.jsonLd.length, 2);
+    assert.equal((embedded.jsonLd[0] as { "@type": string })["@type"], "Event");
+    assert.equal((embedded.jsonLd[1] as { "@type": string })["@type"], "Course");
+    assert.ok(warnings.some((w) => w.includes("JSON-LD total exceeded")));
+  });
+
   it("caps the NUMBER of JSON-LD blocks at MAX_JSONLD_BLOCKS", () => {
     const many = Array.from({ length: MAX_JSONLD_BLOCKS + 5 }, (_, i) =>
       `<script type="application/ld+json">{"@type":"Event","name":"e${i}"}</script>`,
