@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/kontourai/traverse/compare/v0.5.1...v0.6.0) (2026-07-03)
+
+
+### Features
+
+* embedded-state sidecar (JSON-LD / __NEXT_DATA__) + JS-shell warning ([#15](https://github.com/kontourai/traverse/issues/15)) ([4a19823](https://github.com/kontourai/traverse/commit/4a19823883371d457f8924c95583819e1512ef8b))
+
 ## [0.5.1](https://github.com/kontourai/traverse/compare/v0.5.0...v0.5.1) (2026-07-03)
 
 
