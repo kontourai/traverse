@@ -1,3 +1,5 @@
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0003 — Indexed fieldPath normalization (accept, don't reject)
 
 Status: Accepted (2026-07-02). Original decision record for

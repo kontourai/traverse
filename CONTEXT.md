@@ -34,3 +34,17 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   normalized `proposals`, the provider's `raw` response for audit, an
   `extractedAt` timestamp, an optional `error` (Traverse never throws for
   provider/parse failure), and optional `warnings` for dropped proposals.
+- **Fetch and Snapshot**: the `@kontourai/traverse/fetch` subpath's
+  standalone-first capability for getting content in the first place —
+  configurable single-page fetch (`fetchSource`) plus snapshot capture for
+  byte-identical replay (`replaySource`), composed with `extract()` via
+  `fetchAndExtract`. Distinct vocabulary from extraction (`SourceConfig`,
+  `Snapshot`, `SnapshotStore`, `FetchResult`) kept out of the package root so a
+  caller who only extracts imports nothing from it.
+- **Field Path Normalization**: `extract()`'s recovery rule for a
+  provider-emitted `fieldPath` that carries concrete array indices (e.g.
+  `"schedules[0].startDate"`) against a `targetSchema` that declares the
+  un-indexed form (`"schedules[].startDate"`). The indices are stripped to
+  match the declared path, the proposal is accepted under the declared
+  `fieldPath`, and the stripped indices are preserved on
+  `ExtractionProposal.pathIndices`.

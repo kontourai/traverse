@@ -1,3 +1,5 @@
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0002 — Fetch/snapshot foundation (Slice 2)
 
 Status: Accepted (2026-07-02). Original decision record for Traverse's fetch

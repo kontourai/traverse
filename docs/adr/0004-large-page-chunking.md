@@ -1,3 +1,5 @@
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0004 - Large-page extraction: markdown prep + structural chunking
 
 Status: Accepted (2026-07-03). Shipped in 0.5.0.
