@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/kontourai/traverse/compare/v0.4.0...v0.5.0) (2026-07-03)
+
+
+### Features
+
+* large-page extraction via markdown prep + structural chunking ([#9](https://github.com/kontourai/traverse/issues/9)) ([21e1041](https://github.com/kontourai/traverse/commit/21e10418b7093ee00f88326c957492e5fdec50d8)), closes [#8](https://github.com/kontourai/traverse/issues/8)
+
 ## [0.4.0](https://github.com/kontourai/traverse/compare/v0.3.0...v0.4.0) (2026-07-03)
 
 
