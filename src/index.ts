@@ -12,6 +12,8 @@ export {
   prepareContent,
   htmlToText,
   htmlToMarkdown,
+  preparePdfText,
+  resolvePdfPage,
   type PrepMode,
 } from "./content-prep.js";
 export {
@@ -45,4 +47,6 @@ export type {
   ProviderExtractionOutput,
   ExtractionProvider,
   ExtractInput,
+  PdfExtractedText,
+  PdfTextExtractor,
 } from "./types.js";
