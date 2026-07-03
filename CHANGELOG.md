@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/kontourai/traverse/compare/v0.5.0...v0.5.1) (2026-07-03)
+
+
+### Fixes
+
+* dedup on verified source span; keep prepareContent from throwing ([#12](https://github.com/kontourai/traverse/issues/12)) ([28207ee](https://github.com/kontourai/traverse/commit/28207eee2affcd7a292cdf9fbe83bea872f7a626))
+
 ## [0.5.0](https://github.com/kontourai/traverse/compare/v0.4.0...v0.5.0) (2026-07-03)
 
 
