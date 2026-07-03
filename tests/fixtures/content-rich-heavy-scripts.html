@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Beginner Bouldering Session — Riverside Climbing</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Event",
+        "name": "Beginner Bouldering Session",
+        "startDate": "2026-08-05T18:30:00-07:00",
+        "endDate": "2026-08-05T20:00:00-07:00",
+        "location": { "@type": "Place", "name": "Riverside Climbing Gym" },
+        "offers": { "@type": "Offer", "price": "24", "priceCurrency": "USD" }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="root">
+      <h1>Beginner Bouldering Session</h1>
+      <p>
+        Our Beginner Bouldering Session runs every Tuesday and Thursday evening and is designed for
+        first-time climbers who want a friendly, low-pressure introduction to the sport. Sessions are
+        led by certified instructors who cover movement basics, falling safely onto the mats, and how
+        to read a route before you leave the ground.
+      </p>
+      <p>
+        The drop-in price is $24 per person and includes shoe and chalk rental, so you can show up
+        with nothing but comfortable clothes. Each session lasts ninety minutes, starting at 6:30pm
+        and wrapping up by 8:00pm, with the last fifteen minutes reserved for cool-down stretches and
+        questions with the coaching team.
+      </p>
+      <p>
+        Groups are capped at twelve climbers to keep the instructor-to-participant ratio high. If you
+        want to reserve a spot ahead of time you can register online, though walk-ins are welcome
+        whenever space allows. Returning climbers often move on to our intermediate technique clinic,
+        which builds on the fundamentals introduced here.
+      </p>
+      <p>
+        Parking is free after 6:00pm in the lot behind the building, and the front desk can point you
+        toward the changing rooms and water refill stations. We recommend arriving ten minutes early
+        for your first visit so staff can size your rental shoes and walk you through the waiver.
+      </p>
+    </main>
+    <script src="/assets/analytics-bundle.js"></script>
+    <script>
+      (function () {
+        // A deliberately heavy analytics/tag-manager payload — the false-positive
+        // trap: script-dominated but the page is genuinely content-rich.
+        var events = [];
+        for (var i = 0; i < 600; i++) {
+          events.push({ id: i, kind: "pageview", ts: Date.now() + i, meta: { path: "/session/" + i, ref: "organic-search-result-" + i } });
+        }
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({ event: "session_view", events: events });
+        function track(n) { for (var j = 0; j < 200; j++) { window.dataLayer.push({ event: n, seq: j }); } }
+        track("scroll_depth"); track("engagement"); track("heartbeat");
+      })();
+    </script>
+    <script src="/assets/vendor-tagmanager-9999.js"></script>
+  </body>
+</html>

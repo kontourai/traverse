@@ -21,12 +21,21 @@
 
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
-import type { ContentType } from "./types.js";
+import { inspectHtml } from "./embedded.js";
+import type { ContentType, EmbeddedState } from "./types.js";
 
 /** Prep mode: "text" (regex strip) or "markdown" (structure-preserving). */
 export type PrepMode = "text" | "markdown";
 
 const DEFAULT_MAX_CHARS = 32_000;
+
+/**
+ * Large cap used to prepare the FULL text for shell detection, independent of a
+ * caller's `maxChars`. Mirrors the `SAFETY_CAP` in chunk.ts (kept as a local
+ * const to avoid a content-prep <-> chunk import cycle). See the maxChars note
+ * in {@link prepareContent}.
+ */
+const SHELL_INSPECT_CAP = 5_000_000;
 
 /** Elements whose entire content is chrome/noise, removed with their children (text mode). */
 const NOISE_ELEMENTS = ["script", "style", "noscript", "nav", "header", "footer"];
@@ -188,13 +197,20 @@ export function htmlToMarkdown(html: string, maxChars: number = DEFAULT_MAX_CHAR
  *
  * Binary (`Uint8Array`) input is only meaningful for `"pdf"` today, which is
  * deferred; passing bytes for `"html"`/`"text"` returns a typed `error`.
+ *
+ * `maxChars` bounds the returned `text`. For `"html"`, the text is prepared in
+ * full first (so JS-shell detection sees the true prepared length, not a
+ * `maxChars`-shrunk one) and then sliced to `maxChars`; that full-prep stage is
+ * itself capped at {@link SHELL_INSPECT_CAP} (5,000,000), so a `maxChars` larger
+ * than that ceiling is effectively clamped to it. The 32,000 default and any
+ * realistic value are unaffected.
  */
 export function prepareContent(
   content: string | Uint8Array,
   contentType: ContentType,
   maxChars: number = DEFAULT_MAX_CHARS,
   prep?: PrepMode,
-): { text?: string; error?: string } {
+): { text?: string; error?: string; embedded?: EmbeddedState; warnings?: string[] } {
   if (contentType === "pdf") {
     return { error: PDF_PREP_ERROR };
   }
@@ -206,15 +222,35 @@ export function prepareContent(
   const mode: PrepMode = prep ?? (contentType === "html" ? "markdown" : "text");
 
   if (contentType === "html") {
-    if (mode === "text") return { text: htmlToText(content, maxChars) };
-    // Preserve the "never throws" contract: a DOM/Turndown failure on adversarial
-    // HTML (e.g. pathological nesting overflowing the stack) degrades to the
-    // regex text strip rather than propagating — mirroring prepareAndChunk.
-    try {
-      return { text: htmlToMarkdown(content, maxChars) };
-    } catch {
-      return { text: htmlToText(content, maxChars) };
+    // Prepare the FULL text once (bounded only by the large SHELL_INSPECT_CAP),
+    // then slice the caller-visible `text` to `maxChars`. Shell detection must see
+    // the full prepared length, NOT the caller's `maxChars`-truncated text:
+    // otherwise a small `maxChars` (e.g. a lightweight preview) would shrink a
+    // genuinely content-rich page below the shell floor and false-flag it as a JS
+    // shell. Truncation happens after conversion, so preparing at the larger cap
+    // costs the same conversion work and leaves the returned `text` identical.
+    let full: string;
+    if (mode === "text") {
+      full = htmlToText(content, SHELL_INSPECT_CAP);
+    } else {
+      // Preserve the "never throws" contract: a DOM/Turndown failure on adversarial
+      // HTML (e.g. pathological nesting overflowing the stack) degrades to the
+      // regex text strip rather than propagating — mirroring prepareAndChunk.
+      try {
+        full = htmlToMarkdown(content, SHELL_INSPECT_CAP);
+      } catch {
+        full = htmlToText(content, SHELL_INSPECT_CAP);
+      }
     }
+    const text = full.slice(0, maxChars);
+    // Harvest embedded state (JSON-LD / __NEXT_DATA__ / hydration) from the raw
+    // HTML before scripts were stripped, and flag a JS-shell shape against the
+    // FULL prepared text — both surface on the prep result. See src/embedded.ts.
+    const { embedded, warnings } = inspectHtml(content, full);
+    const result: { text: string; embedded?: EmbeddedState; warnings?: string[] } = { text };
+    if (embedded) result.embedded = embedded;
+    if (warnings.length > 0) result.warnings = warnings;
+    return result;
   }
 
   // "text": truncate-only passthrough.

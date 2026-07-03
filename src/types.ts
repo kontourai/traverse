@@ -105,6 +105,34 @@ export interface ExtractionProposal {
 }
 
 /**
+ * Machine-readable state harvested from the raw HTML before prep strips every
+ * `<script>` block — a STRUCTURED SIDECAR, deliberately NOT proposals. See
+ * `src/embedded.ts` and `docs/adr/0005-embedded-state-sidecar.md` for why
+ * embedded state cannot carry the `chars:<start>-<end>` provenance an
+ * ExtractionProposal requires (it is not present in the prepared text), and why
+ * mapping this state onto caller field names is the caller's job (Traverse owns
+ * zero field vocabulary).
+ *
+ * Every value is JSON.parse-d and size-capped. Absent fields mean "not found";
+ * a malformed block is dropped with a warning rather than throwing.
+ */
+export interface EmbeddedState {
+  /**
+   * Parsed contents of each `<script type="application/ld+json">` block, in
+   * document order (one entry per block; schema.org `@graph`/array payloads are
+   * kept as-parsed for the caller to flatten). Empty array when none parsed.
+   */
+  jsonLd: unknown[];
+  /** Parsed `<script id="__NEXT_DATA__">` payload (Next.js), when present. */
+  nextData?: unknown;
+  /**
+   * Parsed generic hydration blob (`window.__INITIAL_STATE__` /
+   * `__PRELOADED_STATE__`), when present.
+   */
+  initialState?: unknown;
+}
+
+/**
  * Raw provider response, kept for audit alongside the normalized proposals.
  */
 export interface RawProviderResponse {
@@ -131,6 +159,14 @@ export interface ExtractionResult {
   error?: string;
   /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */
   warnings?: string[];
+  /**
+   * Machine-readable state harvested from the raw HTML (JSON-LD, `__NEXT_DATA__`,
+   * hydration blobs) — present ONLY for `"html"` content that carried some. This
+   * is a structured sidecar the caller can prefer over LLM proposals; it is
+   * harvested ONCE from the whole page, so it is never duplicated across chunks.
+   * See `src/embedded.ts` and `docs/adr/0005-embedded-state-sidecar.md`.
+   */
+  embedded?: EmbeddedState;
 }
 
 /**
