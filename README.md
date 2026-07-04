@@ -60,6 +60,42 @@ Because provenance is required on the type itself AND enforced by
 normalization, the whole package is structurally a provenance-bearing-proposal
 producer — this is its identity, not a convention.
 
+## Explicit vs. inferred fields (`inferenceType`)
+
+Every `ExtractionProposal` above is grounded by a verbatim `excerpt` — but
+that only tells you the EXCERPT is real; it doesn't tell you whether the
+proposed VALUE itself is a verbatim copy of the source text or something a
+provider derived, normalized, or classified from it. `TargetFieldSchema`
+carries an optional tag for exactly that distinction:
+
+```ts
+const targetSchema: TargetFieldSchema[] = [
+  // "explicit": the value should appear verbatim in the source. Traverse
+  // (and the Anthropic adapter) treat this as a hint that offset-verifying
+  // the VALUE itself, not just the excerpt, would be meaningful.
+  { path: "zip", type: "string", inferenceType: "explicit" },
+  // "inferred": the value is derived/normalized/classified from the
+  // source (e.g. a computed total, a reworded summary, a classified
+  // category) — the excerpt still grounds the proposal, but the value
+  // itself can never be offset-verified against the source text.
+  { path: "category", type: "enum", enumValues: ["a", "b"], inferenceType: "inferred" },
+];
+```
+
+`inferenceType` is **100% optional and additive**: a field that never sets
+it behaves exactly as before — no shape change, no new warning, no new drop
+behavior for you or for any existing caller. When set, `extract()` carries
+the tag through unchanged onto `ExtractionProposal.inferenceType` (present
+only when the matched schema field declared it, mirroring the `pathIndices`
+conditional-attach idiom used for indexed array paths), so a review UI can
+render an honest "offset-grounded value" vs. "derived value, excerpt-grounded
+only" distinction. This slice adds **no stricter verification** — an
+`"explicit"` field whose returned value doesn't literally match the excerpt
+is proposed exactly as it would be without the tag, reviewed by the caller,
+not gated by Traverse (see
+[`docs/decisions/extraction-proposals.md`](docs/decisions/extraction-proposals.md)
+for the full rationale and the deferred stricter-verification follow-up).
+
 ## Quickstart
 
 ```ts
@@ -414,6 +450,14 @@ The adapter's own synthesized/provided `locator` on each proposal is
 final `locator` value, which it derives from a verified excerpt offset (see
 "The provenance contract" above). This applies to any provider, not just the
 Anthropic adapter: `extract()` re-derives every proposal's locator itself.
+
+A field's `inferenceType` (see "Explicit vs. inferred fields" above), when
+declared, turns into one extra guidance sentence in the tool's `description`
+for that field — a verbatim-copy instruction for `"explicit"`, a
+derived/normalized-value instruction for `"inferred"` — with **zero prompt
+change** for untagged fields. This only affects the natural-language tool
+description the model reads; the `input_schema` it must respond against is
+unchanged either way.
 
 ### Model override
 

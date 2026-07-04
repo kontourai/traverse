@@ -177,7 +177,13 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
     const parts = [`- "${f.path}" (${f.type}`, f.required ? ", required" : "", ")"].join("");
     const enumPart = f.enumValues?.length ? ` one of: [${f.enumValues.join(", ")}].` : "";
     const descPart = f.description ? ` ${f.description}` : "";
-    return `${parts}${enumPart}${descPart}`;
+    const inferenceTypePart =
+      f.inferenceType === "explicit"
+        ? " Copy this value verbatim from the source text — do not paraphrase, reformat, or normalize it."
+        : f.inferenceType === "inferred"
+          ? " This value may be derived, normalized, or classified from the source text — it still needs a grounding excerpt, but the value itself need not match verbatim."
+          : "";
+    return `${parts}${enumPart}${descPart}${inferenceTypePart}`;
   });
 
   return {

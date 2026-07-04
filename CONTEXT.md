@@ -16,7 +16,12 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   one field to extract — its `path`, `type`, optional `enumValues`,
   `description`, and `required` flag. Traverse defines zero field names itself;
   the schema is 100% supplied by the caller, so no domain vocabulary lives in
-  this package.
+  this package. An optional `inferenceType?: "explicit" | "inferred"` further
+  classifies grounding honesty — `"explicit"` means the value should appear
+  verbatim in the source (offset-verification of the value itself would be
+  meaningful); `"inferred"` means the value is derived/normalized from the
+  source (only the excerpt is offset-groundable, never the value). Additive
+  and 100% optional; see `docs/decisions/extraction-proposals.md`.
 - **Content Preparation**: the step that turns raw input into extractor-ready
   text. `html` is stripped to text dependency-free; `text` passes through;
   `pdf` is an **opt-in injected seam** — a caller supplies a small
@@ -35,6 +40,9 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   a `confidence` in `0..1`, an `extractor` identity string, and required
   `provenance` (`excerpt` and `locator`). This is the whole identity of the
   package — a proposal without provenance is not something Traverse emits.
+  Carries `inferenceType` through from the matched `TargetFieldSchema` entry
+  when that entry declared it (absent otherwise), mirroring the `pathIndices`
+  conditional-attach idiom.
 - **Extraction Result** (`ExtractionResult`): the return of `extract()` —
   normalized `proposals`, the provider's `raw` response for audit, an
   `extractedAt` timestamp, an optional `error` (Traverse never throws for
