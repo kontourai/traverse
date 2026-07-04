@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/traverse",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Schema-directed content extraction that produces provenance-bearing, review-ready extraction proposals in Survey's shape.",
   "license": "Apache-2.0",
   "type": "module",
