@@ -225,4 +225,57 @@ describe("buildExtractionTool / parseProposals (units)", () => {
     assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), { proposals: [], warnings: [] });
     assert.deepEqual(parseProposals("string", "x", "html"), { proposals: [], warnings: [] });
   });
+
+  describe("inferenceType prompt guidance", () => {
+    it("[AC5] produces a BYTE-IDENTICAL description for the untagged genericTargetSchema fixture", () => {
+      const tool = buildExtractionTool(genericTargetSchema);
+      assert.equal(
+        tool.description,
+        [
+          "Submit an array of extraction proposals for the requested target fields.",
+          "You are PROPOSING for review — every proposal is a reviewable record, not a resolved value.",
+          "For EACH field you can find in the content, return one proposal with:",
+          "  - fieldPath: the exact target field path from the list below,",
+          "  - value: the extracted value (typed per the field),",
+          "  - confidence: 0.0-1.0,",
+          "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
+          "Only propose fields you can ground in a verbatim excerpt. Omit fields you cannot find.",
+          "",
+          "Target fields:",
+          "- \"title\" (string, required) The name of the activity or session.",
+          "- \"priceAmount\" (number) The drop-in price in whole currency units.",
+          "- \"scheduleSummary\" (string) A short human-readable summary of when the activity runs.",
+          "- \"schedules[].startDate\" (date) The start date of one schedule item in a repeating series.",
+        ].join("\n"),
+      );
+    });
+
+    it("appends a verbatim-copy sentence for explicit fields, a derived-value sentence for inferred fields, and NOTHING extra for untagged fields", () => {
+      const tool = buildExtractionTool([
+        { path: "explicitField", type: "string", inferenceType: "explicit" },
+        { path: "inferredField", type: "string", inferenceType: "inferred" },
+        { path: "untaggedField", type: "string" },
+      ]);
+      const lines = tool.description.split("\n");
+      const explicitLine = lines.find((l) => l.startsWith('- "explicitField"'));
+      const inferredLine = lines.find((l) => l.startsWith('- "inferredField"'));
+      const untaggedLine = lines.find((l) => l.startsWith('- "untaggedField"'));
+
+      assert.equal(explicitLine, '- "explicitField" (string) Copy this value verbatim from the source text — do not paraphrase, reformat, or normalize it.');
+      assert.equal(inferredLine, '- "inferredField" (string) This value may be derived, normalized, or classified from the source text — it still needs a grounding excerpt, but the value itself need not match verbatim.');
+      // Untagged field's rendered line is byte-identical to the pre-change format: just the type, no trailing sentence.
+      assert.equal(untaggedLine, '- "untaggedField" (string)');
+    });
+
+    it("leaves input_schema (fieldPath/value/confidence/excerpt shape and required list) unchanged when fields are inferenceType-tagged", () => {
+      const tool = buildExtractionTool([
+        { path: "explicitField", type: "string", inferenceType: "explicit" },
+        { path: "inferredField", type: "string", inferenceType: "inferred" },
+      ]);
+      const itemRequired = (tool.input_schema.properties.proposals as {
+        items: { required: string[] };
+      }).items.required;
+      assert.deepEqual([...itemRequired].sort(), ["confidence", "excerpt", "fieldPath", "value"]);
+    });
+  });
 });

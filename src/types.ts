@@ -34,6 +34,24 @@ export interface TargetFieldSchema {
   /** field semantics for the provider prompt/rules — caller-owned, not a fixed enum. */
   description?: string;
   required?: boolean;
+  /**
+   * Optional grounding-honesty classification for this field, carried
+   * through onto the matching `ExtractionProposal.inferenceType` by
+   * `extract()`'s normalization step (see below) and, for the Anthropic
+   * adapter, turned into one extra prompt-guidance sentence per field
+   * (`buildExtractionTool`). `"explicit"` — the value should appear
+   * verbatim in the source text; offset-verification of the VALUE itself
+   * (not just the excerpt) is meaningful, and adapters may instruct the
+   * provider to copy it verbatim rather than paraphrase/reformat it.
+   * `"inferred"` — the value is derived/normalized/classified from the
+   * source (e.g. computed, reworded, or categorized); the excerpt still
+   * grounds the proposal, but the VALUE itself can never be
+   * offset-verified against the source text. Absent (the default) means
+   * unspecified — today's behavior, no classification implied either way.
+   * Additive and optional: a schema that never sets this drives zero
+   * behavior change by itself.
+   */
+  inferenceType?: "explicit" | "inferred";
 }
 
 /**
@@ -102,6 +120,19 @@ export interface ExtractionProposal {
    * from the same source `schedules[N]`).
    */
   pathIndices?: number[];
+  /**
+   * Present ONLY when the matched `TargetFieldSchema` entry (looked up by
+   * the declared/normalized `fieldPath`, same as `pathIndices`'s recovery
+   * path) declared `inferenceType` — absent otherwise. Populated by
+   * `extract()`'s normalization, mirroring the `pathIndices`
+   * conditional-attach idiom above: this is a claim about the proposal's
+   * own grounding honesty ("explicit" = value itself is offset-groundable;
+   * "inferred" = value is derived/normalized, only the excerpt is
+   * grounded), not a re-statement of schema-authoring constraints, so it
+   * is carried onto the proposal itself rather than requiring a consumer
+   * to still hold the original `targetSchema` in scope.
+   */
+  inferenceType?: "explicit" | "inferred";
 }
 
 /**

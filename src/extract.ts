@@ -378,7 +378,7 @@ function normalizeChunkProposals(
     return { proposals, warnings };
   }
 
-  const knownFieldPaths = new Set(input.targetSchema.map((f) => f.path));
+  const schemaByPath = new Map(input.targetSchema.map((f) => [f.path, f] as const));
 
   for (const item of raw) {
     if (typeof item !== "object" || item === null) {
@@ -395,14 +395,14 @@ function normalizeChunkProposals(
 
     let effectiveFieldPath = fieldPath;
     let pathIndices: number[] | undefined;
-    if (!knownFieldPaths.has(fieldPath)) {
+    if (!schemaByPath.has(fieldPath)) {
       // Not a direct match — try normalizing indexed segments ("[0]" -> "[]",
       // consistently at every level) against a declared array path before
       // giving up. This recovers proposals like "schedules[0].startDate"
       // against a schema that only declares "schedules[].startDate" — see
       // docs/adr/0003-indexed-path-normalization.md.
       const { normalized, indices } = normalizeIndexedFieldPath(fieldPath);
-      if (indices.length > 0 && knownFieldPaths.has(normalized)) {
+      if (indices.length > 0 && schemaByPath.has(normalized)) {
         effectiveFieldPath = normalized;
         pathIndices = indices;
       } else {
@@ -461,6 +461,8 @@ function normalizeChunkProposals(
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
+    const inferenceType = schemaByPath.get(effectiveFieldPath)?.inferenceType;
+    if (inferenceType !== undefined) proposal.inferenceType = inferenceType;
     proposals.push(proposal);
   }
 

@@ -264,6 +264,41 @@ describe("extract()", () => {
       assert.equal(result.proposals[0].fieldPath, "title");
       assert.equal(result.proposals[0].pathIndices, undefined);
     });
+
+    it("looks up inferenceType by the DECLARED (normalized) path, not the raw indexed one", async () => {
+      // Declares "schedules[].startDate" (the array form) with inferenceType:
+      // "inferred"; the provider emits the raw indexed form. The tag must
+      // still attach to the recovered proposal via the declared path.
+      const taggedSchema = [
+        {
+          path: "schedules[].startDate",
+          type: "date" as const,
+          description: "The start date of one schedule item in a repeating series.",
+          inferenceType: "inferred" as const,
+        },
+      ];
+      const content = "Session begins March 3.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "schedules[0].startDate",
+            candidateValue: "2026-03-03",
+            provenance: { excerpt: "March 3", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: taggedSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].fieldPath, "schedules[].startDate");
+      assert.deepEqual(result.proposals[0].pathIndices, [0]);
+      assert.equal(result.proposals[0].inferenceType, "inferred");
+    });
   });
 
   it("drops proposals lacking a provenance excerpt", async () => {
@@ -388,5 +423,113 @@ describe("extract()", () => {
     assert.ok(result.warnings?.some((w) => /unknown fieldPath "notInSchema"/.test(w)));
     // Provider warnings are surfaced ahead of normalization warnings.
     assert.equal(result.warnings?.[0], "response truncated at maxTokens; proposals may be incomplete");
+  });
+
+  describe("inferenceType carry-through", () => {
+    // Inline schema (NOT genericTargetSchema, which stays untagged/unmodified
+    // so it remains a clean zero-diff baseline fixture for other tests).
+    const taggedSchema = [
+      {
+        path: "explicitField",
+        type: "string" as const,
+        inferenceType: "explicit" as const,
+      },
+      {
+        path: "inferredField",
+        type: "string" as const,
+        inferenceType: "inferred" as const,
+      },
+      {
+        path: "untaggedField",
+        type: "string" as const,
+      },
+    ];
+
+    it("attaches inferenceType from the matched schema entry when declared, and leaves it absent otherwise", async () => {
+      const content = "Explicit value here. Inferred value here. Untagged value here.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "explicitField",
+            candidateValue: "Explicit value",
+            provenance: { excerpt: "Explicit value", locator: "provisional" },
+          }),
+          proposal({
+            fieldPath: "inferredField",
+            candidateValue: "Inferred value",
+            provenance: { excerpt: "Inferred value", locator: "provisional" },
+          }),
+          proposal({
+            fieldPath: "untaggedField",
+            candidateValue: "Untagged value",
+            provenance: { excerpt: "Untagged value", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: taggedSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 3);
+      const byField = Object.fromEntries(result.proposals.map((p) => [p.fieldPath, p]));
+      assert.equal(byField["explicitField"]?.inferenceType, "explicit");
+      assert.equal(byField["inferredField"]?.inferenceType, "inferred");
+      // Key-presence assertion, not just value-equality — an absent key, not
+      // a present key holding `undefined`.
+      assert.equal("inferenceType" in (byField["untaggedField"] as object), false);
+    });
+
+    it("[AC5] never attaches inferenceType to any proposal when the schema never declares it (genericTargetSchema, unmodified)", async () => {
+      const content = "Beginner Bouldering Session details.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal(),
+          proposal({ fieldPath: "priceAmount", candidateValue: 12 }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 2);
+      for (const p of result.proposals) {
+        assert.equal("inferenceType" in (p as object), false);
+      }
+    });
+
+    it("[AC6] adds no new drop/warning/clamp condition for an explicit field whose candidateValue is reformatted differently from the (still verbatim-matching) excerpt", async () => {
+      // The excerpt itself must still verbatim-match the prepared content
+      // (that enforcement is unchanged and pre-existing); only
+      // `candidateValue` differs in format from the excerpt text. No
+      // stricter "candidateValue must be groundable" check exists this
+      // slice — the proposal survives untouched.
+      const content = "Contact us at (303) 555-1234 for details.";
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "explicitField",
+            candidateValue: "303.555.1234", // reformatted vs. the excerpt's "(303) 555-1234"
+            provenance: { excerpt: "(303) 555-1234", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content,
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: taggedSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].candidateValue, "303.555.1234");
+      assert.equal(result.proposals[0].inferenceType, "explicit");
+      assert.equal(result.warnings, undefined);
+    });
   });
 });
