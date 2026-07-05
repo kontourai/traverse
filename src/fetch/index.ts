@@ -30,6 +30,21 @@ export type {
   FetchAndExtractResult,
   ParsedSnapshotSourceRef,
 } from "./compose.js";
+export {
+  fetchYouTube,
+  parseYouTubeUrl,
+  pickCaptionTrack,
+  createDefaultYtDlp,
+} from "./youtube.js";
+export type {
+  YouTubeSourceConfig,
+  YouTubeVideoMetadata,
+  YouTubeFetchResult,
+  YouTubeFetchOptions,
+  YtDlp,
+  YtDlpCaptionTrack,
+  YtDlpMetadata,
+} from "./youtube.js";
 export { parseRobots, isPathAllowed, productToken } from "./robots.js";
 export type {
   SourceConfig,

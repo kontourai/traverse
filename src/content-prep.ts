@@ -139,6 +139,72 @@ export function htmlToText(html: string, maxChars: number = DEFAULT_MAX_CHARS): 
   return text.slice(0, maxChars);
 }
 
+/**
+ * WebVTT caption track -> clean transcript text. This is the cleanup proven on
+ * three real videos in the 2026-07-04 knowledge-kit dogfood (kontourai/ops#72),
+ * promoted here from a one-off session script (issue #31). It is CUE-AWARE: only
+ * text INSIDE a cue payload (the lines after a `-->` timing line, up to the next
+ * blank line) is kept as transcript; everything OUTSIDE a cue — the `WEBVTT`
+ * signature, `Kind:`/`Language:` headers, `NOTE`/`STYLE`/`REGION` blocks (INCLUDING
+ * their multi-line continuations), and bare cue-identifier lines — is dropped.
+ * Cue-awareness is what lets a legitimately spoken caption line that merely
+ * STARTS with "Note"/"Style"/"Region" survive: such words are only treated as
+ * structural when they head a block outside any cue, never inside caption text.
+ * Within a cue payload it also:
+ *
+ *  - strips inline cue tags — timestamp tags like `<00:00:04.160>` and voice/
+ *    class spans like `<c>`/`</c>` — via the same `<[^>]+>` strip
+ *    {@link htmlToText} uses, then decodes the common entities VTT shares with
+ *    HTML (`&amp;`, `&nbsp;`, …),
+ *  - de-duplicates the OVERLAPPING lines auto-captions emit: a rolling caption
+ *    repeats the previous line as it scrolls, so after timings are removed the
+ *    same line appears on consecutive rows. Collapsing consecutive duplicate
+ *    lines (the rolling window) turns that scroll into a single clean line each.
+ *
+ * The result is truncated to `maxChars` (same discipline as every other prep
+ * path). It takes NO new dependency, matching this module's zero-runtime-
+ * dependency posture. Choosing WHICH track to feed it (the `en` vs `en-orig`
+ * pick-one rule) is the acquisition layer's job — see src/fetch/youtube.ts.
+ */
+export function vttToText(vtt: string, maxChars: number = DEFAULT_MAX_CHARS): string {
+  const out: string[] = [];
+  let prev: string | undefined;
+  // Tracks whether we are inside a cue's PAYLOAD (after its `-->` timing line,
+  // before the next blank line). Only payload lines are transcript text; a line
+  // outside a cue is structural (signature/header/NOTE-block/cue-id) and dropped
+  // wholesale — which is what keeps a spoken line starting "Note"/"Style" safe.
+  let inCuePayload = false;
+
+  for (const rawLine of vtt.split(/\r?\n/)) {
+    // Strip inline cue tags (timestamp tags, <c> spans) and decode entities,
+    // then trim — mirroring htmlToText's tag-strip + entity-decode.
+    const cleaned = rawLine
+      .replace(/<[^>]+>/g, "")
+      .replace(ENTITY_RE, (m) => ENTITY_MAP[m.toLowerCase()] ?? m)
+      .replace(/[ \t]+/g, " ")
+      .trim();
+
+    if (cleaned === "") {
+      inCuePayload = false; // a blank line closes the current cue / block
+      continue;
+    }
+    if (cleaned.includes("-->")) {
+      inCuePayload = true; // a cue-TIMING line opens the payload that follows it
+      continue;
+    }
+    if (!inCuePayload) continue; // structural line outside any cue — drop it
+
+    // Rolling-window dedupe: an auto-caption line that scrolled up from the
+    // previous cue repeats verbatim on the next row — collapse the repeat.
+    if (cleaned === prev) continue;
+
+    out.push(cleaned);
+    prev = cleaned;
+  }
+
+  return out.join("\n").slice(0, maxChars);
+}
+
 /** A configured Turndown instance: ATX headings, dash bullets, chrome removed. */
 export function createTurndownService(): TurndownService {
   const td = new TurndownService({
@@ -198,6 +264,10 @@ export function htmlToMarkdown(html: string, maxChars: number = DEFAULT_MAX_CHAR
  *   ({@link htmlToText}). The default flipped to `"markdown"` in 0.5.0 — see
  *   `docs/adr/0004-large-page-chunking.md`.
  * - `"text"`: string input, truncate-only passthrough (`prep` is ignored).
+ * - `"transcript"`: string WebVTT input, cleaned to plain transcript text via
+ *   {@link vttToText} (`prep` is ignored). The excerpt/locator a downstream
+ *   extraction verifies anchor to THIS cleaned text, not the raw VTT — the same
+ *   prepared-text contract html/text already follow.
  * - `"pdf"`: DEFERRED — always returns a typed `error`, never decodes the bytes.
  *
  * Binary (`Uint8Array`) input is only meaningful for `"pdf"` today, which is
@@ -256,6 +326,10 @@ export function prepareContent(
     if (embedded) result.embedded = embedded;
     if (warnings.length > 0) result.warnings = warnings;
     return result;
+  }
+
+  if (contentType === "transcript") {
+    return { text: vttToText(content, maxChars) };
   }
 
   // "text": truncate-only passthrough.

@@ -15,3 +15,5 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [extraction-proposals](./extraction-proposals.md) | current | Extraction proposals |
 | [fetch-and-snapshot](./fetch-and-snapshot.md) | needs-decision | Fetch and snapshot |
 | [field-path-normalization](./field-path-normalization.md) | needs-decision | Indexed field path normalization |
+| [http-validators](./http-validators.md) | current | HTTP validators (ETag / conditional GET) on snapshots |
+| [transcript-content-type](./transcript-content-type.md) | current | YouTube / transcript (WebVTT) content type |

@@ -34,6 +34,7 @@ import {
   collapseMarkdown,
   createTurndownService,
   htmlToText,
+  vttToText,
   PDF_PREP_ERROR,
   type PrepMode,
 } from "./content-prep.js";
@@ -330,11 +331,19 @@ export function prepareAndChunk(
   if (contentType === "pdf") return emptyError(PDF_PREP_ERROR);
   if (typeof content !== "string") return emptyError(binaryPrepError(contentType));
 
-  // text passthrough or html with the prep:'text' escape hatch. Embedded-state
-  // harvesting + shell detection still apply to html here (they read the raw
-  // source, independent of prep mode).
+  // text/transcript passthrough or html with the prep:'text' escape hatch.
+  // Embedded-state harvesting + shell detection still apply to html here (they
+  // read the raw source, independent of prep mode). A "transcript" is cleaned
+  // from WebVTT to plain text FIRST (vttToText) so chunk offsets — and every
+  // proposal's chars:<start>-<end> locator — anchor to the cleaned transcript,
+  // exactly the way html anchors to its Markdown.
   if (contentType !== "html" || prep === "text") {
-    const fullText = contentType === "html" ? htmlToText(content, SAFETY_CAP) : content.slice(0, SAFETY_CAP);
+    const fullText =
+      contentType === "html"
+        ? htmlToText(content, SAFETY_CAP)
+        : contentType === "transcript"
+          ? vttToText(content, SAFETY_CAP)
+          : content.slice(0, SAFETY_CAP);
     const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
     if (contentType === "html") augmentHtml(result, content);
     return result;

@@ -540,6 +540,7 @@ const result = await fetchSource({
 if (result.error) {
   // typed, never thrown: "timeout" | "network" | "http-error" | "robots-denied"
   //   | "too-many-redirects" | "invalid-url" | "invalid-config" | "no-snapshot"
+  //   | "dependency-missing" | "adapter-error"  (YouTube adapter — see below)
   console.error(result.error.kind, result.error.message);
 } else {
   const s = result.snapshot!;
@@ -611,6 +612,73 @@ const exactBytes = await store.get(ref!.sourceId, ref!.bodyHash); // the snapsho
 Use `mode: "replay"` to run the identical extraction against a stored snapshot
 with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a
 handy non-persistent store for tests and single-process capture-then-replay.
+
+### Conditional GET (ETag / Last-Modified)
+
+A snapshot stores the response `ETag` and `Last-Modified` validators when the
+server sends them. Opt in to a **conditional GET** on a re-fetch (via a
+`revalidate` flag plus a `store`) so an unchanged source comes back as a bodyless
+`304` instead of re-downloading — completing the "URL recheck" story
+([`docs/decisions/http-validators.md`](docs/decisions/http-validators.md)):
+
+```ts
+import { fetchSource, createFilesystemSnapshotStore } from "@kontourai/traverse/fetch";
+
+const store = createFilesystemSnapshotStore({ root: ".snapshots" });
+
+// First fetch captures whatever validators the server offers onto the snapshot.
+const first = await fetchSource({ id: "listing-1", url });
+if (first.snapshot) await store.put(first.snapshot); // s.etag / s.lastModified stored
+
+// Later re-check: send If-None-Match / If-Modified-Since from the prior snapshot.
+const again = await fetchSource({ id: "listing-1", url, revalidate: true }, { store });
+if (again.snapshot?.notModified) {
+  // 304 — the prior snapshot re-served (fromCache + notModified), zero body transfer.
+  // Record a cheap "checked, still current" freshness event and move on.
+  // Do NOT `store.put()` this snapshot: it is byte-identical to the prior one
+  // (same fetchedAt + bodyHash) and a filesystem store would just overwrite the
+  // original file in place. A 304 is a freshness signal, not a new capture.
+}
+```
+
+Validators only make the **unchanged** case cheap; when a server offers none (or
+there is no prior snapshot) the fetch proceeds normally and the existing
+`bodyHash` (sha256) compare stays the drift signal. Check MECHANICS live here;
+recheck ORCHESTRATION (when to check, recording drift) is the caller's.
+
+### YouTube / transcript acquisition
+
+`fetchYouTube` acquires a video's captions + metadata and returns them
+**traverse-shaped** — a `Snapshot` carrying the RAW WebVTT
+(`contentType: "transcript"`) plus a `metadata` sidecar — so `extract()` and a
+knowledge kit's `ingest-source` consume it unchanged. content-prep's `vttToText`
+cleans the VTT to plain transcript text (cue timings / headers / inline tags
+stripped, overlapping auto-caption lines rolling-window-deduped, `en` preferred
+over `en-orig`), so a proposal's `chars:<start>-<end>` locator anchors to the
+CLEANED transcript exactly the way an html page's anchors to its Markdown. See
+[`docs/decisions/transcript-content-type.md`](docs/decisions/transcript-content-type.md).
+
+```ts
+import { fetchYouTube } from "@kontourai/traverse/fetch";
+import { prepareContent } from "@kontourai/traverse";
+
+const result = await fetchYouTube({ id: "talk-1", url: "https://youtu.be/VIDEOID?si=track&t=42" });
+if (result.error?.kind === "dependency-missing") {
+  // yt-dlp not installed — an OPTIONAL binary dependency (like @anthropic-ai/sdk).
+} else if (result.snapshot) {
+  result.metadata;            // { videoId, url, title?, channel?, durationSeconds?, uploadDate?, timestampSeconds?, captionLang? }
+  const { text } = prepareContent(result.snapshot.body, "transcript"); // cleaned transcript
+}
+```
+
+`yt-dlp` is an **optional external binary**, detected at call time — a consumer
+who never fetches transcripts pays nothing. Like `fetchSource`, `fetchYouTube`
+**never throws**: a missing binary (`dependency-missing`), a tool failure
+(`adapter-error`), or an unparseable URL (`invalid-url`) surface as typed
+`FetchError`s. The **video id is the canonical identity** (`si=`/`is=` tracking
+stripped, `t=` surfaced as metadata); politeness is **delegated to `yt-dlp`**
+rather than double-governed by traverse's robots/per-host machinery. Inject a
+fake `YtDlp` (`{ available, metadata, captions }`) for network-free tests.
 
 ## PDF content-prep (opt-in seam, no bundled parser)
 

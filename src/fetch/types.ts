@@ -76,6 +76,19 @@ export interface SourceConfig {
    * `true`. See docs/adr/0002 for the fail-open-on-robots-retrieval-error choice.
    */
   respectRobots?: boolean;
+  /**
+   * Opt in to a CONDITIONAL GET when a prior snapshot for this `id` (looked up
+   * via {@link FetchSourceOptions.store}) carries HTTP validators. When `true`
+   * and that prior snapshot has an `etag` and/or `lastModified`, `fetchSource`
+   * sends `If-None-Match` / `If-Modified-Since` so an unchanged resource comes
+   * back as a `304 Not Modified` with ZERO body transfer — the prior snapshot is
+   * returned marked `fromCache` + `notModified` instead of re-downloading. Falls
+   * back to the existing sha256 body-hash compare when a server offers no
+   * validators (a fresh `200` is captured with whatever validators it does
+   * send). Default `false` — behavior is byte-identical to before this option
+   * existed. See docs/decisions/http-validators.md and kontourai/ops#75.
+   */
+  revalidate?: boolean;
 }
 
 /**
@@ -106,6 +119,27 @@ export interface Snapshot {
   redirects?: string[];
   /** true when this snapshot was served from a store (replay) rather than the network. */
   fromCache?: boolean;
+  /**
+   * The response `ETag` validator, verbatim (weak `W/"..."` prefix preserved),
+   * when the server sent one. Stored so a later {@link SourceConfig.revalidate}
+   * fetch can send it back as `If-None-Match` for a cheap conditional GET.
+   */
+  etag?: string;
+  /**
+   * The response `Last-Modified` validator, verbatim (an HTTP-date string), when
+   * the server sent one. Sent back as `If-Modified-Since` on a later
+   * {@link SourceConfig.revalidate} fetch.
+   */
+  lastModified?: string;
+  /**
+   * True ONLY on the snapshot returned when a {@link SourceConfig.revalidate}
+   * conditional GET produced a `304 Not Modified` — i.e. this is the byte-
+   * identical PRIOR snapshot, re-served without a body transfer because the
+   * resource was unchanged. It is also `fromCache: true`. A normal live `200`
+   * (even one that captured validators) never sets this. Lets a caller record a
+   * cheap "checked, still current" freshness event without a hash compare.
+   */
+  notModified?: boolean;
 }
 
 /** The discriminant classes of a non-throwing fetch failure. */
@@ -117,7 +151,21 @@ export type FetchErrorKind =
   | "network"
   | "http-error"
   | "too-many-redirects"
-  | "no-snapshot";
+  | "no-snapshot"
+  /**
+   * An OPTIONAL external binary the adapter shells out to is not installed —
+   * currently `yt-dlp` for the YouTube/transcript adapter (src/fetch/youtube.ts),
+   * mirroring the optional-peer-dependency posture of the Anthropic SDK. The
+   * adapter DEGRADES to this typed error rather than throwing, so a consumer
+   * without the binary pays nothing and gets a clear, branchable signal.
+   */
+  | "dependency-missing"
+  /**
+   * The external acquisition tool ran but failed (non-zero exit, unparseable
+   * output) — e.g. `yt-dlp` erroring on a private/removed video. Distinct from
+   * `network` (our own fetch) and `dependency-missing` (tool absent).
+   */
+  | "adapter-error";
 
 /**
  * A typed, non-throwing fetch failure. `status` is populated for `http-error`.
@@ -208,6 +256,16 @@ export interface FetchSourceOptions {
   politenessState?: Map<string, number>;
   /** per-origin robots.txt cache; inject a private map to isolate. */
   robotsCache?: Map<string, RobotsRules>;
+  /**
+   * Snapshot store consulted ONLY when {@link SourceConfig.revalidate} is `true`:
+   * `store.latest(config.id)` supplies the prior snapshot whose `etag` /
+   * `lastModified` become the `If-None-Match` / `If-Modified-Since` request
+   * headers, and — on a `304` — the snapshot re-served as `notModified`. Unused
+   * (never read) when `revalidate` is falsy, so a plain fetch never needs a
+   * store. `fetchSource` only READS the store; persisting a fresh snapshot stays
+   * the caller's / `fetchAndExtract`'s job.
+   */
+  store?: SnapshotStore;
 }
 
 /** Parsed, UA-resolved robots rules for one origin. `null` group = allow-all. */
