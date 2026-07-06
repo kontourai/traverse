@@ -53,6 +53,10 @@ export interface FetchAndExtractOptions {
   maxChunks?: number;
   /** injectable fetch/time seams forwarded to `fetchSource()` (network-free tests). */
   fetchOptions?: FetchSourceOptions;
+  /** ceiling on provider.extract() calls in one run, forwarded to extract() (see ExtractInput.maxProviderCalls). */
+  maxProviderCalls?: number;
+  /** ceiling on accumulated raw.tokensUsed in one run, forwarded to extract() (see ExtractInput.maxTotalTokens). */
+  maxTotalTokens?: number;
 }
 
 export interface FetchAndExtractResult {
@@ -151,6 +155,17 @@ export async function fetchAndExtract(
     chunkSize: opts.chunkSize,
     chunkOverlap: opts.chunkOverlap,
     maxChunks: opts.maxChunks,
+    maxProviderCalls: opts.maxProviderCalls,
+    maxTotalTokens: opts.maxTotalTokens,
+    // pdfTextExtractor is deliberately NOT forwarded here: Snapshot.body is
+    // typed `string` (see traverse#23 — binary content is corrupted before
+    // it ever reaches a Snapshot), so when a replayed/fetched snapshot's
+    // contentType is "pdf", extract()'s PDF pre-step already fails with
+    // pdfBytesRequiredError() (src/extract.ts:141-152) before any
+    // pdfTextExtractor would be consulted. Forwarding this option here
+    // would be a dead option that traps consumers into configuring
+    // something that can never run through this seam. Revisit once #23
+    // gives Snapshot a binary-safe body representation.
   });
 
   return { fetch: fetchResult, extraction, sourceRef };

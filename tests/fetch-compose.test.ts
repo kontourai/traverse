@@ -9,11 +9,21 @@ import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 import { sha256Hex } from "../src/fetch/fetch-source.js";
 import { prepareContent } from "../src/content-prep.js";
 import type { SourceConfig } from "../src/fetch/types.js";
+import { readFileSync } from "node:fs";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
-import { createMockExtractionProvider } from "./fixtures/mock-provider.js";
+import { createMockExtractionProvider, createRegexScanProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 
 const PAGE = "<h1>Beginner Bouldering Session</h1>";
+
+// Reused from tests/cost-guard.test.ts: cardsHtml structurally chunks into
+// exactly 6 chunks at chunkSize 400 (12 cards, ~2 per chunk) — the same
+// "6 natural calls" baseline used there for cost-guard ceiling scenarios.
+const cardsHtml = readFileSync(
+  new URL("../../tests/fixtures/repeated-cards-page.html", import.meta.url),
+  "utf8",
+);
+const CHUNK_SIZE = 400;
 
 function cfg(overrides: Partial<SourceConfig> = {}): SourceConfig {
   return { id: "listing-1", url: "https://example.test/listing", respectRobots: false, ...overrides };
@@ -192,5 +202,92 @@ describe("fetchAndExtract() — revalidate wiring", () => {
     assert.equal(second.calls[0].headers["If-None-Match"], ETAG);
     assert.equal(result.fetch.snapshot!.notModified, true);
     assert.equal(result.fetch.snapshot!.fromCache, true);
+  });
+});
+
+describe("fetchAndExtract() — cost-guard forwarding", () => {
+  async function seededStore() {
+    const store = createInMemorySnapshotStore();
+    const config = cfg();
+    await store.put({
+      sourceId: config.id,
+      url: config.url,
+      fetchedAt: "2026-07-06T00:00:00.000Z",
+      status: 200,
+      contentType: "html",
+      body: cardsHtml,
+      bodyHash: sha256Hex(cardsHtml),
+    });
+    return store;
+  }
+
+  it("bounds provider calls to maxProviderCalls through the full fetchAndExtract -> extract() path, with the same ceiling warning extract() asserts directly", async () => {
+    const store = await seededStore();
+    const provider = createRegexScanProvider();
+    const result = await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "replay",
+      chunkSize: CHUNK_SIZE,
+      maxProviderCalls: 1,
+    });
+
+    assert.equal(result.extraction!.providerCalls, 1, "exactly 1 call, not the natural 6");
+    assert.equal(provider.callContents.length, 1, "the provider itself recorded exactly 1 call");
+    assert.ok(result.extraction!.proposals.length > 0, "partial proposals from the one call survive");
+    assert.ok(
+      result.extraction!.warnings?.some(
+        (w) => w === "stopped after 1 provider call(s): maxProviderCalls (1) reached; 5 chunk(s) not processed",
+      ),
+      `expected ceiling warning, got: ${JSON.stringify(result.extraction!.warnings)}`,
+    );
+  });
+
+  it("control: without maxProviderCalls, the same replayed content issues all 6 natural provider calls", async () => {
+    const store = await seededStore();
+    const provider = createRegexScanProvider();
+    const result = await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "replay",
+      chunkSize: CHUNK_SIZE,
+    });
+
+    assert.equal(result.extraction!.providerCalls, 6);
+    assert.ok(
+      result.extraction!.providerCalls > 1,
+      "proves the guard option (not the fixture) causes the cap above",
+    );
+    assert.ok(!result.extraction!.warnings?.some((w) => /maxProviderCalls/.test(w)));
+  });
+
+  it("maxTotalTokens forwards through the same path: accumulated tokensUsed ceiling stops issuing calls", async () => {
+    const store = await seededStore();
+    const provider = createRegexScanProvider({ tokensUsed: 100 });
+    const result = await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "replay",
+      chunkSize: CHUNK_SIZE,
+      maxTotalTokens: 250,
+    });
+
+    // Same "checked before each call" behavior as tests/cost-guard.test.ts's
+    // direct-extract() maxTotalTokens coverage: 2 calls (200 < 250) still
+    // issue a 3rd, then the accumulated 300 trips the ceiling before a 4th.
+    assert.equal(provider.callContents.length, 3);
+    assert.equal(result.extraction!.providerCalls, 3);
+    assert.equal(result.extraction!.totalTokensUsed, 300);
+    assert.ok(
+      result.extraction!.warnings?.some(
+        (w) =>
+          w ===
+          "stopped after 3 provider call(s): maxTotalTokens (250) reached (300 tokens used); 3 chunk(s) not processed",
+      ),
+      `expected ceiling warning, got: ${JSON.stringify(result.extraction!.warnings)}`,
+    );
   });
 });
