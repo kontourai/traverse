@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.1](https://github.com/kontourai/traverse/compare/v0.10.0...v0.10.1) (2026-07-06)
+
+
+### Fixes
+
+* **fetch:** forward maxProviderCalls/maxTotalTokens through fetchAndExtract ([c4505ba](https://github.com/kontourai/traverse/commit/c4505ba83e7705f63796b9980b52e6a3bcbf8f4c))
+* **fetch:** forward maxProviderCalls/maxTotalTokens through fetchAndExtract ([#28](https://github.com/kontourai/traverse/issues/28)) ([05b9c1d](https://github.com/kontourai/traverse/commit/05b9c1ddcc20765040f43c4008515e8f4635b7bc))
+* remove delivery trust bundle — content-boundary violation (private vertical names in public repo) ([17cd51b](https://github.com/kontourai/traverse/commit/17cd51ba7965ebacfe9c4b271338a2475a765d8e))
+
 ## [0.10.0](https://github.com/kontourai/traverse/compare/v0.9.0...v0.10.0) (2026-07-06)
 
 
