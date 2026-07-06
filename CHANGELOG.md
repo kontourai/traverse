@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/kontourai/traverse/compare/v0.10.1...v0.11.0) (2026-07-06)
+
+
+### Features
+
+* **fetch:** crawlSource — bounded same-host crawl frontier (slice 1) ([43898ca](https://github.com/kontourai/traverse/commit/43898ca0f445f16d9f309453b3a36bd40fd8f3b3))
+* **fetch:** crawlSource — bounded same-host crawl frontier (slice 1) ([#38](https://github.com/kontourai/traverse/issues/38)) ([f106e43](https://github.com/kontourai/traverse/commit/f106e43544282092c344c91d78c3b42e8d35aa59))
+
 ## [0.10.1](https://github.com/kontourai/traverse/compare/v0.10.0...v0.10.1) (2026-07-06)
 
 
