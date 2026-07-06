@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/kontourai/traverse/compare/v0.9.0...v0.10.0) (2026-07-06)
+
+
+### Features
+
+* **fetch,content-prep:** YouTube/VTT transcript adapter + HTTP validators ([#31](https://github.com/kontourai/traverse/issues/31)) ([#32](https://github.com/kontourai/traverse/issues/32)) ([e3039b8](https://github.com/kontourai/traverse/commit/e3039b8687e8ee482a9f3e890ca1fd368add7b99))
+
 ## [0.9.0](https://github.com/kontourai/traverse/compare/v0.8.0...v0.9.0) (2026-07-04)
 
 
