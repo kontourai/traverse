@@ -30,6 +30,14 @@ export type {
   FetchAndExtractResult,
   ParsedSnapshotSourceRef,
 } from "./compose.js";
+export { crawlSource } from "./crawl.js";
+export type { CrawlOptions, CrawlManifest, CrawlPageOutcome } from "./crawl.js";
+export {
+  DEFAULT_MAX_PAGES,
+  MAX_CRAWL_PAGES,
+  DEFAULT_MAX_DEPTH,
+  MAX_CRAWL_DEPTH,
+} from "./crawl.js";
 export {
   fetchYouTube,
   parseYouTubeUrl,

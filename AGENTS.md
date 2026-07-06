@@ -3,9 +3,11 @@
 Traverse is `@kontourai/traverse`: a schema-directed content-extraction library.
 It turns prepared content plus a caller-supplied `TargetFieldSchema[]` into
 provenance-bearing `ExtractionProposal[]` in Survey's shape. Traverse never
-decides truth, crawls, ranks, resolves values, or owns review policy — the
-caller's own review path does. Every proposal is a reviewable record with an
-excerpt and locator.
+decides truth, ranks, resolves values, or owns review policy — the caller's
+own review path does. (The extraction core never crawls either; the opt-in
+`@kontourai/traverse/fetch` subpath's `crawlSource` offers a bounded, same-host
+crawl on top of the single-page fetcher — see `docs/decisions/crawl-frontier.md`.)
+Every proposal is a reviewable record with an excerpt and locator.
 
 ## Source Of Truth
 

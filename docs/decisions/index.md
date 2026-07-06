@@ -11,6 +11,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | Topic | Status | Decision |
 | --- | --- | --- |
 | [content-preparation](./content-preparation.md) | current | Content preparation |
+| [crawl-frontier](./crawl-frontier.md) | current | Crawl frontier (bounded same-host link-following) |
 | [extraction-cost-guard](./extraction-cost-guard.md) | current | Extraction cost guard |
 | [extraction-proposals](./extraction-proposals.md) | current | Extraction proposals |
 | [fetch-and-snapshot](./fetch-and-snapshot.md) | needs-decision | Fetch and snapshot |

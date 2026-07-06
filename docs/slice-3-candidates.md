@@ -8,10 +8,10 @@ promised; this is a backlog note, not a plan.
 
 ## Explicitly deferred by the Slice-2 brief
 
-- **Multi-page link-following / crawl frontier** — discovering and queueing
-  further URLs from a fetched page. Slice 2 fetches exactly the one URL it is
-  given. This is the core "crawler" capability and the natural heart of a later
-  slice.
+- **Multi-page link-following / crawl frontier** — shipped, in bounded form, as
+  `crawlSource` (same-host BFS only; cross-host crawling remains out of
+  scope). Design decisions recorded in
+  [`docs/decisions/crawl-frontier.md`](decisions/crawl-frontier.md).
 - **Headless-browser rendering** — executing JavaScript to fetch content that
   is not present in the server-rendered HTML. Slice 2 does a plain HTTP GET.
 - **Scheduling** — recurring/deferred fetch runs, cross-process or distributed

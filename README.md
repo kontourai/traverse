@@ -6,9 +6,12 @@ review-ready extraction proposals** in Survey's shape.
 Traverse takes prepared content (HTML or text) plus a caller-supplied list of
 target fields, asks a pluggable extraction provider to propose field values,
 and normalizes those into `ExtractionProposal[]` — each one a reviewable record
-carrying a verbatim `excerpt` and a `locator`. Traverse is a **proposer only**:
-it never resolves a value, never crawls, never ranks, and never owns review
-policy. See [`docs/adr/0001-proposals-only.md`](docs/adr/0001-proposals-only.md).
+carrying a verbatim `excerpt` and a `locator`. Traverse's extraction core is a
+**proposer only**: it never resolves a value, never ranks, and never owns
+review policy (the opt-in `@kontourai/traverse/fetch` subpath's `crawlSource`
+offers a bounded same-host crawl — see "Fetching & snapshots" below — but
+extraction itself still never crawls). See
+[`docs/adr/0001-proposals-only.md`](docs/adr/0001-proposals-only.md).
 
 ## Install
 
@@ -516,8 +519,10 @@ HTTP errors, and bad config surface as a typed `FetchError` on the result. It
 has **zero runtime dependencies** (global `fetch` + `node:crypto`/`node:fs`).
 
 Out of scope for this layer (see
-[`docs/slice-3-candidates.md`](docs/slice-3-candidates.md)): multi-page
-link-following / crawl frontier, headless-browser rendering, and scheduling.
+[`docs/slice-3-candidates.md`](docs/slice-3-candidates.md)): headless-browser
+rendering and scheduling. Multi-page link-following now has a bounded,
+same-host-only crawl frontier (`crawlSource`, below) — cross-host crawling is
+still out of scope.
 
 ### Standalone fetch
 
@@ -556,6 +561,35 @@ If `/robots.txt` is itself unreachable or 5xx, the fetch **fails open** with a
 warning (a single-page fetch should not be blocked by robots *infra* problems —
 see [`docs/adr/0002`](docs/adr/0002-fetch-snapshot-slice2.md)). Politeness is a
 per-host minimum delay, enforced in-process.
+
+### Bounded same-host crawl
+
+`crawlSource(seed, opts)` is a thin BFS driver on top of `fetchSource()` /
+`replaySource()`: it follows same-host links discovered in each fetched page's
+HTML, bounded by `maxPages` and `maxDepth`, and never throws. It reuses the
+same robots/politeness/replay guarantees as a single `fetchSource()` call —
+see [`docs/decisions/crawl-frontier.md`](docs/decisions/crawl-frontier.md) for
+the query-handling, replay, and same-host-boundary decisions.
+
+```ts
+import { crawlSource } from "@kontourai/traverse/fetch";
+
+const manifest = await crawlSource(
+  { id: "listing-1", url: "https://example.com/listing" },
+  { maxPages: 20, maxDepth: 2 },
+);
+
+// manifest.seed              — { id, url } the crawl started from
+// manifest.pages             — CrawlPageOutcome[] in BFS discovery order,
+//                               each { url, depth, fetch: FetchResult, sourceRef? }
+// manifest.warnings          — per-page warnings plus a cap-reached note when truncated
+// manifest.truncated         — true if maxPages stopped the crawl before the
+//                               frontier was exhausted
+```
+
+Cross-host links are never followed (a page whose own fetch redirects
+off-host is still recorded, but its links stop the frontier there); headless
+rendering and scheduling remain out of scope for this layer.
 
 ### Capture & replay
 
