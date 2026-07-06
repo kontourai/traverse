@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/kontourai/traverse/compare/v0.8.0...v0.9.0) (2026-07-04)
+
+
+### Features
+
+* **content-prep:** PDF extraction via injected PdfTextExtractor seam ([#26](https://github.com/kontourai/traverse/issues/26)) ([298e9ea](https://github.com/kontourai/traverse/commit/298e9ea1574d3e849f7d8da3bea7a0f41d6914f0)), closes [#21](https://github.com/kontourai/traverse/issues/21)
+* **schema:** inferenceType — honest grounding semantics per field ([#29](https://github.com/kontourai/traverse/issues/29)) ([4c9a015](https://github.com/kontourai/traverse/commit/4c9a0153cc3eed2a7d192ee825841c46bab90f0f)), closes [#24](https://github.com/kontourai/traverse/issues/24)
+
 ## [0.8.0](https://github.com/kontourai/traverse/compare/v0.7.0...v0.8.0) (2026-07-03)
 
 
