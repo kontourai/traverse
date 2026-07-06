@@ -1,0 +1,22 @@
+WEBVTT
+Kind: captions
+Language: en
+
+NOTE this is a comment block yt-dlp sometimes emits
+
+00:00:00.000 --> 00:00:02.000 align:start position:0%
+ 
+
+00:00:00.000 --> 00:00:02.500 align:start position:0%
+the<00:00:00.480><c> quick</c><00:00:01.000><c> brown</c>
+
+00:00:02.500 --> 00:00:05.000 align:start position:0%
+the quick brown
+fox<00:00:03.000><c> jumps</c>
+
+00:00:05.000 --> 00:00:07.500 align:start position:0%
+fox jumps
+over<00:00:05.500><c> rock</c><00:00:06.000><c> &amp;</c><00:00:06.500><c> roll</c>
+
+00:00:07.500 --> 00:00:09.000 align:start position:0%
+over rock &amp; roll

@@ -17,8 +17,17 @@
  * here so callers can pass it through a stable union today, but content-prep for
  * it is deferred (returns a typed not-yet-implemented error at 0.1.0) — see
  * src/content-prep.ts.
+ *
+ * `"transcript"` is a WebVTT caption/subtitle track (e.g. the auto-captions a
+ * YouTube fetch acquires via yt-dlp — see src/fetch/youtube.ts). content-prep
+ * cleans it to plain transcript text (cue timings/headers/inline tags stripped,
+ * overlapping auto-caption lines deduped) via `vttToText`, so an extraction
+ * proposal's `excerpt`/`locator` anchor to that CLEANED text exactly as they do
+ * for the Markdown of an `"html"` page. Raw VTT is what a snapshot stores (the
+ * fetch cache stays replayable); cleaning happens at prep time, mirroring the
+ * raw-HTML -> Markdown split.
  */
-export type ContentType = "html" | "text" | "pdf";
+export type ContentType = "html" | "text" | "pdf" | "transcript";
 
 /**
  * A caller-owned description of one field to extract. Traverse defines ZERO

@@ -219,6 +219,25 @@ export async function fetchSource(
   };
   headers["User-Agent"] = userAgent;
 
+  // Conditional GET (opt-in). When `revalidate` is set and a prior snapshot for
+  // this id carries HTTP validators, send them so an unchanged resource returns
+  // a bodyless 304 (handled in the loop below). No store / no validators / no
+  // opt-in => nothing added and behavior is byte-identical to before. The prior
+  // snapshot is also what a 304 re-serves, so it is captured here for the loop.
+  let prior: Snapshot | undefined;
+  if ((config.revalidate ?? false) && opts.store) {
+    // A custom store could reject; never-throws means we degrade to an
+    // unconditional fetch (with a warning) rather than propagate.
+    try {
+      prior = await opts.store.latest(config.id);
+    } catch (err) {
+      warnings.push(`revalidate: prior-snapshot lookup failed (${err instanceof Error ? err.message : String(err)}); fetching unconditionally`);
+      prior = undefined;
+    }
+    if (prior?.etag) headers["If-None-Match"] = prior.etag;
+    if (prior?.lastModified) headers["If-Modified-Since"] = prior.lastModified;
+  }
+
   // --- redirect loop (manual, bounded, robots-checked per hop) ---
   const redirects: string[] = [];
   let currentUrl = startUrl;
@@ -255,6 +274,29 @@ export async function fetchSource(
 
     if (attempt.error) return withWarnings({ error: attempt.error }, warnings);
     const response = attempt.response!;
+
+    // 304 Not Modified: a conditional GET (If-None-Match / If-Modified-Since)
+    // confirmed the resource is unchanged, so there is no body to read — re-serve
+    // the byte-identical prior snapshot, flagged `notModified` (and `fromCache`).
+    // Checked BEFORE the 3xx redirect branch below, since 304 falls in that
+    // range but is emphatically not a redirect. Conditional headers are only ever
+    // sent when a `prior` exists, so a 304 without one is a server-side surprise
+    // rather than our doing — surface it as a typed http-error.
+    if (response.status === 304) {
+      if (!prior) {
+        return withWarnings(
+          {
+            error: {
+              kind: "http-error",
+              status: 304,
+              message: `unexpected 304 Not Modified from ${currentUrl.href} with no prior snapshot to revalidate`,
+            },
+          },
+          warnings,
+        );
+      }
+      return withWarnings({ snapshot: { ...prior, fromCache: true, notModified: true } }, warnings);
+    }
 
     // redirects (3xx with a Location).
     if (response.status >= 300 && response.status < 400) {
@@ -313,6 +355,13 @@ export async function fetchSource(
       bodyHash: sha256Hex(body),
     };
     if (redirects.length > 0) snapshot.redirects = redirects;
+    // Capture HTTP validators (verbatim) so a later `revalidate` fetch can turn
+    // an unchanged re-fetch into a cheap 304. Absent headers leave the fields
+    // unset — the sha256 body-hash compare remains the drift signal in that case.
+    const etag = response.headers.get("etag");
+    if (etag) snapshot.etag = etag;
+    const lastModified = response.headers.get("last-modified");
+    if (lastModified) snapshot.lastModified = lastModified;
     return withWarnings({ snapshot }, warnings);
   }
 

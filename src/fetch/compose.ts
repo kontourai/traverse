@@ -109,7 +109,15 @@ async function acquire(config: SourceConfig, opts: FetchAndExtractOptions): Prom
     }
     return replaySource(opts.store, config.id);
   }
-  const result = await fetchSource(config, opts.fetchOptions ?? {});
+  // Thread the composition-level `store` into fetchSource's options when the
+  // caller didn't set one explicitly, so a `SourceConfig.revalidate` conditional
+  // GET can look up the prior snapshot (fetchSource reads `store.latest(id)`).
+  // Without this, `fetchAndExtract` with `store` + `revalidate: true` would
+  // silently fetch unconditionally every time.
+  const fetchOptions: FetchSourceOptions = { ...(opts.fetchOptions ?? {}) };
+  if (opts.store && fetchOptions.store === undefined) fetchOptions.store = opts.store;
+
+  const result = await fetchSource(config, fetchOptions);
   if (mode === "live-with-capture" && result.snapshot && opts.store) {
     await opts.store.put(result.snapshot);
   }

@@ -158,3 +158,39 @@ describe("fetchAndExtract() — capture + replay parity", () => {
     assert.equal(result.fetch.error!.kind, "invalid-config");
   });
 });
+
+describe("fetchAndExtract() — revalidate wiring", () => {
+  it("threads the composition store into fetchSource so a config.revalidate conditional GET works", async () => {
+    const store = createInMemorySnapshotStore();
+    const provider = mockProvider();
+    const ETAG = '"listing-v1"';
+
+    // First fetch captures the ETag onto the stored snapshot.
+    const first = fakeFetch({
+      "https://example.test/listing": { headers: { "content-type": "text/html", etag: ETAG }, body: PAGE },
+    });
+    await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "live-with-capture",
+      fetchOptions: { fetch: first, sleep: async () => {}, clock: () => "2026-07-02T00:00:00.000Z" },
+    });
+
+    // Re-check with revalidate: compose must pass `store` down so fetchSource can
+    // read the prior snapshot's validator and send If-None-Match — a 304 re-serves
+    // the prior snapshot marked notModified.
+    const second = fakeFetch({ "https://example.test/listing": { status: 304 } });
+    const result = await fetchAndExtract(cfg({ revalidate: true }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "live",
+      fetchOptions: { fetch: second, sleep: async () => {}, clock: () => "2026-07-03T00:00:00.000Z" },
+    });
+
+    assert.equal(second.calls[0].headers["If-None-Match"], ETAG);
+    assert.equal(result.fetch.snapshot!.notModified, true);
+    assert.equal(result.fetch.snapshot!.fromCache, true);
+  });
+});

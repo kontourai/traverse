@@ -12,6 +12,7 @@ export {
   prepareContent,
   htmlToText,
   htmlToMarkdown,
+  vttToText,
   preparePdfText,
   resolvePdfPage,
   type PrepMode,
