@@ -4,11 +4,14 @@ Traverse is `@kontourai/traverse`, a schema-directed content-extraction
 library. Given prepared content (HTML or text) and a caller-supplied list of
 target fields, it asks a pluggable extraction provider to propose field values,
 then normalizes those into provenance-bearing proposals shaped for Survey's
-producer pipeline. Traverse is a PROPOSER only: it never resolves a value, never
-crawls, never ranks, and never owns review policy. Every proposal it emits is a
-reviewable record carrying a verbatim excerpt and a locator. Traverse does not
-depend on Survey at runtime; it only produces output that maps cleanly onto
-Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
+producer pipeline. Traverse is a PROPOSER only: the extraction core never
+resolves a value, never ranks, and never owns review policy (the opt-in fetch
+subpath's `crawlSource` now offers a bounded same-host crawl — see "Crawl
+Frontier" below — but extraction itself still never crawls). Every proposal it
+emits is a reviewable record carrying a verbatim excerpt and a locator. Traverse
+does not depend on Survey at runtime; it only produces output that maps cleanly
+onto Survey's `Extraction`/`RawSource` types (proven by a compile-time compat
+test).
 
 ## Term Glossary
 
@@ -65,6 +68,14 @@ Survey's `Extraction`/`RawSource` types (proven by a compile-time compat test).
   `fetchAndExtract`. Distinct vocabulary from extraction (`SourceConfig`,
   `Snapshot`, `SnapshotStore`, `FetchResult`) kept out of the package root so a
   caller who only extracts imports nothing from it.
+- **Crawl Frontier**: the `@kontourai/traverse/fetch` subpath's opt-in, bounded
+  same-host BFS link-following (`crawlSource`, returning a `CrawlManifest` of
+  per-page `CrawlPageOutcome`s). A thin driver over `fetchSource`/
+  `replaySource` — no separate HTTP/robots/politeness implementation — that
+  stops at `maxPages`/`maxDepth` and never crosses origins. Fetch-layer only
+  (no `extract()` composition); see
+  [`docs/decisions/crawl-frontier.md`](docs/decisions/crawl-frontier.md) for
+  the query-handling and replay-semantics decisions.
 - **Field Path Normalization**: `extract()`'s recovery rule for a
   provider-emitted `fieldPath` that carries concrete array indices (e.g.
   `"schedules[0].startDate"`) against a `targetSchema` that declares the

@@ -1,0 +1,66 @@
+<!--
+  Crawl-frontier fixture site (traverse#38, crawl-frontier-slice1).
+
+  Intended link graph (all URLs same-origin under https://example.test/crawl-site/
+  unless noted). Tests wire these files' bodies to fake fetch URLs via
+  tests/fixtures/fake-fetch.ts — this comment documents the graph shape so the
+  test author does not have to re-derive it from the markup:
+
+    home.html   (seed, depth 0)
+      -> about.html                              (relative link)          depth 1
+      -> https://example.test/crawl-site/gear.html (absolute same-host)   depth 1
+      -> https://other-example.test/promo.html    (cross-host, EXCLUDED — different origin)
+      -> mailto:hello@example.test                (non-http, EXCLUDED — not http/https)
+      -> home.html#top                            (fragment link — resolves back to the
+                                                     seed URL itself once the fragment is
+                                                     stripped; already `seen`, so it does
+                                                     NOT enqueue a new page)
+
+    about.html  (depth 1, reached only from home.html)
+      -> contact.html                             (relative link)          depth 2
+
+    gear.html   (depth 1, reached only from home.html)
+      -> contact.html                             (relative link)          depth 2
+      -> gear.html?variant=green                  (query-variant link — kept verbatim per
+                                                     the query-handling decision, so this is
+                                                     a DISTINCT frontier URL from gear.html,
+                                                     not deduped by query stripping)
+
+    contact.html (depth 2 — reachable ONLY via about.html and/or gear.html, never
+                  linked directly from home.html; both about.html and gear.html link
+                  to it, so it is the dedup case: discovered twice, enqueued once)
+      -> home.html                                (relative link back to the seed —
+                                                     already `seen`, does not re-enqueue)
+
+  Distinct same-host URLs discoverable from this graph: home.html, about.html,
+  gear.html, contact.html, gear.html?variant=green — five, which is enough for a
+  small maxPages (e.g. 2) to demonstrably truncate the frontier.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Trailhead Supply Co. — Home</title>
+</head>
+<body>
+  <header>
+    <h1 id="top">Trailhead Supply Co.</h1>
+    <p class="tagline">Simple outdoor gear for weekend trips.</p>
+  </header>
+
+  <nav class="site-nav">
+    <a href="about.html">About</a>
+    <a href="https://example.test/crawl-site/gear.html">Gear</a>
+    <a href="https://other-example.test/promo.html">Our retail partner</a>
+    <a href="mailto:hello@example.test">Email us</a>
+    <a href="home.html#top">Back to top</a>
+  </nav>
+
+  <main>
+    <p>
+      We are a small shop that sells packs, stoves, and trail snacks. See our
+      About page for the shop's story, or browse the Gear catalog.
+    </p>
+  </main>
+</body>
+</html>
