@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fetchSource, sha256Hex, resolveContentType } from "../src/fetch/fetch-source.js";
+import { readFileSync } from "node:fs";
+import { fetchSource, sha256Hex, sha256Bytes, resolveContentType } from "../src/fetch/fetch-source.js";
 import type { FetchSourceOptions, SourceConfig } from "../src/fetch/types.js";
 import { DEFAULT_USER_AGENT } from "../src/fetch/types.js";
 import { fakeFetch, firingSchedule } from "./fixtures/fake-fetch.js";
+
+const pdfFixtureBytes = new Uint8Array(
+  readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
+);
 
 function cfg(overrides: Partial<SourceConfig> = {}): SourceConfig {
   return { id: "src-1", url: "https://example.test/page", respectRobots: false, ...overrides };
@@ -68,6 +73,54 @@ describe("fetchSource() — happy path & snapshot", () => {
     assert.equal(resolveContentType(undefined, "application/pdf"), "pdf");
     assert.equal(resolveContentType(undefined, "application/json"), "text");
     assert.equal(resolveContentType(undefined, null), "text");
+  });
+});
+
+describe("fetchSource() — binary body capture (traverse#23)", () => {
+  it("captures a pdf response as raw bodyBytes, leaves body empty, and hashes over the raw bytes", async () => {
+    const fetch = fakeFetch({
+      "https://example.test/doc.pdf": {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+        bytes: pdfFixtureBytes,
+      },
+    });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/doc.pdf" }),
+      fastOpts({ fetch }),
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.contentType, "pdf");
+    assert.equal(result.snapshot!.body, "");
+    assert.deepEqual(result.snapshot!.bodyBytes, pdfFixtureBytes);
+    assert.equal(result.snapshot!.bodyHash, sha256Bytes(pdfFixtureBytes));
+  });
+
+  it("degrades to lossy text capture with a warning when the fetchImpl has no arrayBuffer() for a binary content-type", async () => {
+    const fetch = fakeFetch({
+      "https://example.test/doc.pdf": {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+        body: "%PDF-1.4 corrupted-as-text",
+      },
+    });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/doc.pdf" }),
+      fastOpts({ fetch }),
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.contentType, "pdf");
+    assert.equal(result.snapshot!.bodyBytes, undefined);
+    assert.equal(result.snapshot!.body, "%PDF-1.4 corrupted-as-text");
+    assert.equal(result.snapshot!.bodyHash, sha256Hex("%PDF-1.4 corrupted-as-text"));
+    assert.ok(
+      result.warnings?.some((w) => /arrayBuffer/.test(w) && /binary/.test(w)),
+      `expected a missing-arrayBuffer warning, got: ${JSON.stringify(result.warnings)}`,
+    );
   });
 });
 
