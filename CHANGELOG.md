@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/kontourai/traverse/compare/v0.12.0...v0.13.0) (2026-07-07)
+
+
+### Features
+
+* **fetch:** rendered-fetch seam — SPA/JS pages through fetchSource/crawlSource via pluggable renderImpl ([#44](https://github.com/kontourai/traverse/issues/44)) ([e7f1832](https://github.com/kontourai/traverse/commit/e7f18326253b60db04014e795335dc349f1479a2))
+
 ## [0.12.0](https://github.com/kontourai/traverse/compare/v0.11.0...v0.12.0) (2026-07-07)
 
 
