@@ -70,7 +70,7 @@
 
 import { prepareAndChunk } from "./chunk.js";
 import type { PreparedChunks } from "./chunk.js";
-import { pdfBytesRequiredError, preparePdfText } from "./content-prep.js";
+import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import type {
   ExtractInput,
   ExtractionProposal,
@@ -86,10 +86,15 @@ import type {
  * import cycle; see docs/decisions/content-preparation.md, Stop-short risk 5).
  */
 const PDF_FULL_TEXT_CAP = 5_000_000;
+const IMAGE_FULL_TEXT_CAP = 5_000_000;
 
 const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
+
+function isImageContentType(contentType: ExtractInput["contentType"]): boolean {
+  return contentType === "png" || contentType === "jpeg";
+}
 
 export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const extractedAt = new Date().toISOString();
@@ -138,6 +143,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // path.
     let prepared: PreparedChunks;
     let pdfPageOffsets: number[] | undefined;
+    let ocrDerived = false;
     if (input.contentType === "pdf" && input.pdfTextExtractor) {
       if (!(input.content instanceof Uint8Array)) {
         return {
@@ -167,6 +173,35 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         maxChunks: input.maxChunks,
       });
       prepared.warnings = [...pdfPrep.warnings, ...prepared.warnings];
+    } else if (isImageContentType(input.contentType) && input.imageTextExtractor) {
+      if (!(input.content instanceof Uint8Array)) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: imageBytesRequiredError(),
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+      const imagePrep = await prepareImageText(input.content, input.imageTextExtractor, IMAGE_FULL_TEXT_CAP);
+      if (imagePrep.error !== undefined) {
+        return {
+          proposals: [],
+          raw: EMPTY_RAW,
+          extractedAt,
+          error: imagePrep.error,
+          providerCalls: 0,
+          totalTokensUsed: 0,
+        };
+      }
+      ocrDerived = true;
+      prepared = prepareAndChunk(imagePrep.text, "text", {
+        chunkSize: input.chunkSize,
+        chunkOverlap: input.chunkOverlap,
+        maxChunks: input.maxChunks,
+      });
+      prepared.warnings = [...imagePrep.warnings, ...prepared.warnings];
     } else {
       prepared = prepareAndChunk(input.content, input.contentType, {
         prep: input.prep,
@@ -278,6 +313,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
       if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
+      if (ocrDerived) failed.ocrDerived = true;
       return failed;
     }
 
@@ -306,6 +342,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // Attach the whole-page embedded-state sidecar once (never per chunk).
     if (prepared.embedded) result.embedded = prepared.embedded;
     if (pdfPageOffsets) result.pdfPageOffsets = pdfPageOffsets;
+    if (ocrDerived) result.ocrDerived = true;
     return result;
   } catch (err) {
     return {

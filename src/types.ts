@@ -27,7 +27,7 @@
  * fetch cache stays replayable); cleaning happens at prep time, mirroring the
  * raw-HTML -> Markdown split.
  */
-export type ContentType = "html" | "text" | "pdf" | "transcript";
+export type ContentType = "html" | "text" | "pdf" | "transcript" | "png" | "jpeg";
 
 /**
  * A caller-owned description of one field to extract. Traverse defines ZERO
@@ -237,6 +237,16 @@ export interface ExtractionResult {
    * docs/decisions/content-preparation.md.
    */
   pdfPageOffsets?: number[];
+  /**
+   * Present ONLY when contentType was an image type and
+   * ExtractInput.imageTextExtractor successfully produced the prepared OCR text
+   * used for extraction. PRESENCE (never explicit `false`) is the marker,
+   * mirroring Snapshot.rendered and Snapshot.bodyBytes: downstream trust
+   * surfaces can distinguish OCR-derived excerpts from text parsed directly
+   * from a source while the normal chars:<start>-<end> locator contract still
+   * anchors to the prepared OCR text.
+   */
+  ocrDerived?: true;
 }
 
 /**
@@ -309,6 +319,26 @@ export interface PdfTextExtractor {
 }
 
 /**
+ * Extracted text from one image document, produced by a caller-supplied
+ * {@link ImageTextExtractor}.
+ */
+export interface ImageExtractedText {
+  /** OCR text for the whole image. */
+  text: string;
+  /** non-fatal notes from OCR (e.g. low-confidence regions). */
+  warnings?: string[];
+}
+
+/**
+ * Injected seam for image OCR. Traverse ships NO default implementation and
+ * takes NO OCR/vision dependency; callers that need PNG/JPEG content-prep
+ * supply one.
+ */
+export interface ImageTextExtractor {
+  extract(bytes: Uint8Array): Promise<ImageExtractedText>;
+}
+
+/**
  * Input to the top-level `extract()` orchestration.
  */
 export interface ExtractInput {
@@ -327,6 +357,13 @@ export interface ExtractInput {
    * docs/decisions/content-preparation.md.
    */
   pdfTextExtractor?: PdfTextExtractor;
+  /**
+   * Injected image OCR extractor. With this unset, contentType "png"/"jpeg"
+   * keeps returning the generic binary-content typed error. When supplied,
+   * content must be Uint8Array bytes; Traverse uses the returned OCR text as
+   * prepared text and marks the result with `ocrDerived: true`.
+   */
+  imageTextExtractor?: ImageTextExtractor;
   /**
    * Per-chunk provider content budget (default 32_000). Each chunk handed to the
    * provider is truncated to this length. In the common single-chunk case this

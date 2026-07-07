@@ -23,7 +23,13 @@
  */
 
 import { extract } from "../extract.js";
-import type { ExtractionProvider, ExtractionResult, PdfTextExtractor, TargetFieldSchema } from "../types.js";
+import type {
+  ExtractionProvider,
+  ExtractionResult,
+  ImageTextExtractor,
+  PdfTextExtractor,
+  TargetFieldSchema,
+} from "../types.js";
 import { fetchSource } from "./fetch-source.js";
 import { replaySource } from "./snapshot-store.js";
 import type { FetchResult, FetchSourceOptions, Snapshot, SnapshotStore, SourceConfig } from "./types.js";
@@ -59,6 +65,8 @@ export interface FetchAndExtractOptions {
   maxTotalTokens?: number;
   /** injected PDF text extractor, forwarded to extract() (see ExtractInput.pdfTextExtractor). Needs a "pdf" contentType snapshot with bodyBytes (traverse#23) to ever run through this seam. */
   pdfTextExtractor?: PdfTextExtractor;
+  /** injected image OCR extractor, forwarded to extract() (see ExtractInput.imageTextExtractor). Needs a PNG/JPEG snapshot with bodyBytes to run through this seam. */
+  imageTextExtractor?: ImageTextExtractor;
 }
 
 export interface FetchAndExtractResult {
@@ -165,6 +173,7 @@ export async function fetchAndExtract(
     // requires (src/extract.ts:141-152) instead of the always-string body
     // that made this option a dead trap before (traverse#28's deferral).
     pdfTextExtractor: opts.pdfTextExtractor,
+    imageTextExtractor: opts.imageTextExtractor,
   });
 
   return { fetch: fetchResult, extraction, sourceRef };
