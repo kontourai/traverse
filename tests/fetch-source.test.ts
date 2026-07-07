@@ -5,6 +5,7 @@ import { fetchSource, sha256Hex, sha256Bytes, resolveContentType } from "../src/
 import type { FetchSourceOptions, SourceConfig } from "../src/fetch/types.js";
 import { DEFAULT_USER_AGENT } from "../src/fetch/types.js";
 import { fakeFetch, firingSchedule } from "./fixtures/fake-fetch.js";
+import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 
 const pdfFixtureBytes = new Uint8Array(
   readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
@@ -121,6 +122,41 @@ describe("fetchSource() — binary body capture (traverse#23)", () => {
       result.warnings?.some((w) => /arrayBuffer/.test(w) && /binary/.test(w)),
       `expected a missing-arrayBuffer warning, got: ${JSON.stringify(result.warnings)}`,
     );
+  });
+});
+
+describe("fetchSource() — revalidate with a binary prior snapshot (traverse#23)", () => {
+  it("a 304 revalidate preserves bodyBytes on a prior pdf snapshot (body stays empty, bodyHash unchanged)", async () => {
+    const store = createInMemorySnapshotStore();
+    const first = fakeFetch({
+      "https://example.test/doc.pdf": {
+        status: 200,
+        headers: { "content-type": "application/pdf", etag: '"pdf-v1"' },
+        bytes: pdfFixtureBytes,
+      },
+    });
+    const captured = await fetchSource(cfg({ url: "https://example.test/doc.pdf" }), fastOpts({ fetch: first }));
+    await store.put(captured.snapshot!);
+    assert.ok(captured.snapshot!.bodyBytes); // sanity: the prior snapshot really is binary
+
+    // Re-check: server confirms unchanged via 304, so no body is transferred.
+    const second = fakeFetch({ "https://example.test/doc.pdf": { status: 304 } });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/doc.pdf", revalidate: true }),
+      fastOpts({ fetch: second, store }),
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.notModified, true);
+    assert.equal(result.snapshot!.fromCache, true);
+    assert.equal(result.snapshot!.contentType, "pdf");
+    // The 304 re-serves the prior snapshot verbatim: bodyBytes must survive,
+    // body stays the binary-marker empty string, and bodyHash is unchanged.
+    assert.deepEqual(result.snapshot!.bodyBytes, pdfFixtureBytes);
+    assert.equal(result.snapshot!.body, "");
+    assert.equal(result.snapshot!.bodyHash, captured.snapshot!.bodyHash);
+    assert.equal(result.snapshot!.bodyHash, sha256Bytes(pdfFixtureBytes));
   });
 });
 
