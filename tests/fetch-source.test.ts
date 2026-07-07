@@ -5,6 +5,7 @@ import { fetchSource, sha256Hex, sha256Bytes, resolveContentType } from "../src/
 import type { FetchSourceOptions, SourceConfig } from "../src/fetch/types.js";
 import { DEFAULT_USER_AGENT } from "../src/fetch/types.js";
 import { fakeFetch, firingSchedule } from "./fixtures/fake-fetch.js";
+import { fakeRenderImpl } from "./fixtures/fake-render.js";
 import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 
 const pdfFixtureBytes = new Uint8Array(
@@ -331,5 +332,127 @@ describe("fetchSource() — politeness", () => {
     clockMs = 5000;
     await fetchSource(cfg({ minDelayMs: 1000 }), opts);
     assert.deepEqual(slept, []);
+  });
+});
+
+describe("fetchSource() — rendered fetch (traverse#41)", () => {
+  it("render: true with no renderImpl configured is a typed invalid-config error", async () => {
+    const result = await fetchSource(cfg({ render: true }), fastOpts());
+    assert.equal(result.snapshot, undefined);
+    assert.equal(result.error!.kind, "invalid-config");
+    assert.match(result.error!.message, /render is true but no FetchSourceOptions\.renderImpl/);
+  });
+
+  it("a successful render produces the documented Snapshot shape (AC3)", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>Rendered</h1>" },
+    });
+    const result = await fetchSource(cfg({ render: true }), fastOpts({ renderImpl }));
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.contentType, "html");
+    assert.equal(result.snapshot!.body, "<h1>Rendered</h1>");
+    assert.equal(result.snapshot!.bodyHash, sha256Hex("<h1>Rendered</h1>"));
+    assert.equal(result.snapshot!.rendered, true);
+    assert.equal(result.snapshot!.url, "https://example.test/page");
+    assert.equal(result.snapshot!.status, 200);
+    assert.equal(result.snapshot!.redirects, undefined);
+    assert.equal(result.snapshot!.etag, undefined);
+    assert.equal(result.snapshot!.lastModified, undefined);
+    assert.equal(renderImpl.calls.length, 1);
+    assert.equal(renderImpl.calls[0], "https://example.test/page");
+  });
+
+  it("uses renderResult.finalUrl/status when the renderer reports them", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<p>x</p>", finalUrl: "https://example.test/page/after-redirect", status: 201 },
+    });
+    const result = await fetchSource(cfg({ render: true }), fastOpts({ renderImpl }));
+    assert.equal(result.snapshot!.url, "https://example.test/page/after-redirect");
+    assert.equal(result.snapshot!.status, 201);
+  });
+
+  it("robots-denied short-circuits BEFORE renderImpl is ever invoked (AC2)", async () => {
+    const fetch = fakeFetch({
+      "https://example.test/robots.txt": { status: 200, body: "User-agent: *\nDisallow: /private" },
+    });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/private/x": { html: "<h1>should never render</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/private/x", render: true, respectRobots: true }),
+      fastOpts({ fetch, renderImpl }),
+    );
+    assert.equal(result.snapshot, undefined);
+    assert.equal(result.error!.kind, "robots-denied");
+    assert.equal(renderImpl.calls.length, 0);
+  });
+
+  it("allows a render when robots permits the requested URL", async () => {
+    const fetch = fakeFetch({
+      "https://example.test/robots.txt": { status: 200, body: "User-agent: *\nDisallow: /private" },
+    });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/public": { html: "<h1>ok</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/public", render: true, respectRobots: true }),
+      fastOpts({ fetch, renderImpl }),
+    );
+    assert.equal(result.snapshot!.rendered, true);
+    assert.equal(renderImpl.calls.length, 1);
+  });
+
+  it("renderImpl throwing maps to a typed adapter-error (AC6)", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { throws: "browser crashed" },
+    });
+    const result = await fetchSource(cfg({ render: true }), fastOpts({ renderImpl }));
+    assert.equal(result.snapshot, undefined);
+    assert.equal(result.error!.kind, "adapter-error");
+    assert.match(result.error!.message, /renderImpl failed for https:\/\/example\.test\/page/);
+    assert.match(result.error!.message, /browser crashed/);
+  });
+
+  it("renderImpl reporting a non-2xx status maps to a typed http-error with that status (AC6)", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>gone</h1>", status: 404 },
+    });
+    const result = await fetchSource(cfg({ render: true }), fastOpts({ renderImpl }));
+    assert.equal(result.snapshot, undefined);
+    assert.equal(result.error!.kind, "http-error");
+    assert.equal(result.error!.status, 404);
+  });
+
+  it("render + revalidate: true skips validators entirely and warns instead of silently no-op'ing (AC5)", async () => {
+    const store = createInMemorySnapshotStore();
+    await store.put({
+      sourceId: "src-1",
+      url: "https://example.test/page",
+      fetchedAt: "2026-07-01T00:00:00.000Z",
+      status: 200,
+      contentType: "html",
+      body: "<h1>prior</h1>",
+      bodyHash: sha256Hex("<h1>prior</h1>"),
+      etag: '"prior-etag"',
+      lastModified: "Wed, 01 Jul 2026 00:00:00 GMT",
+    });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>fresh render</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ render: true, revalidate: true }),
+      fastOpts({ renderImpl, store }),
+    );
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.rendered, true);
+    assert.equal(result.snapshot!.etag, undefined);
+    assert.equal(result.snapshot!.lastModified, undefined);
+    assert.equal(result.snapshot!.notModified, undefined);
+    assert.ok(
+      result.warnings?.some((w) => /revalidation has no effect for a rendered fetch/.test(w)),
+      `expected a validators-skip warning, got: ${JSON.stringify(result.warnings)}`,
+    );
   });
 });

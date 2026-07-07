@@ -115,8 +115,11 @@ a single `fetchSource()` call would already report it.
 
 Each discovered page's `SourceConfig` (`pageConfig` in `crawl.ts`) inherits the
 seed's crawl-wide FETCH BEHAVIOR: `minDelayMs`, `timeoutMs`, `retries`,
-`headers`, `userAgent`, `respectRobots`, `revalidate`. These are genuinely
-process-wide HTTP-client settings the whole frontier is meant to share.
+`headers`, `userAgent`, `respectRobots`, `revalidate`, `render` (traverse#41).
+These are genuinely process-wide HTTP-client settings the whole frontier is
+meant to share. `renderImpl` itself needs no `crawl.ts` change to reach every
+discovered page: it already flows through the existing
+`CrawlOptions.fetchOptions: FetchSourceOptions` forwarding, unchanged.
 
 Deliberately NOT inherited: `SourceConfig.contentType`. It is a per-RESOURCE
 identity hint — the caller telling `fetchSource` "the SEED page specifically

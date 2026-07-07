@@ -215,7 +215,7 @@ export async function crawlSource(seed: SourceConfig, opts: CrawlOptions = {}): 
       const { url, depth } = queue.shift()!;
       // Inherit the seed's crawl-wide FETCH BEHAVIOR (politeness delay,
       // timeout, retries, extra headers, user-agent identity, robots policy,
-      // conditional-GET opt-in) onto every discovered page — these are
+      // conditional-GET opt-in, render opt-in) onto every discovered page — these are
       // genuinely process-wide HTTP-client settings meant to apply uniformly
       // across the whole frontier. Deliberately NOT inherited: `contentType`.
       // That is a per-RESOURCE identity hint (the caller telling
@@ -236,6 +236,7 @@ export async function crawlSource(seed: SourceConfig, opts: CrawlOptions = {}): 
         userAgent: seed.userAgent,
         respectRobots: seed.respectRobots,
         revalidate: seed.revalidate,
+        render: seed.render,
       };
 
       const fetchResult =

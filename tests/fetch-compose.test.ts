@@ -14,6 +14,7 @@ import { fakeFetch } from "./fixtures/fake-fetch.js";
 import { createMockExtractionProvider, createRegexScanProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 import { createNaivePdfTextExtractor } from "./fixtures/naive-pdf-text-extractor.js";
+import { fakeRenderImpl } from "./fixtures/fake-render.js";
 
 const pdfFixtureBytes = new Uint8Array(
   readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
@@ -352,5 +353,60 @@ describe("fetchAndExtract() — cost-guard forwarding", () => {
       ),
       `expected ceiling warning, got: ${JSON.stringify(result.extraction!.warnings)}`,
     );
+  });
+});
+
+
+describe("fetchAndExtract() — rendered snapshot cost-guard parity (traverse#41 AC7)", () => {
+  it("a rendered snapshot flows through acquire() -> extract() unchanged: maxProviderCalls stops issuing calls identically to a wire-fetched snapshot of the same content", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/listing": { html: cardsHtml },
+    });
+    const provider = createRegexScanProvider();
+    const result = await fetchAndExtract(cfg({ render: true }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      mode: "live",
+      chunkSize: CHUNK_SIZE,
+      maxProviderCalls: 1,
+      fetchOptions: { renderImpl, sleep: async () => {}, random: () => 0 },
+    });
+
+    assert.equal(result.fetch.snapshot!.rendered, true);
+    assert.equal(result.fetch.snapshot!.contentType, "html");
+    // Same ceiling behavior the wire-fetched equivalent test above asserts:
+    // exactly 1 call, not the natural 6, with the identical warning text —
+    // compose.ts/extract() treat a rendered snapshot as just another Snapshot.
+    assert.equal(result.extraction!.providerCalls, 1, "exactly 1 call, not the natural 6");
+    assert.equal(provider.callContents.length, 1, "the provider itself recorded exactly 1 call");
+    assert.ok(result.extraction!.proposals.length > 0, "partial proposals from the one call survive");
+    assert.ok(
+      result.extraction!.warnings?.some(
+        (w) => w === "stopped after 1 provider call(s): maxProviderCalls (1) reached; 5 chunk(s) not processed",
+      ),
+      `expected ceiling warning, got: ${JSON.stringify(result.extraction!.warnings)}`,
+    );
+
+    // sourceRef provenance continuity holds for a rendered snapshot exactly
+    // as it does for a wire-fetched one.
+    const parsed = parseSnapshotSourceRef(result.sourceRef!);
+    assert.equal(parsed!.bodyHash, result.fetch.snapshot!.bodyHash);
+  });
+
+  it("control: without maxProviderCalls, a rendered snapshot of the same content issues all 6 natural provider calls (same as the wire-fetched control above)", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/listing": { html: cardsHtml },
+    });
+    const provider = createRegexScanProvider();
+    const result = await fetchAndExtract(cfg({ render: true }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      mode: "live",
+      chunkSize: CHUNK_SIZE,
+      fetchOptions: { renderImpl, sleep: async () => {}, random: () => 0 },
+    });
+
+    assert.equal(result.extraction!.providerCalls, 6);
+    assert.ok(!result.extraction!.warnings?.some((w) => /maxProviderCalls/.test(w)));
   });
 });

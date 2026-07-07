@@ -45,6 +45,22 @@ function snapWithBytes(overrides: Partial<Snapshot> = {}): Snapshot {
   };
 }
 
+/** A rendered snapshot (traverse#41) — see snap() for the plain-text default. */
+function snapRendered(overrides: Partial<Snapshot> = {}): Snapshot {
+  const body = overrides.body ?? "<h1>Rendered</h1>";
+  return {
+    sourceId: "src-rendered",
+    url: "https://example.test/spa",
+    fetchedAt: "2026-07-02T00:00:00.000Z",
+    status: 200,
+    contentType: "html",
+    body,
+    bodyHash: sha256Hex(body),
+    rendered: true,
+    ...overrides,
+  };
+}
+
 describe("filesystem snapshot store", () => {
   let root: string;
   before(async () => { root = await mkdtemp(path.join(os.tmpdir(), "traverse-store-")); });
@@ -124,6 +140,20 @@ describe("filesystem snapshot store", () => {
     assert.deepEqual(latest, s);
     assert.equal(latest!.bodyBytes, undefined);
   });
+
+  it("Snapshot.rendered survives a put -> latest/get round-trip (traverse#41 AC4)", async () => {
+    const store = createFilesystemSnapshotStore({ root });
+    const s = snapRendered();
+    await store.put(s);
+
+    const latest = await store.latest("src-rendered");
+    assert.deepEqual(latest, s);
+    assert.equal(latest!.rendered, true);
+
+    const byHash = await store.get("src-rendered", s.bodyHash);
+    assert.deepEqual(byHash, s);
+    assert.equal(byHash!.rendered, true);
+  });
 });
 
 describe("in-memory snapshot store", () => {
@@ -141,6 +171,15 @@ describe("in-memory snapshot store", () => {
     await store.put(original);
     const latest = await store.latest("src-pdf");
     assert.strictEqual(latest!.bodyBytes, original.bodyBytes, "same Uint8Array instance, not a clone");
+  });
+
+  it("Snapshot.rendered survives a put -> latest round-trip (traverse#41 AC4)", async () => {
+    const store = createInMemorySnapshotStore();
+    const s = snapRendered();
+    await store.put(s);
+    const latest = await store.latest("src-rendered");
+    assert.equal(latest!.rendered, true);
+    assert.deepEqual(latest, s);
   });
 });
 
