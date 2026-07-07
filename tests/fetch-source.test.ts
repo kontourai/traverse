@@ -73,6 +73,9 @@ describe("fetchSource() — happy path & snapshot", () => {
     assert.equal(resolveContentType("pdf", "text/html"), "pdf");
     assert.equal(resolveContentType(undefined, "application/xhtml+html"), "html");
     assert.equal(resolveContentType(undefined, "application/pdf"), "pdf");
+    assert.equal(resolveContentType(undefined, "image/png"), "png");
+    assert.equal(resolveContentType(undefined, "image/jpeg"), "jpeg");
+    assert.equal(resolveContentType(undefined, "image/jpg"), "jpeg");
     assert.equal(resolveContentType(undefined, "application/json"), "text");
     assert.equal(resolveContentType(undefined, null), "text");
   });
@@ -98,6 +101,28 @@ describe("fetchSource() — binary body capture (traverse#23)", () => {
     assert.equal(result.snapshot!.body, "");
     assert.deepEqual(result.snapshot!.bodyBytes, pdfFixtureBytes);
     assert.equal(result.snapshot!.bodyHash, sha256Bytes(pdfFixtureBytes));
+  });
+
+  it("captures a png response as raw bodyBytes, leaves body empty, and hashes over the raw bytes", async () => {
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const fetch = fakeFetch({
+      "https://example.test/image.png": {
+        status: 200,
+        headers: { "content-type": "image/png" },
+        bytes: pngBytes,
+      },
+    });
+    const result = await fetchSource(
+      cfg({ url: "https://example.test/image.png" }),
+      fastOpts({ fetch }),
+    );
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.contentType, "png");
+    assert.equal(result.snapshot!.body, "");
+    assert.deepEqual(result.snapshot!.bodyBytes, pngBytes);
+    assert.equal(result.snapshot!.bodyHash, sha256Bytes(pngBytes));
   });
 
   it("degrades to lossy text capture with a warning when the fetchImpl has no arrayBuffer() for a binary content-type", async () => {

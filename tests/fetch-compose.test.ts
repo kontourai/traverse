@@ -15,10 +15,12 @@ import { createMockExtractionProvider, createRegexScanProvider } from "./fixture
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 import { createNaivePdfTextExtractor } from "./fixtures/naive-pdf-text-extractor.js";
 import { fakeRenderImpl } from "./fixtures/fake-render.js";
+import type { ImageTextExtractor } from "../src/types.js";
 
 const pdfFixtureBytes = new Uint8Array(
   readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
 );
+const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
 const PAGE = "<h1>Beginner Bouldering Session</h1>";
 
@@ -266,6 +268,62 @@ describe("fetchAndExtract() — pdfTextExtractor forwarding (traverse#23)", () =
     assert.equal(start, expectedStart, "locator start matches the independently-derived pdf text offset");
     assert.equal(expected.text.slice(start, end), excerpt, "fullText.slice(start, end) === excerpt (offset fidelity)");
     assert.deepEqual(result.extraction!.pdfPageOffsets, expected.pageOffsets);
+  });
+});
+
+describe("fetchAndExtract() — imageTextExtractor forwarding", () => {
+  it("an image-content-type snapshot's bytes reach the injected imageTextExtractor end-to-end, producing verifiable OCR-derived proposals", async () => {
+    const excerpt = "Generic receipt total 42";
+    const imageTextExtractor: ImageTextExtractor & { calls: Uint8Array[] } = {
+      calls: [],
+      async extract(bytes: Uint8Array) {
+        this.calls.push(bytes);
+        return { text: `${excerpt}\nReference ABC`, warnings: ["ocr text requires review"] };
+      },
+    };
+
+    const fetch = fakeFetch({
+      "https://example.test/image.png": {
+        status: 200,
+        headers: { "content-type": "image/png" },
+        bytes: pngBytes,
+      },
+    });
+
+    const provider = createMockExtractionProvider({
+      proposals: [
+        {
+          fieldPath: "title",
+          candidateValue: excerpt,
+          confidence: 0.9,
+          provenance: { excerpt, locator: "provisional" },
+          extractor: "test-provider",
+        },
+      ],
+      raw: { response: "{}", model: "mock" },
+    });
+
+    const result = await fetchAndExtract(cfg({ url: "https://example.test/image.png" }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      imageTextExtractor,
+      mode: "live",
+      fetchOptions: { fetch, sleep: async () => {}, random: () => 0, politenessState: new Map(), robotsCache: new Map() },
+    });
+
+    assert.equal(result.fetch.snapshot!.contentType, "png");
+    assert.deepEqual(result.fetch.snapshot!.bodyBytes, pngBytes);
+    assert.equal(result.fetch.snapshot!.body, "");
+    assert.deepEqual(imageTextExtractor.calls, [pngBytes]);
+
+    assert.equal(result.extraction!.error, undefined);
+    assert.equal(result.extraction!.ocrDerived, true);
+    assert.equal(result.extraction!.proposals.length, 1);
+    assert.equal(result.extraction!.proposals[0].provenance.locator, `chars:0-${excerpt.length}`);
+    assert.ok(
+      result.extraction!.warnings?.some((w) => w === "ocr text requires review"),
+      `expected OCR warning, got: ${JSON.stringify(result.extraction!.warnings)}`,
+    );
   });
 });
 
