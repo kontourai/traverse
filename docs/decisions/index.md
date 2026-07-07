@@ -10,6 +10,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 
 | Topic | Status | Decision |
 | --- | --- | --- |
+| [binary-snapshot-bodies](./binary-snapshot-bodies.md) | current | Binary-safe Snapshot bodies and bodyHash domain |
 | [content-preparation](./content-preparation.md) | current | Content preparation |
 | [crawl-frontier](./crawl-frontier.md) | current | Crawl frontier (bounded same-host link-following) |
 | [extraction-cost-guard](./extraction-cost-guard.md) | current | Extraction cost guard |
