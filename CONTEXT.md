@@ -33,7 +33,11 @@ test).
   existing character-window chunker, unchanged. Traverse ships no default PDF
   parser and takes no new dependency for this. With no extractor supplied,
   `pdf` still returns the original typed not-implemented error, unchanged
-  since `0.1.0`. See `docs/decisions/content-preparation.md`.
+  since `0.1.0`. `png`/`jpeg` follow the same opt-in seam pattern through
+  `ImageTextExtractor` (`ExtractInput.imageTextExtractor`): Traverse ships no
+  OCR dependency, requires caller-supplied bytes, and uses returned OCR text as
+  prepared text. See `docs/decisions/content-preparation.md` and
+  `docs/decisions/image-content-preparation.md`.
 - **Extraction Provider** (`ExtractionProvider`): a pluggable backend that
   receives prepared content plus the target schema and returns
   `{ proposals, raw }`. The bundled Anthropic adapter (subpath
@@ -50,6 +54,9 @@ test).
   normalized `proposals`, the provider's `raw` response for audit, an
   `extractedAt` timestamp, an optional `error` (Traverse never throws for
   provider/parse failure), and optional `warnings` for dropped proposals.
+  `ocrDerived?: true` is an additive presence marker used only when image OCR
+  text was the prepared content, so trust surfaces can distinguish OCR-derived
+  excerpts from directly parsed text.
 - **Extraction Cost Guard**: `extract()`'s optional
   `ExtractInput.maxProviderCalls` / `maxTotalTokens` ceilings on a single
   run's provider spend. Once a configured ceiling is reached, `extract()`
@@ -90,6 +97,12 @@ test).
   Composes with `crawlSource` unchanged: `render` is inherited by every
   discovered page alongside `revalidate`/`respectRobots`. See
   [`docs/decisions/rendered-fetch.md`](docs/decisions/rendered-fetch.md).
+- **Binary Snapshot Body** (`Snapshot.bodyBytes`): raw response bytes captured
+  for binary-classified content types (`pdf`, `png`, `jpeg`) instead of lossy
+  UTF-8 text. Presence of `bodyBytes` is the binary marker; `Snapshot.body`
+  stays `""` and `bodyHash` hashes the raw bytes. This is what lets
+  `fetchAndExtract()` pass fetched PDF/image snapshots into caller-supplied
+  text-extractor seams.
 - **Field Path Normalization**: `extract()`'s recovery rule for a
   provider-emitted `fieldPath` that carries concrete array indices (e.g.
   `"schedules[0].startDate"`) against a `targetSchema` that declares the

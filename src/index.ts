@@ -14,7 +14,9 @@ export {
   htmlToMarkdown,
   vttToText,
   preparePdfText,
+  prepareImageText,
   resolvePdfPage,
+  imageBytesRequiredError,
   type PrepMode,
 } from "./content-prep.js";
 export {
@@ -50,4 +52,6 @@ export type {
   ExtractInput,
   PdfExtractedText,
   PdfTextExtractor,
+  ImageExtractedText,
+  ImageTextExtractor,
 } from "./types.js";

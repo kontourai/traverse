@@ -22,7 +22,7 @@
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
 import { inspectHtml } from "./embedded.js";
-import type { ContentType, EmbeddedState, PdfTextExtractor } from "./types.js";
+import type { ContentType, EmbeddedState, ImageTextExtractor, PdfTextExtractor } from "./types.js";
 
 /** Prep mode: "text" (regex strip) or "markdown" (structure-preserving). */
 export type PrepMode = "text" | "markdown";
@@ -72,6 +72,11 @@ export function binaryPrepError(contentType: ContentType): string {
 /** Typed error for "pdf" content-prep called with a string instead of bytes when an extractor IS supplied. */
 export function pdfBytesRequiredError(): string {
   return "pdf content-prep requires Uint8Array (bytes), not a string — read the PDF as bytes (e.g. Buffer.from(fs.readFileSync(path)))";
+}
+
+/** Typed error for image content-prep called with a string instead of bytes when an extractor IS supplied. */
+export function imageBytesRequiredError(): string {
+  return "image content-prep requires Uint8Array (bytes), not a string";
 }
 
 const ENTITY_MAP: Record<string, string> = {
@@ -269,6 +274,9 @@ export function htmlToMarkdown(html: string, maxChars: number = DEFAULT_MAX_CHAR
  *   extraction verifies anchor to THIS cleaned text, not the raw VTT — the same
  *   prepared-text contract html/text already follow.
  * - `"pdf"`: DEFERRED — always returns a typed `error`, never decodes the bytes.
+ * - `"png"`/`"jpeg"`: DEFERRED without an ImageTextExtractor — returns a typed
+ *   binary error here; extract() owns the optional OCR pre-step so OCR text can
+ *   reuse the normal text chunking/provenance pipeline.
  *
  * Binary (`Uint8Array`) input is only meaningful for `"pdf"` today, which is
  * deferred; passing bytes for `"html"`/`"text"` returns a typed `error`.
@@ -429,6 +437,32 @@ export async function preparePdfText(
       text: "",
       warnings: [],
       error: `pdf text extraction failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
+/**
+ * Run a caller-supplied {@link ImageTextExtractor} against image bytes and
+ * produce prepared OCR text. Mirrors {@link preparePdfText}'s never-throw and
+ * warning-shape discipline, but has no page-offset sidecar: OCR-derived
+ * provenance honesty is carried by ExtractionResult.ocrDerived instead.
+ */
+export async function prepareImageText(
+  bytes: Uint8Array,
+  extractor: ImageTextExtractor,
+  maxChars: number = DEFAULT_MAX_CHARS,
+): Promise<{ text: string; warnings: string[]; error?: string }> {
+  try {
+    const raw = await extractor.extract(bytes);
+    if (typeof raw?.text !== "string") {
+      return { text: "", warnings: [], error: "image text extraction failed: extractor returned no text" };
+    }
+    return { text: raw.text.slice(0, maxChars), warnings: validateWarnings(raw.warnings) };
+  } catch (err) {
+    return {
+      text: "",
+      warnings: [],
+      error: `image text extraction failed: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 }

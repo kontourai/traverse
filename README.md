@@ -856,6 +856,47 @@ function uses) — much smaller than the 5,000,000-char cap `extract()` passes
 internally when it calls `preparePdfText` on your behalf, so a direct caller
 who wants the whole document should pass `maxChars` explicitly.
 
+## Image content-prep (opt-in OCR seam, no bundled OCR)
+
+`ContentType` also includes `"png"` and `"jpeg"`. Traverse ships **no default
+OCR implementation** and takes **no OCR/vision dependency** for these image
+types. A caller supplies an `ImageTextExtractor` that wraps the OCR system it
+already owns:
+
+```ts
+import { extract } from "@kontourai/traverse";
+import type { ImageTextExtractor } from "@kontourai/traverse";
+
+const myImageExtractor: ImageTextExtractor = {
+  async extract(bytes: Uint8Array) {
+    const text = await myOwnOcr(bytes);
+    return { text, warnings: ["OCR output should be reviewed"] };
+  },
+};
+
+const result = await extract({
+  content: imageBytes, // Uint8Array
+  contentType: "png",
+  imageTextExtractor: myImageExtractor,
+  sourceRef: "upload:document-image.png",
+  targetSchema,
+  provider,
+});
+```
+
+With `imageTextExtractor` supplied, `extract()` hands the image bytes to the
+OCR seam, then sends the returned text through the **existing text chunking and
+proposal-normalization pipeline**. Excerpts still verify with the normal
+`indexOf` mechanism and locators are still `chars:<start>-<end>` offsets into
+the prepared OCR text. Because OCR text is lossier than parsed text, successful
+OCR-derived results carry `ExtractionResult.ocrDerived === true` as an
+additive presence marker, mirroring `Snapshot.rendered`.
+
+With no `imageTextExtractor` supplied, image bytes return the normal typed
+binary-content error with zero provider calls. Fetched PNG/JPEG snapshots are
+captured as raw `bodyBytes`, so `fetchAndExtract()` can forward the same
+extractor end-to-end for live or replayed snapshots.
+
 ## Requirements
 
 - Node.js `>= 22`

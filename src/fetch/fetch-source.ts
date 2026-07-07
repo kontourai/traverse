@@ -53,7 +53,7 @@ export function sha256Bytes(bytes: Uint8Array): string {
 /**
  * Resolve the Traverse `ContentType` for content-prep from an optional caller
  * hint and the response `Content-Type` header. The hint always wins; otherwise
- * `html`/`pdf` are detected from the header and everything else is `text`.
+ * `html`/`pdf`/PNG/JPEG are detected from the header and everything else is `text`.
  */
 export function resolveContentType(
   hint: ContentType | undefined,
@@ -63,18 +63,20 @@ export function resolveContentType(
   const h = (header ?? "").toLowerCase();
   if (h.includes("html")) return "html";
   if (h.includes("pdf")) return "pdf";
+  if (h.includes("image/png")) return "png";
+  if (h.includes("image/jpeg") || h.includes("image/jpg")) return "jpeg";
   return "text";
 }
 
 /**
  * Resolved `ContentType`s Traverse captures as RAW BYTES on
- * `Snapshot.bodyBytes` rather than decoded text — currently only `"pdf"`.
+ * `Snapshot.bodyBytes` rather than decoded text.
  * Add a new resolved type here (only) when a future binary format needs
  * bytes-safe capture; every call site keys off this one function. See
  * traverse#23.
  */
 function isBinaryContentType(contentType: ContentType): boolean {
-  return contentType === "pdf";
+  return contentType === "pdf" || contentType === "png" || contentType === "jpeg";
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -479,7 +481,7 @@ export async function fetchSource(
       );
     }
 
-    // success: build the snapshot. Binary content-types (today: "pdf" only,
+    // success: build the snapshot. Binary content-types (PDF and image formats,
     // via isBinaryContentType) are captured as RAW BYTES on `bodyBytes` when
     // the response supports `arrayBuffer()` — the real global `fetch`
     // Response always does; a custom `fetchImpl` that omits it degrades to

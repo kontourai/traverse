@@ -42,7 +42,7 @@ export interface SourceConfig {
   /**
    * Optional content-type HINT. When set, it wins over the response's
    * `Content-Type` header for deciding how content-prep treats the body
-   * (html/text/pdf). When absent, the header is used (defaulting to `text`).
+   * (html/text/pdf/png/jpeg). When absent, the header is used (defaulting to `text`).
    */
   contentType?: ContentType;
   /**
@@ -125,7 +125,7 @@ export interface Snapshot {
   /** HTTP status of the final response. */
   status: number;
   /**
-   * The RESOLVED Traverse content type (html/text/pdf) — the value handed to
+   * The RESOLVED Traverse content type (html/text/pdf/png/jpeg) — the value handed to
    * content-prep on replay/extraction, decided from {@link SourceConfig.contentType}
    * or the response `Content-Type` header at fetch time. Kept resolved (not the
    * raw header) so replay is deterministic and needs no re-parsing.
@@ -133,7 +133,7 @@ export interface Snapshot {
   contentType: ContentType;
   /**
    * The response body, decoded as UTF-8 text — populated for every resolved
-   * `contentType` EXCEPT one classified BINARY (today: `"pdf"` only, see
+   * `contentType` EXCEPT one classified BINARY (see
    * `isBinaryContentType` in fetch-source.ts), where it is `""` and the raw
    * bytes live on {@link bodyBytes} instead. EXACTLY ONE of `body` /
    * `bodyBytes` is ever populated for a given snapshot.
@@ -141,7 +141,7 @@ export interface Snapshot {
   body: string;
   /**
    * RAW response bytes, present ONLY for a resolved `contentType` classified
-   * BINARY (currently `"pdf"` only — see `isBinaryContentType` in
+   * BINARY (see `isBinaryContentType` in
    * fetch-source.ts). EXACTLY ONE of `body` / `bodyBytes` is ever populated:
    * binary content sets `bodyBytes` and leaves `body` as `""`; text content
    * (`"html"`/`"text"`/`"transcript"`) sets `body` and leaves `bodyBytes`
