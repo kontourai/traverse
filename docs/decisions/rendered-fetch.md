@@ -114,7 +114,33 @@ explicit `FetchResult.warnings` note ("revalidation has no effect for a
 rendered fetch...") rather than silently ignoring the combination — masking
 that config mistake would be worse than a normal, unconditional render.
 
-### 7. Error mapping — no new `FetchErrorKind`
+### 7. Headers and retries are also not forwarded — warn, don't silently drop
+
+`RenderImpl` receives only `{ userAgent, timeoutMs }` (see decision 2) — there
+is no headers parameter and no retry wrapper around the call. Two caller
+config knobs are therefore INERT for a rendered fetch, same category as
+`revalidate` above:
+
+- `SourceConfig.headers` (any caller-supplied extra headers) are never
+  forwarded to `renderImpl` — the renderer implementation owns its own
+  request headers/auth entirely; traverse has no hook to inject them into a
+  caller-owned rendering process.
+- `SourceConfig.retries` never applies — `fetchSource`'s bounded/jittered
+  retry loop (`requestWithRetries`) wraps only the direct `FetchLike` path; a
+  `renderImpl` failure maps straight to `adapter-error` (decision 7 below)
+  with no retry attempt.
+
+Mirroring the `revalidate` treatment, `fetchSource` pushes an explicit
+`FetchResult.warnings` note for each ONLY when the caller actually set
+something — a caller-supplied non-empty `headers` object, and/or an explicit
+`retries` value — never on `fetchSource`'s own internal defaults (e.g. the
+`Accept` header it adds, or the default retry count when `retries` is left
+unset). A rendered fetch configured with neither gets no such warning. As
+with `revalidate`, this is a deliberate warn-and-document scope limit, not a
+gap silently absorbed: header forwarding and a render-retry loop are both
+explicitly out of scope for this seam (see Non-goals).
+
+### 8. Error mapping — no new `FetchErrorKind`
 
 - `renderImpl` throwing maps to the existing `adapter-error` kind — mirrors
   the yt-dlp external-tool-failure precedent (`src/fetch/youtube.ts`)
@@ -130,7 +156,7 @@ that config mistake would be worse than a normal, unconditional render.
 No new `FetchErrorKind` value is introduced for render failures; the
 exported union is unchanged from before this seam.
 
-### 8. `crawlSource` composition
+### 9. `crawlSource` composition
 
 `render` joins the existing list of crawl-wide FETCH BEHAVIOR fields a
 discovered page's `SourceConfig` inherits from the seed in `crawl.ts`
@@ -142,7 +168,7 @@ forwarding, unchanged. `discoverSameHostLinks` composes unchanged too — it
 operates on `Snapshot.body` gated on `contentType === "html"`, both of which
 a rendered snapshot satisfies exactly like a wire-fetched one.
 
-### 9. Cost guards untouched
+### 10. Cost guards untouched
 
 Rendering happens inside `acquire()` (`compose.ts`), strictly before the
 resulting snapshot is handed to `extract()`. `maxProviderCalls`/
@@ -161,6 +187,8 @@ code change for this seam.
   as a hint only).
 - Re-checking robots against a renderer's own client-side navigation (see
   decision 3).
+- Forwarding `SourceConfig.headers` to `renderImpl`, or retrying a
+  `renderImpl` failure (see decision 7 — warn-and-document only).
 
 ## Boundary
 

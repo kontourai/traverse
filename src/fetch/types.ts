@@ -99,7 +99,13 @@ export interface SourceConfig {
    * `robots.txt` is still checked once against the requested URL before
    * `renderImpl` is invoked. {@link SourceConfig.revalidate} has no effect
    * when combined with this (an explicit warning is emitted) — a renderer has
-   * no real HTTP response to conditionally re-request. See
+   * no real HTTP response to conditionally re-request. {@link SourceConfig.headers}
+   * and {@link SourceConfig.retries} ALSO have no effect on a rendered fetch —
+   * `renderImpl` receives only `{ userAgent, timeoutMs }` (see {@link RenderImpl}),
+   * so caller-supplied headers are never forwarded to it (the renderer owns its
+   * own request headers/auth) and a `renderImpl` failure is never retried by
+   * `fetchSource`. Both are surfaced as explicit `FetchResult.warnings` (not a
+   * silent no-op) whenever the caller actually set one. See
    * docs/decisions/rendered-fetch.md.
    */
   render?: boolean;
@@ -311,8 +317,13 @@ export interface RenderResult {
  * source's {@link SourceConfig.render} is `true`. `timeoutMs` is a
  * DOCUMENTED HINT — `fetchSource` does NOT wrap this call in its own timeout
  * race (unlike {@link FetchLike}); the implementation is responsible for
- * enforcing it itself (e.g. a Playwright navigation timeout). See
- * docs/decisions/rendered-fetch.md.
+ * enforcing it itself (e.g. a Playwright navigation timeout). Note the
+ * signature below carries only `{ userAgent, timeoutMs }` — `SourceConfig.headers`
+ * is NEVER forwarded here (the renderer implementation owns its own request
+ * headers/auth) and `SourceConfig.retries` never wraps this call (a
+ * `renderImpl` failure is not retried by `fetchSource`); both are flagged with
+ * an explicit `FetchResult.warnings` note when the caller actually set them.
+ * See docs/decisions/rendered-fetch.md.
  */
 export type RenderImpl = (
   url: string,

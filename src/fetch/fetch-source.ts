@@ -295,6 +295,25 @@ export async function fetchSource(
       );
     }
 
+    // Same discipline for headers/retries: `renderImpl` receives only
+    // `{ userAgent, timeoutMs }` (see the `RenderImpl` signature), so a
+    // caller-supplied `SourceConfig.headers` is never forwarded to it (the
+    // renderer owns its own request headers/auth) and `SourceConfig.retries`
+    // never wraps this call (a `renderImpl` failure is not retried). Warn
+    // ONLY when the caller actually set something — never on the plain
+    // `headers`/`retries` defaults this function itself would otherwise use,
+    // so a render with neither configured gets no such warning.
+    if (config.headers && Object.keys(config.headers).length > 0) {
+      warnings.push(
+        "headers are not forwarded to renderImpl for a rendered fetch (SourceConfig.render is true); the renderer implementation owns request headers/auth",
+      );
+    }
+    if (config.retries !== undefined) {
+      warnings.push(
+        "retries do not apply to a rendered fetch (SourceConfig.render is true); renderImpl failures are not retried",
+      );
+    }
+
     let renderResult: RenderResult;
     try {
       renderResult = await opts.renderImpl(startUrl.href, { userAgent, timeoutMs });

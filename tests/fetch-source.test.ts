@@ -455,4 +455,95 @@ describe("fetchSource() — rendered fetch (traverse#41)", () => {
       `expected a validators-skip warning, got: ${JSON.stringify(result.warnings)}`,
     );
   });
+
+  it("caller-supplied headers on a rendered fetch produce a not-forwarded warning", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>x</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ render: true, headers: { "X-Custom": "yes" } }),
+      fastOpts({ renderImpl }),
+    );
+    assert.equal(result.error, undefined);
+    assert.ok(
+      result.warnings?.some((w) => /headers are not forwarded to renderImpl/.test(w)),
+      `expected a headers-not-forwarded warning, got: ${JSON.stringify(result.warnings)}`,
+    );
+  });
+
+  it("a retries setting on a rendered fetch produces a retries-do-not-apply warning", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>x</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ render: true, retries: 3 }),
+      fastOpts({ renderImpl }),
+    );
+    assert.equal(result.error, undefined);
+    assert.ok(
+      result.warnings?.some((w) => /retries do not apply to a rendered fetch/.test(w)),
+      `expected a retries-do-not-apply warning, got: ${JSON.stringify(result.warnings)}`,
+    );
+  });
+
+  it("a rendered fetch with neither caller headers nor an explicit retries setting emits NEITHER warning (no false positive)", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>x</h1>" },
+    });
+    const result = await fetchSource(cfg({ render: true }), fastOpts({ renderImpl }));
+    assert.equal(result.error, undefined);
+    assert.equal(
+      result.warnings?.some((w) => /headers are not forwarded to renderImpl/.test(w)) ?? false,
+      false,
+    );
+    assert.equal(
+      result.warnings?.some((w) => /retries do not apply to a rendered fetch/.test(w)) ?? false,
+      false,
+    );
+  });
+
+  it("an empty caller headers object on a rendered fetch does NOT trigger the not-forwarded warning", async () => {
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>x</h1>" },
+    });
+    const result = await fetchSource(
+      cfg({ render: true, headers: {} }),
+      fastOpts({ renderImpl }),
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(
+      result.warnings?.some((w) => /headers are not forwarded to renderImpl/.test(w)) ?? false,
+      false,
+    );
+  });
+});
+
+describe("fetchSource() — renderImpl is never invoked without render: true (traverse#41)", () => {
+  it("render: false performs a plain wire fetch and never calls renderImpl", async () => {
+    const fetch = fakeFetch({ "https://example.test/page": { body: "<h1>wire</h1>" } });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>should never render</h1>" },
+    });
+    const result = await fetchSource(cfg({ render: false }), fastOpts({ fetch, renderImpl }));
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.body, "<h1>wire</h1>");
+    assert.equal(result.snapshot!.rendered, undefined);
+    assert.equal(fetch.calls.length, 1);
+    assert.equal(renderImpl.calls.length, 0);
+  });
+
+  it("render left unset (renderImpl still configured) performs a plain wire fetch and never calls renderImpl", async () => {
+    const fetch = fakeFetch({ "https://example.test/page": { body: "<h1>wire</h1>" } });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<h1>should never render</h1>" },
+    });
+    const result = await fetchSource(cfg(), fastOpts({ fetch, renderImpl }));
+    assert.equal(result.error, undefined);
+    assert.ok(result.snapshot);
+    assert.equal(result.snapshot!.body, "<h1>wire</h1>");
+    assert.equal(result.snapshot!.rendered, undefined);
+    assert.equal(fetch.calls.length, 1);
+    assert.equal(renderImpl.calls.length, 0);
+  });
 });
