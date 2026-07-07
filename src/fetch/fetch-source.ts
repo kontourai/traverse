@@ -44,6 +44,11 @@ export function sha256Hex(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
+/** sha256 hex of RAW bytes — the byte-identity fingerprint for a binary snapshot's bodyHash. */
+export function sha256Bytes(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /**
  * Resolve the Traverse `ContentType` for content-prep from an optional caller
  * hint and the response `Content-Type` header. The hint always wins; otherwise
@@ -58,6 +63,17 @@ export function resolveContentType(
   if (h.includes("html")) return "html";
   if (h.includes("pdf")) return "pdf";
   return "text";
+}
+
+/**
+ * Resolved `ContentType`s Traverse captures as RAW BYTES on
+ * `Snapshot.bodyBytes` rather than decoded text — currently only `"pdf"`.
+ * Add a new resolved type here (only) when a future binary format needs
+ * bytes-safe capture; every call site keys off this one function. See
+ * traverse#23.
+ */
+function isBinaryContentType(contentType: ContentType): boolean {
+  return contentType === "pdf";
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -335,25 +351,54 @@ export async function fetchSource(
       );
     }
 
-    // success: build the snapshot.
-    let body: string;
-    try {
-      body = await response.text();
-    } catch (err) {
-      return withWarnings(
-        { error: { kind: "network", message: `failed to read body from ${currentUrl.href}: ${err instanceof Error ? err.message : String(err)}` } },
-        warnings,
-      );
+    // success: build the snapshot. Binary content-types (today: "pdf" only,
+    // via isBinaryContentType) are captured as RAW BYTES on `bodyBytes` when
+    // the response supports `arrayBuffer()` — the real global `fetch`
+    // Response always does; a custom `fetchImpl` that omits it degrades to
+    // the pre-existing lossy `text()` capture, flagged with a warning, rather
+    // than silently corrupting the body (see traverse#23).
+    const resolvedContentType = resolveContentType(config.contentType, response.headers.get("content-type"));
+    let body = "";
+    let bodyBytes: Uint8Array | undefined;
+    let bodyHash: string;
+    if (isBinaryContentType(resolvedContentType) && typeof response.arrayBuffer === "function") {
+      let buf: ArrayBuffer;
+      try {
+        buf = await response.arrayBuffer();
+      } catch (err) {
+        return withWarnings(
+          { error: { kind: "network", message: `failed to read body from ${currentUrl.href}: ${err instanceof Error ? err.message : String(err)}` } },
+          warnings,
+        );
+      }
+      bodyBytes = new Uint8Array(buf);
+      bodyHash = sha256Bytes(bodyBytes);
+    } else {
+      if (isBinaryContentType(resolvedContentType)) {
+        warnings.push(
+          `fetchImpl has no arrayBuffer(); binary content-type "${resolvedContentType}" from ${currentUrl.href} captured as lossy text — pass a fetchImpl with arrayBuffer for binary sources`,
+        );
+      }
+      try {
+        body = await response.text();
+      } catch (err) {
+        return withWarnings(
+          { error: { kind: "network", message: `failed to read body from ${currentUrl.href}: ${err instanceof Error ? err.message : String(err)}` } },
+          warnings,
+        );
+      }
+      bodyHash = sha256Hex(body);
     }
     const snapshot: Snapshot = {
       sourceId: config.id,
       url: currentUrl.href,
       fetchedAt: r.clock(),
       status: response.status,
-      contentType: resolveContentType(config.contentType, response.headers.get("content-type")),
+      contentType: resolvedContentType,
       body,
-      bodyHash: sha256Hex(body),
+      bodyHash,
     };
+    if (bodyBytes) snapshot.bodyBytes = bodyBytes;
     if (redirects.length > 0) snapshot.redirects = redirects;
     // Capture HTTP validators (verbatim) so a later `revalidate` fetch can turn
     // an unchanged re-fetch into a cheap 304. Absent headers leave the fields
