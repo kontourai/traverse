@@ -354,8 +354,11 @@ for the full decision record.
 ## SPA / JS-rendered pages
 
 Many sites ship an almost-empty HTML shell and hydrate the real content in the
-browser. Traverse never renders (it stays fetch-agnostic), but the prep layer
-does two things so JS-heavy sources are still useful:
+browser. Traverse **core** still ships no rendering and no browser dependency,
+but the fetch subpath now offers an OPT-IN `renderImpl` seam a caller can plug
+a renderer into (see "Rendered fetch" below) — and, whether or not you use
+that seam, the prep layer does two more things so JS-heavy sources are still
+useful:
 
 ### 1. Embedded-state sidecar
 
@@ -518,11 +521,11 @@ package root stays focused on extraction and re-exports none of it. Like
 HTTP errors, and bad config surface as a typed `FetchError` on the result. It
 has **zero runtime dependencies** (global `fetch` + `node:crypto`/`node:fs`).
 
-Out of scope for this layer (see
-[`docs/slice-3-candidates.md`](docs/slice-3-candidates.md)): headless-browser
-rendering and scheduling. Multi-page link-following now has a bounded,
-same-host-only crawl frontier (`crawlSource`, below) — cross-host crawling is
-still out of scope.
+Headless-browser rendering now has an OPT-IN seam — see "Rendered fetch"
+below. Out of scope for this layer (see
+[`docs/slice-3-candidates.md`](docs/slice-3-candidates.md)): scheduling.
+Multi-page link-following now has a bounded, same-host-only crawl frontier
+(`crawlSource`, below) — cross-host crawling is still out of scope.
 
 ### Standalone fetch
 
@@ -592,8 +595,51 @@ const manifest = await crawlSource(
 ```
 
 Cross-host links are never followed (a page whose own fetch redirects
-off-host is still recorded, but its links stop the frontier there); headless
-rendering and scheduling remain out of scope for this layer.
+off-host is still recorded, but its links stop the frontier there);
+scheduling remains out of scope for this layer. Headless rendering now has
+an opt-in seam a crawl seed can enable (see "Rendered fetch" below) —
+`crawlSource` itself still implements no rendering of its own.
+
+### Rendered fetch (opt-in `renderImpl` seam)
+
+For an SPA/JS-rendered page whose real content only exists after client-side
+JavaScript runs, plug in ANY renderer (Playwright, Puppeteer, a remote
+rendering service, a test stub) via `FetchSourceOptions.renderImpl` and opt
+the source in with `SourceConfig.render: true`. Traverse core takes no new
+runtime dependency for this — you own the renderer.
+
+```ts
+import { fetchSource } from "@kontourai/traverse/fetch";
+import type { RenderImpl } from "@kontourai/traverse/fetch";
+
+// A minimal stub renderer — swap in Playwright/Puppeteer/a remote service.
+const renderImpl: RenderImpl = async (url, { timeoutMs }) => {
+  // ... navigate, wait for hydration, read the DOM ...
+  return { html: "<html>...</html>" };
+};
+
+const result = await fetchSource(
+  { id: "spa-page", url: "https://example.com/app", render: true },
+  { renderImpl },
+);
+
+if (!result.error) {
+  result.snapshot!.rendered; // true — the honest wire-vs-rendered marker
+}
+```
+
+`render: true` with no `renderImpl` configured is a typed `invalid-config`
+error, never a silent normal fetch. `robots.txt` is checked once against the
+requested URL before `renderImpl` is ever invoked (renderImpl owns any
+further client-side navigation itself). HTTP validators
+(`etag`/`lastModified`/conditional GET) are skipped for a rendered fetch;
+setting `revalidate: true` alongside `render: true` adds an explicit warning
+rather than silently doing nothing. A `renderImpl` throw maps to
+`kind: "adapter-error"`; a reported non-2xx `status` maps to
+`kind: "http-error"` — no new `FetchErrorKind` is introduced. See
+[`docs/decisions/rendered-fetch.md`](docs/decisions/rendered-fetch.md) for
+the full rationale, including the `timeoutMs`-is-a-hint and
+robots-per-hop-limit accepted scope limits.
 
 ### Capture & replay
 

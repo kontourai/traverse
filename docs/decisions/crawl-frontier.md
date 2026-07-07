@@ -141,7 +141,12 @@ The following remain explicitly deferred, unchanged from
 `docs/slice-3-candidates.md`:
 
 - Cross-host crawling (crawling follows links only within the seed's origin).
-- Headless-browser / JavaScript rendering.
+- Headless-browser / JavaScript rendering IN `crawl.ts` ITSELF. Note
+  (traverse#41): an opt-in `render`/`renderImpl` seam has since been added
+  at the `fetchSource` layer (see `docs/decisions/rendered-fetch.md`), and
+  `crawlSource` composes with it via the existing seed-config inheritance
+  (decision 6 above) — but `crawl.ts` still implements no rendering of its
+  own; a caller must supply the renderer.
 - Scheduling: recurring/deferred crawl runs, cross-process or distributed
   politeness coordination.
 - A fuller robots engine: sitemap discovery, `Crawl-delay`, and the `*`/`$`
