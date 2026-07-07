@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/kontourai/traverse/compare/v0.11.0...v0.12.0) (2026-07-07)
+
+
+### Features
+
+* **fetch:** binary-safe Snapshot bodies (bodyBytes) + pdfTextExtractor forwarding in fetchAndExtract ([#42](https://github.com/kontourai/traverse/issues/42)) ([e656307](https://github.com/kontourai/traverse/commit/e656307bdf713b53b353e08eac5abd5b7efd6329))
+
 ## [0.11.0](https://github.com/kontourai/traverse/compare/v0.10.1...v0.11.0) (2026-07-06)
 
 
