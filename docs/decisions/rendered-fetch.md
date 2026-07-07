@@ -127,7 +127,7 @@ config knobs are therefore INERT for a rendered fetch, same category as
   caller-owned rendering process.
 - `SourceConfig.retries` never applies — `fetchSource`'s bounded/jittered
   retry loop (`requestWithRetries`) wraps only the direct `FetchLike` path; a
-  `renderImpl` failure maps straight to `adapter-error` (decision 7 below)
+  `renderImpl` failure maps straight to `adapter-error` (decision 8 below)
   with no retry attempt.
 
 Mirroring the `revalidate` treatment, `fetchSource` pushes an explicit
