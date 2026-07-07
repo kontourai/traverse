@@ -35,9 +35,26 @@ function snapshotFileName(snapshot: Snapshot): string {
   return `${ts}-${snapshot.bodyHash.slice(0, 12)}.json`;
 }
 
+/** JSON-serialisable on-disk shape: bodyBytes (if any) becomes base64 in a sibling field. */
+function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
+  if (snapshot.bodyBytes === undefined) return snapshot as unknown as Record<string, unknown>;
+  const { bodyBytes, ...rest } = snapshot;
+  return { ...rest, bodyBytesBase64: Buffer.from(bodyBytes).toString("base64") };
+}
+
+/** Reverse of toDiskShape: base64 sibling field -> bodyBytes. Old files (no such field) pass through unchanged. */
+function fromDiskShape(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const v = value as Record<string, unknown>;
+  if (typeof v.bodyBytesBase64 !== "string") return value;
+  const { bodyBytesBase64, ...rest } = v;
+  return { ...rest, bodyBytes: new Uint8Array(Buffer.from(bodyBytesBase64 as string, "base64")) };
+}
+
 function isSnapshot(value: unknown): value is Snapshot {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  if (v.bodyBytes !== undefined && !(v.bodyBytes instanceof Uint8Array)) return false;
   return (
     typeof v.sourceId === "string" &&
     typeof v.url === "string" &&
@@ -76,7 +93,7 @@ export function createFilesystemSnapshotStore(
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
       try {
-        const parsed = JSON.parse(await readFile(path.join(dir, name), "utf8"));
+        const parsed = fromDiskShape(JSON.parse(await readFile(path.join(dir, name), "utf8")));
         if (isSnapshot(parsed)) out.push(parsed);
       } catch {
         // skip unreadable/foreign file
@@ -94,7 +111,7 @@ export function createFilesystemSnapshotStore(
       const dir = path.join(root, sourceDirName(snapshot.sourceId));
       await mkdir(dir, { recursive: true });
       const file = path.join(dir, snapshotFileName(snapshot));
-      await writeFile(file, JSON.stringify(snapshot, null, 2), "utf8");
+      await writeFile(file, JSON.stringify(toDiskShape(snapshot), null, 2), "utf8");
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {
       return (await readAll(sourceId))[0];

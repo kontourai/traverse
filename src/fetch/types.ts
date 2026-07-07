@@ -111,9 +111,31 @@ export interface Snapshot {
    * raw header) so replay is deterministic and needs no re-parsing.
    */
   contentType: ContentType;
-  /** the response body, decoded as UTF-8 text. */
+  /**
+   * The response body, decoded as UTF-8 text — populated for every resolved
+   * `contentType` EXCEPT one classified BINARY (today: `"pdf"` only, see
+   * `isBinaryContentType` in fetch-source.ts), where it is `""` and the raw
+   * bytes live on {@link bodyBytes} instead. EXACTLY ONE of `body` /
+   * `bodyBytes` is ever populated for a given snapshot.
+   */
   body: string;
-  /** lowercase hex SHA-256 of `body` — the byte-identity fingerprint. */
+  /**
+   * RAW response bytes, present ONLY for a resolved `contentType` classified
+   * BINARY (currently `"pdf"` only — see `isBinaryContentType` in
+   * fetch-source.ts). EXACTLY ONE of `body` / `bodyBytes` is ever populated:
+   * binary content sets `bodyBytes` and leaves `body` as `""`; text content
+   * (`"html"`/`"text"`/`"transcript"`) sets `body` and leaves `bodyBytes`
+   * unset. `bodyBytes` PRESENCE is the binary marker — there is no separate
+   * `isBinary` flag. See traverse#23.
+   */
+  bodyBytes?: Uint8Array;
+  /**
+   * Lowercase hex SHA-256 — the byte-identity fingerprint. Hash DOMAIN
+   * depends on which of `body`/`bodyBytes` is populated: sha256 of the RAW
+   * bytes (`sha256Bytes` in fetch-source.ts) for a binary snapshot
+   * (`bodyBytes` populated), sha256 of utf8-`body` (`sha256Hex`) otherwise —
+   * byte-identical to pre-#23 behavior for every text snapshot.
+   */
   bodyHash: string;
   /** the redirect chain that led here, if any: the ordered list of URLs visited BEFORE `url`. */
   redirects?: string[];
@@ -225,6 +247,14 @@ export interface FetchLikeResponse {
   status: number;
   headers: { get(name: string): string | null };
   text(): Promise<string>;
+  /**
+   * OPTIONAL raw-bytes reader, used by `fetchSource` for binary
+   * content-types (see `isBinaryContentType`). The real global `fetch`
+   * `Response` always implements this. A custom `fetchImpl` that omits it
+   * degrades gracefully for binary content — see the fallback branch in
+   * `fetchSource` — rather than being required to implement it.
+   */
+  arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
 /**

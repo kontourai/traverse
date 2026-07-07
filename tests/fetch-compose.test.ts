@@ -13,6 +13,11 @@ import { readFileSync } from "node:fs";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
 import { createMockExtractionProvider, createRegexScanProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
+import { createNaivePdfTextExtractor } from "./fixtures/naive-pdf-text-extractor.js";
+
+const pdfFixtureBytes = new Uint8Array(
+  readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
+);
 
 const PAGE = "<h1>Beginner Bouldering Session</h1>";
 
@@ -202,6 +207,64 @@ describe("fetchAndExtract() — revalidate wiring", () => {
     assert.equal(second.calls[0].headers["If-None-Match"], ETAG);
     assert.equal(result.fetch.snapshot!.notModified, true);
     assert.equal(result.fetch.snapshot!.fromCache, true);
+  });
+});
+
+
+describe("fetchAndExtract() — pdfTextExtractor forwarding (traverse#23)", () => {
+  it("a pdf-content-type snapshot's bytes reach the injected pdfTextExtractor end-to-end, producing verifiable proposals", async () => {
+    const extractor = createNaivePdfTextExtractor();
+    // Independently derive expected text/pageOffsets from the naive extractor
+    // (pure), so this test's expectations come from the fixture, not from
+    // reading back extract()'s own internals (mirrors pdf-content-prep.test.ts).
+    const expected = await extractor.extract(pdfFixtureBytes);
+    const excerpt = "Section Two: Item counts";
+    assert.ok(expected.text.includes(excerpt), "fixture sanity: page 2's known text is present");
+    const expectedStart = expected.text.indexOf(excerpt);
+
+    const fetch = fakeFetch({
+      "https://example.test/doc.pdf": {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+        bytes: pdfFixtureBytes,
+      },
+    });
+
+    const provider = createMockExtractionProvider({
+      proposals: [
+        {
+          fieldPath: "title",
+          candidateValue: excerpt,
+          confidence: 0.9,
+          provenance: { excerpt, locator: "provisional" },
+          extractor: "test-provider",
+        },
+      ],
+      raw: { response: "{}", model: "mock" },
+    });
+
+    const result = await fetchAndExtract(cfg({ url: "https://example.test/doc.pdf" }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      pdfTextExtractor: extractor,
+      mode: "live",
+      fetchOptions: { fetch, sleep: async () => {}, random: () => 0, politenessState: new Map(), robotsCache: new Map() },
+    });
+
+    assert.equal(result.fetch.snapshot!.contentType, "pdf");
+    assert.deepEqual(result.fetch.snapshot!.bodyBytes, pdfFixtureBytes);
+    assert.equal(result.fetch.snapshot!.body, "");
+
+    assert.equal(result.extraction!.error, undefined);
+    assert.equal(result.extraction!.proposals.length, 1);
+    const proposal = result.extraction!.proposals[0];
+    assert.match(proposal.provenance.locator, /^chars:\d+-\d+$/);
+    const match = proposal.provenance.locator.match(/^chars:(\d+)-(\d+)$/) as RegExpMatchArray;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    assert.equal(start, expectedStart, "locator start matches the independently-derived pdf text offset");
+    assert.equal(expected.text.slice(start, end), excerpt, "fullText.slice(start, end) === excerpt (offset fidelity)");
+    assert.deepEqual(result.extraction!.pdfPageOffsets, expected.pageOffsets);
   });
 });
 

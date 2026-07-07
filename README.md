@@ -551,6 +551,10 @@ if (result.error) {
   const s = result.snapshot!;
   // s.url (final, post-redirect), s.status, s.contentType, s.body,
   // s.bodyHash (sha256), s.redirects?, s.fetchedAt
+  // Binary content (today: "pdf" only) sets s.bodyBytes (raw bytes) instead
+  // of s.body (which stays ""); EXACTLY ONE of body / bodyBytes is ever
+  // populated. bodyHash's hash domain follows suit: sha256 of the raw bytes
+  // for a binary snapshot, sha256 of utf8-body otherwise.
 }
 ```
 
@@ -632,6 +636,7 @@ const result = await fetchAndExtract(
     provider,                    // any ExtractionProvider (mock/Anthropic/...)
     store,                       // required for "replay" / "live-with-capture"
     mode: "live-with-capture",   // "live" | "replay" | "live-with-capture"
+    pdfTextExtractor,            // optional — forwarded to extract() for a "pdf" snapshot; see PDF content-prep below
   },
 );
 

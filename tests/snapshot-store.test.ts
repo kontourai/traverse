@@ -8,8 +8,13 @@ import {
   createInMemorySnapshotStore,
   replaySource,
 } from "../src/fetch/snapshot-store.js";
-import { sha256Hex } from "../src/fetch/fetch-source.js";
+import { sha256Hex, sha256Bytes } from "../src/fetch/fetch-source.js";
 import type { Snapshot } from "../src/fetch/types.js";
+import { readFileSync } from "node:fs";
+
+const pdfFixtureBytes = new Uint8Array(
+  readFileSync(new URL("../../tests/fixtures/minimal-two-page.pdf", import.meta.url)),
+);
 
 function snap(overrides: Partial<Snapshot> = {}): Snapshot {
   const body = overrides.body ?? "<h1>Hello</h1>";
@@ -21,6 +26,21 @@ function snap(overrides: Partial<Snapshot> = {}): Snapshot {
     contentType: "html",
     body,
     bodyHash: sha256Hex(body),
+    ...overrides,
+  };
+}
+
+function snapWithBytes(overrides: Partial<Snapshot> = {}): Snapshot {
+  const bytes = (overrides.bodyBytes as Uint8Array | undefined) ?? pdfFixtureBytes;
+  return {
+    sourceId: "src-pdf",
+    url: "https://example.test/doc.pdf",
+    fetchedAt: "2026-07-02T00:00:00.000Z",
+    status: 200,
+    contentType: "pdf",
+    body: "",
+    bodyBytes: bytes,
+    bodyHash: sha256Bytes(bytes),
     ...overrides,
   };
 }
@@ -75,6 +95,35 @@ describe("filesystem snapshot store", () => {
     assert.equal(await store.get("src-1", "deadbeef"), undefined);
     assert.deepEqual(await store.list("does-not-exist"), []);
   });
+
+  it("round-trips a binary (bodyBytes) snapshot byte-identically via put -> latest -> get -> list (AC4)", async () => {
+    const store = createFilesystemSnapshotStore({ root });
+    const s = snapWithBytes();
+    await store.put(s);
+
+    const latest = await store.latest("src-pdf");
+    assert.deepEqual(latest, s);
+    assert.ok(latest!.bodyBytes instanceof Uint8Array);
+
+    const byHash = await store.get("src-pdf", s.bodyHash);
+    assert.deepEqual(byHash, s);
+
+    const list = await store.list("src-pdf");
+    assert.equal(list.length, 1);
+    assert.deepEqual(list[0], s);
+  });
+
+  it("still loads an OLD-shape on-disk snapshot (no bodyBytes/bodyBytesBase64 field at all) unchanged (AC4 back-compat)", async () => {
+    const store = createFilesystemSnapshotStore({ root });
+    // put() a plain text-only snapshot with the CURRENT store code: toDiskShape
+    // is a no-op when bodyBytes is undefined, so this is byte-identical to the
+    // pre-#23 on-disk shape (no bytes field of any kind).
+    const s = snap({ sourceId: "src-old-shape" });
+    await store.put(s);
+    const latest = await store.latest("src-old-shape");
+    assert.deepEqual(latest, s);
+    assert.equal(latest!.bodyBytes, undefined);
+  });
 });
 
 describe("in-memory snapshot store", () => {
@@ -84,6 +133,14 @@ describe("in-memory snapshot store", () => {
     await store.put(snap({ fetchedAt: "2026-07-05T00:00:00.000Z", body: "new" }));
     assert.equal((await store.latest("src-1"))!.body, "new");
     assert.deepEqual((await store.list("src-1")).map((s) => s.body), ["new", "old"]);
+  });
+
+  it("keeps REFERENCE semantics for bodyBytes on put() (no defensive deep-clone) (AC4/D4)", async () => {
+    const store = createInMemorySnapshotStore();
+    const original = snapWithBytes();
+    await store.put(original);
+    const latest = await store.latest("src-pdf");
+    assert.strictEqual(latest!.bodyBytes, original.bodyBytes, "same Uint8Array instance, not a clone");
   });
 });
 
@@ -97,6 +154,14 @@ describe("replaySource()", () => {
     assert.equal(result.snapshot!.fromCache, true);
     // byte-identical apart from the fromCache flag
     assert.deepEqual({ ...result.snapshot, fromCache: undefined }, { ...s, fromCache: undefined });
+  });
+
+  it("keeps REFERENCE semantics for bodyBytes through replaySource() (no defensive deep-clone) (AC4/D4)", async () => {
+    const store = createInMemorySnapshotStore();
+    const original = snapWithBytes();
+    await store.put(original);
+    const result = await replaySource(store, "src-pdf");
+    assert.strictEqual(result.snapshot!.bodyBytes, original.bodyBytes, "same Uint8Array instance, not a clone");
   });
 
   it("returns a typed no-snapshot error (never throws) when nothing is stored", async () => {

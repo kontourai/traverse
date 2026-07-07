@@ -15,6 +15,8 @@ export interface FakeResponseSpec {
   networkError?: string;
   /** when true, never resolve until aborted — used with a firing scheduler for timeouts. */
   hang?: boolean;
+  /** raw bytes backing arrayBuffer() for a binary response. Omit to simulate a fetchImpl with no arrayBuffer() (exercises the fallback-to-text path). */
+  bytes?: Uint8Array;
 }
 
 export interface FakeFetchCall {
@@ -29,13 +31,19 @@ export interface FakeFetch extends FetchLike {
 function makeResponse(spec: FakeResponseSpec): FetchLikeResponse {
   const headers = new Map<string, string>();
   for (const [k, v] of Object.entries(spec.headers ?? {})) headers.set(k.toLowerCase(), v);
-  return {
+  const response: FetchLikeResponse = {
     status: spec.status ?? 200,
     headers: { get: (name: string) => headers.get(name.toLowerCase()) ?? null },
     async text() {
       return spec.body ?? "";
     },
   };
+  if (spec.bytes) {
+    const bytes = spec.bytes;
+    response.arrayBuffer = async () =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  }
+  return response;
 }
 
 /**

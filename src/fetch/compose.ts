@@ -23,7 +23,7 @@
  */
 
 import { extract } from "../extract.js";
-import type { ExtractionProvider, ExtractionResult, TargetFieldSchema } from "../types.js";
+import type { ExtractionProvider, ExtractionResult, PdfTextExtractor, TargetFieldSchema } from "../types.js";
 import { fetchSource } from "./fetch-source.js";
 import { replaySource } from "./snapshot-store.js";
 import type { FetchResult, FetchSourceOptions, Snapshot, SnapshotStore, SourceConfig } from "./types.js";
@@ -57,6 +57,8 @@ export interface FetchAndExtractOptions {
   maxProviderCalls?: number;
   /** ceiling on accumulated raw.tokensUsed in one run, forwarded to extract() (see ExtractInput.maxTotalTokens). */
   maxTotalTokens?: number;
+  /** injected PDF text extractor, forwarded to extract() (see ExtractInput.pdfTextExtractor). Needs a "pdf" contentType snapshot with bodyBytes (traverse#23) to ever run through this seam. */
+  pdfTextExtractor?: PdfTextExtractor;
 }
 
 export interface FetchAndExtractResult {
@@ -144,7 +146,7 @@ export async function fetchAndExtract(
   const sourceRef = buildSnapshotSourceRef(snapshot);
 
   const extraction = await extract({
-    content: snapshot.body,
+    content: snapshot.bodyBytes ?? snapshot.body,
     contentType: snapshot.contentType,
     sourceRef,
     targetSchema: opts.targetSchema,
@@ -157,15 +159,12 @@ export async function fetchAndExtract(
     maxChunks: opts.maxChunks,
     maxProviderCalls: opts.maxProviderCalls,
     maxTotalTokens: opts.maxTotalTokens,
-    // pdfTextExtractor is deliberately NOT forwarded here: Snapshot.body is
-    // typed `string` (see traverse#23 — binary content is corrupted before
-    // it ever reaches a Snapshot), so when a replayed/fetched snapshot's
-    // contentType is "pdf", extract()'s PDF pre-step already fails with
-    // pdfBytesRequiredError() (src/extract.ts:141-152) before any
-    // pdfTextExtractor would be consulted. Forwarding this option here
-    // would be a dead option that traps consumers into configuring
-    // something that can never run through this seam. Revisit once #23
-    // gives Snapshot a binary-safe body representation.
+    // pdfTextExtractor forwarding landed with traverse#23: Snapshot now
+    // carries bodyBytes for binary content (contentType "pdf" today), so
+    // this seam can hand extract()'s PDF pre-step the Uint8Array it
+    // requires (src/extract.ts:141-152) instead of the always-string body
+    // that made this option a dead trap before (traverse#28's deferral).
+    pdfTextExtractor: opts.pdfTextExtractor,
   });
 
   return { fetch: fetchResult, extraction, sourceRef };
