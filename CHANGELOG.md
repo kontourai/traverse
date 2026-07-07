@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/kontourai/traverse/compare/v0.13.0...v0.14.0) (2026-07-07)
+
+
+### Features
+
+* optional ImageTextExtractor seam — OCR for image documents, mirroring PdfTextExtractor ([#47](https://github.com/kontourai/traverse/issues/47)) ([68979e1](https://github.com/kontourai/traverse/commit/68979e1a038431876aa172617b451923ade51cd0))
+
 ## [0.13.0](https://github.com/kontourai/traverse/compare/v0.12.0...v0.13.0) (2026-07-07)
 
 
