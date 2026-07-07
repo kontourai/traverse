@@ -65,6 +65,8 @@ export type {
   FetchLike,
   FetchLikeResponse,
   RobotsRules,
+  RenderResult,
+  RenderImpl,
 } from "./types.js";
 export {
   DEFAULT_USER_AGENT,
