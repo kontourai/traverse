@@ -18,6 +18,7 @@ import type {
   FetchLike,
   FetchLikeResponse,
   FetchResult,
+  RenderResult,
   RobotsRules,
   Snapshot,
   SourceConfig,
@@ -234,6 +235,133 @@ export async function fetchSource(
     ...(config.headers ?? {}),
   };
   headers["User-Agent"] = userAgent;
+
+  // --- rendered fetch (opt-in seam, traverse#41) ---
+  // A source opts in with `SourceConfig.render: true`; the caller must ALSO
+  // configure `FetchSourceOptions.renderImpl` — the two-key gate mirrors
+  // `revalidate` + `store` exactly, so `render: true` alone is a typed
+  // `invalid-config` error, never a silent fall-through to a normal fetch.
+  // See docs/decisions/rendered-fetch.md.
+  if (config.render) {
+    if (!opts.renderImpl) {
+      return {
+        error: {
+          kind: "invalid-config",
+          message: "SourceConfig.render is true but no FetchSourceOptions.renderImpl is configured",
+        },
+      };
+    }
+    const origin = startUrl.origin;
+
+    // robots: checked ONCE against the requested URL, BEFORE renderImpl is
+    // ever invoked. Narrower than the wire-fetch loop's per-hop check: a
+    // rendered fetch has no manual redirect loop for traverse to hook
+    // per-hop checks into — renderImpl owns all navigation internally, and
+    // robots is NOT re-checked against any client-side redirect it follows
+    // (accepted, documented scope limit).
+    if (respectRobots) {
+      const { rules, warning } = await loadRobots(origin, userAgent, timeoutMs, r);
+      if (warning) warnings.push(warning);
+      const pathForRobots = startUrl.pathname + startUrl.search;
+      if (!isPathAllowed(rules, pathForRobots)) {
+        return withWarnings(
+          {
+            error: {
+              kind: "robots-denied",
+              message: `robots.txt disallows ${userAgentToken(userAgent)} from ${startUrl.href}`,
+            },
+          },
+          warnings,
+        );
+      }
+    }
+
+    // politeness: same per-host wait/stamp discipline as the wire-fetch loop.
+    if (minDelayMs > 0) {
+      const last = r.politeness.get(origin);
+      if (last !== undefined) {
+        const wait = minDelayMs - (r.now() - last);
+        if (wait > 0) await r.sleep(wait);
+      }
+    }
+
+    // HTTP validators are SKIPPED entirely for a rendered fetch — a renderer
+    // has no real response headers to report, so `etag`/`lastModified` stay
+    // unset and no conditional GET is ever sent. Surface the config mistake
+    // explicitly rather than silently no-op'ing it.
+    if (config.revalidate ?? false) {
+      warnings.push(
+        "revalidation has no effect for a rendered fetch (SourceConfig.render is true); no conditional GET is sent and no HTTP validators are captured",
+      );
+    }
+
+    // Same discipline for headers/retries: `renderImpl` receives only
+    // `{ userAgent, timeoutMs }` (see the `RenderImpl` signature), so a
+    // caller-supplied `SourceConfig.headers` is never forwarded to it (the
+    // renderer owns its own request headers/auth) and `SourceConfig.retries`
+    // never wraps this call (a `renderImpl` failure is not retried). Warn
+    // ONLY when the caller actually set something — never on the plain
+    // `headers`/`retries` defaults this function itself would otherwise use,
+    // so a render with neither configured gets no such warning.
+    if (config.headers && Object.keys(config.headers).length > 0) {
+      warnings.push(
+        "headers are not forwarded to renderImpl for a rendered fetch (SourceConfig.render is true); the renderer implementation owns request headers/auth",
+      );
+    }
+    if (config.retries !== undefined) {
+      warnings.push(
+        "retries do not apply to a rendered fetch (SourceConfig.render is true); renderImpl failures are not retried",
+      );
+    }
+
+    let renderResult: RenderResult;
+    try {
+      renderResult = await opts.renderImpl(startUrl.href, { userAgent, timeoutMs });
+    } catch (err) {
+      if (minDelayMs > 0) r.politeness.set(origin, r.now());
+      return withWarnings(
+        {
+          error: {
+            kind: "adapter-error",
+            message: `renderImpl failed for ${startUrl.href}: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        },
+        warnings,
+      );
+    }
+    if (minDelayMs > 0) r.politeness.set(origin, r.now());
+
+    if (renderResult.warnings) {
+      for (const w of renderResult.warnings) warnings.push(w);
+    }
+
+    const status = renderResult.status ?? 200;
+    if (status < 200 || status >= 300) {
+      return withWarnings(
+        {
+          error: {
+            kind: "http-error",
+            status,
+            message: `render of ${startUrl.href} reported HTTP ${status}`,
+          },
+        },
+        warnings,
+      );
+    }
+
+    const body = renderResult.html;
+    const snapshot: Snapshot = {
+      sourceId: config.id,
+      url: renderResult.finalUrl ?? startUrl.href,
+      fetchedAt: r.clock(),
+      status,
+      contentType: "html",
+      body,
+      bodyHash: sha256Hex(body),
+      rendered: true,
+    };
+    return withWarnings({ snapshot }, warnings);
+  }
 
   // Conditional GET (opt-in). When `revalidate` is set and a prior snapshot for
   // this id carries HTTP validators, send them so an unchanged resource returns

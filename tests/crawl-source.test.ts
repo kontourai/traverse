@@ -7,6 +7,7 @@ import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 import type { FetchSourceOptions, SnapshotStore, SourceConfig } from "../src/fetch/types.js";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
 import type { FakeResponseSpec } from "./fixtures/fake-fetch.js";
+import { fakeRenderImpl } from "./fixtures/fake-render.js";
 
 // Fixture site (tests/fixtures/crawl-site/home.html carries the full intended
 // link graph as a doc comment). Recap of the shape this file relies on:
@@ -375,5 +376,48 @@ describe("crawlSource() — review fix: seed contentType hint is not propagated 
     const byUrl = new Map(manifest.pages.map((p) => [p.url, p]));
     assert.equal(byUrl.get(`${ORIGIN}/home.html`)?.fetch.snapshot?.contentType, "html");
     assert.equal(byUrl.get(`${ORIGIN}/about.html`)?.fetch.snapshot?.contentType, "text");
+  });
+});
+
+
+describe("crawlSource() — rendered fetch composes with crawl (traverse#41 AC8)", () => {
+  it("inherits SourceConfig.render from the seed and discovers same-host links across >= 2 BFS depths from renderer-produced HTML", async () => {
+    const renderImpl = fakeRenderImpl({
+      [`${ORIGIN}/home.html`]: { html: HOME_HTML },
+      [`${ORIGIN}/about.html`]: { html: ABOUT_HTML },
+      [`${ORIGIN}/gear.html`]: { html: GEAR_HTML },
+      [`${ORIGIN}/contact.html`]: { html: CONTACT_HTML },
+      [`${ORIGIN}/gear.html?variant=green`]: { html: GEAR_HTML },
+    });
+
+    const manifest = await crawlSource(seedCfg({ render: true }), {
+      maxPages: 10,
+      maxDepth: 2,
+      fetchOptions: fastFetchOptions({ renderImpl }),
+    });
+
+    assert.deepEqual(manifest.pages.map((p) => p.url), EXPECTED_URLS);
+    assert.deepEqual(manifest.pages.map((p) => p.depth), EXPECTED_DEPTHS);
+    // At least 2 distinct BFS depths were actually reached via rendered pages.
+    assert.ok(new Set(manifest.pages.map((p) => p.depth)).size >= 2);
+    assert.ok(manifest.pages.every((p) => p.fetch.snapshot?.rendered === true), "every page's snapshot is marked rendered");
+    assert.ok(manifest.pages.every((p) => p.fetch.snapshot?.contentType === "html"));
+    // renderImpl (not a real fetch) was called once per discovered page.
+    assert.equal(renderImpl.calls.length, EXPECTED_URLS.length);
+  });
+
+  it("does NOT invoke renderImpl for a discovered page when the seed did not opt in (render left unset)", async () => {
+    const fetch = fakeFetch(siteRoutes());
+    const renderImpl = fakeRenderImpl({});
+
+    const manifest = await crawlSource(seedCfg(), {
+      maxPages: 10,
+      maxDepth: 2,
+      fetchOptions: fastFetchOptions({ fetch, renderImpl }),
+    });
+
+    assert.deepEqual(manifest.pages.map((p) => p.url), EXPECTED_URLS);
+    assert.ok(manifest.pages.every((p) => p.fetch.snapshot?.rendered === undefined));
+    assert.equal(renderImpl.calls.length, 0);
   });
 });

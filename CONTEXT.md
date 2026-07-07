@@ -76,6 +76,20 @@ test).
   (no `extract()` composition); see
   [`docs/decisions/crawl-frontier.md`](docs/decisions/crawl-frontier.md) for
   the query-handling and replay-semantics decisions.
+- **Rendered Fetch**: the `@kontourai/traverse/fetch` subpath's opt-in seam
+  for ingesting SPA/JS-rendered pages without traverse core taking a browser
+  dependency. A source opts in with `SourceConfig.render: true` AND the
+  caller configures `FetchSourceOptions.renderImpl` (any renderer —
+  Playwright, Puppeteer, a remote rendering service, a test stub); both keys
+  are required or `fetchSource` returns a typed `invalid-config` error,
+  never a silent normal fetch. `robots.txt` is checked once against the
+  requested URL before `renderImpl` ever runs. A successful render becomes a
+  normal, replayable `Snapshot` (`contentType: "html"`) carrying an honest
+  `rendered: true` marker, so trust surfaces can distinguish wire-HTML from
+  rendered-HTML; HTTP validators are skipped for a rendered fetch.
+  Composes with `crawlSource` unchanged: `render` is inherited by every
+  discovered page alongside `revalidate`/`respectRobots`. See
+  [`docs/decisions/rendered-fetch.md`](docs/decisions/rendered-fetch.md).
 - **Field Path Normalization**: `extract()`'s recovery rule for a
   provider-emitted `fieldPath` that carries concrete array indices (e.g.
   `"schedules[0].startDate"`) against a `targetSchema` that declares the

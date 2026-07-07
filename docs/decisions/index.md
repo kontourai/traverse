@@ -18,4 +18,5 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [fetch-and-snapshot](./fetch-and-snapshot.md) | needs-decision | Fetch and snapshot |
 | [field-path-normalization](./field-path-normalization.md) | needs-decision | Indexed field path normalization |
 | [http-validators](./http-validators.md) | current | HTTP validators (ETag / conditional GET) on snapshots |
+| [rendered-fetch](./rendered-fetch.md) | current | Rendered Fetch |
 | [transcript-content-type](./transcript-content-type.md) | current | YouTube / transcript (WebVTT) content type |

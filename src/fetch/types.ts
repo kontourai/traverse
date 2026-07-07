@@ -89,6 +89,26 @@ export interface SourceConfig {
    * existed. See docs/decisions/http-validators.md and kontourai/ops#75.
    */
   revalidate?: boolean;
+  /**
+   * Opt IN this source to a caller-supplied {@link FetchSourceOptions.renderImpl}
+   * instead of a plain HTTP GET — e.g. an SPA/JS-rendered page whose real
+   * content only exists after client-side JavaScript runs. Default `false`
+   * (a plain fetch). Requires {@link FetchSourceOptions.renderImpl} to also be
+   * configured; `render: true` with no `renderImpl` is a typed
+   * `invalid-config` error, never a silent fall-through to a normal fetch.
+   * `robots.txt` is still checked once against the requested URL before
+   * `renderImpl` is invoked. {@link SourceConfig.revalidate} has no effect
+   * when combined with this (an explicit warning is emitted) — a renderer has
+   * no real HTTP response to conditionally re-request. {@link SourceConfig.headers}
+   * and {@link SourceConfig.retries} ALSO have no effect on a rendered fetch —
+   * `renderImpl` receives only `{ userAgent, timeoutMs }` (see {@link RenderImpl}),
+   * so caller-supplied headers are never forwarded to it (the renderer owns its
+   * own request headers/auth) and a `renderImpl` failure is never retried by
+   * `fetchSource`. Both are surfaced as explicit `FetchResult.warnings` (not a
+   * silent no-op) whenever the caller actually set one. See
+   * docs/decisions/rendered-fetch.md.
+   */
+  render?: boolean;
 }
 
 /**
@@ -162,6 +182,17 @@ export interface Snapshot {
    * cheap "checked, still current" freshness event without a hash compare.
    */
   notModified?: boolean;
+  /**
+   * `true` ONLY when this snapshot's `body` came from a caller-supplied
+   * {@link FetchSourceOptions.renderImpl} rather than traverse's own HTTP GET.
+   * PRESENCE (never explicit `false`) is the marker — same convention as
+   * {@link Snapshot.bodyBytes} marking binary content and
+   * {@link Snapshot.notModified} marking a 304. `contentType` is always
+   * `"html"` and `bodyHash` uses the same text (`sha256Hex`) domain as every
+   * other non-binary snapshot when this is set. See
+   * docs/decisions/rendered-fetch.md.
+   */
+  rendered?: boolean;
 }
 
 /** The discriminant classes of a non-throwing fetch failure. */
@@ -258,6 +289,48 @@ export interface FetchLikeResponse {
 }
 
 /**
+ * The outcome of one {@link RenderImpl} invocation — becomes a `Snapshot`
+ * when successful. See {@link FetchSourceOptions.renderImpl} and
+ * docs/decisions/rendered-fetch.md.
+ */
+export interface RenderResult {
+  /** the rendered HTML — becomes `Snapshot.body` verbatim. */
+  html: string;
+  /**
+   * The URL the renderer actually ended up on, if it followed any
+   * client-side navigation; defaults to the requested URL when absent
+   * (`fetchSource` never fabricates a redirect chain from this).
+   */
+  finalUrl?: string;
+  /**
+   * An HTTP-like status the renderer observed, if any; defaults to `200`
+   * when absent. A value outside `[200,300)` maps to a typed `http-error`,
+   * mirroring the direct-fetch non-2xx branch.
+   */
+  status?: number;
+  /** non-fatal notes from the renderer, merged into `FetchResult.warnings`. */
+  warnings?: string[];
+}
+
+/**
+ * A caller-supplied renderer, invoked in place of a plain HTTP GET when a
+ * source's {@link SourceConfig.render} is `true`. `timeoutMs` is a
+ * DOCUMENTED HINT — `fetchSource` does NOT wrap this call in its own timeout
+ * race (unlike {@link FetchLike}); the implementation is responsible for
+ * enforcing it itself (e.g. a Playwright navigation timeout). Note the
+ * signature below carries only `{ userAgent, timeoutMs }` — `SourceConfig.headers`
+ * is NEVER forwarded here (the renderer implementation owns its own request
+ * headers/auth) and `SourceConfig.retries` never wraps this call (a
+ * `renderImpl` failure is not retried by `fetchSource`); both are flagged with
+ * an explicit `FetchResult.warnings` note when the caller actually set them.
+ * See docs/decisions/rendered-fetch.md.
+ */
+export type RenderImpl = (
+  url: string,
+  opts: { userAgent: string; timeoutMs: number },
+) => Promise<RenderResult>;
+
+/**
  * Injectable seams for `fetchSource`. Every default resolves to a real
  * runtime primitive; tests override them for deterministic, network-free,
  * timer-free runs.
@@ -296,6 +369,17 @@ export interface FetchSourceOptions {
    * the caller's / `fetchAndExtract`'s job.
    */
   store?: SnapshotStore;
+  /**
+   * Caller-supplied renderer for a source whose {@link SourceConfig.render}
+   * is `true` (e.g. Playwright, Puppeteer, a remote rendering service, or a
+   * test stub) — invoked in place of a plain HTTP GET for that source only.
+   * Unlike every other seam on this interface, there is NO default: it is
+   * simply `undefined` unless a caller wires one, since traverse core ships
+   * no rendering/browser dependency of its own. Only invoked when the
+   * fetched `SourceConfig.render` is also `true`; ignored otherwise. See
+   * docs/decisions/rendered-fetch.md.
+   */
+  renderImpl?: RenderImpl;
 }
 
 /** Parsed, UA-resolved robots rules for one origin. `null` group = allow-all. */
