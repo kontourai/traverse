@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/kontourai/traverse/compare/v0.14.0...v0.14.1) (2026-07-10)
+
+
+### Fixes
+
+* scope HTTP validators to resource identity ([#49](https://github.com/kontourai/traverse/issues/49)) ([#51](https://github.com/kontourai/traverse/issues/51)) ([3d5c778](https://github.com/kontourai/traverse/commit/3d5c77855f49194e36e5c0d706f7a7850a9e2be3))
+
 ## [0.14.0](https://github.com/kontourai/traverse/compare/v0.13.0...v0.14.0) (2026-07-07)
 
 
