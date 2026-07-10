@@ -78,15 +78,16 @@ export interface SourceConfig {
   respectRobots?: boolean;
   /**
    * Opt in to a CONDITIONAL GET when a prior snapshot for this `id` (looked up
-   * via {@link FetchSourceOptions.store}) carries HTTP validators. When `true`
-   * and that prior snapshot has an `etag` and/or `lastModified`, `fetchSource`
-   * sends `If-None-Match` / `If-Modified-Since` so an unchanged resource comes
-   * back as a `304 Not Modified` with ZERO body transfer — the prior snapshot is
-   * returned marked `fromCache` + `notModified` instead of re-downloading. Falls
-   * back to the existing sha256 body-hash compare when a server offers no
-   * validators (a fresh `200` is captured with whatever validators it does
-   * send). Default `false` — behavior is byte-identical to before this option
-   * existed. See docs/decisions/http-validators.md and kontourai/ops#75.
+   * via {@link FetchSourceOptions.store}) carries HTTP validators for the exact
+   * resource URL being requested. When `true`, `fetchSource` scopes that prior's
+   * `etag` / `lastModified` to the matching request and sends `If-None-Match` /
+   * `If-Modified-Since`. A `304 Not Modified` re-serves the prior snapshot marked
+   * `fromCache` + `notModified` only when at least one validator from that exact
+   * prior was sent. A validator-free or nonmatching request is unconditional;
+   * its fresh `200` is captured with a new `bodyHash` for the CALLER to compare
+   * with any prior. `fetchSource` does not perform the prior-hash comparison.
+   * Default `false` — behavior is byte-identical to before this option existed.
+   * See docs/decisions/http-validators.md and kontourai/ops#75.
    */
   revalidate?: boolean;
   /**
@@ -361,12 +362,15 @@ export interface FetchSourceOptions {
   robotsCache?: Map<string, RobotsRules>;
   /**
    * Snapshot store consulted ONLY when {@link SourceConfig.revalidate} is `true`:
-   * `store.latest(config.id)` supplies the prior snapshot whose `etag` /
-   * `lastModified` become the `If-None-Match` / `If-Modified-Since` request
-   * headers, and — on a `304` — the snapshot re-served as `notModified`. Unused
-   * (never read) when `revalidate` is falsy, so a plain fetch never needs a
-   * store. `fetchSource` only READS the store; persisting a fresh snapshot stays
-   * the caller's / `fetchAndExtract`'s job.
+   * `store.latest(config.id)` supplies a candidate prior snapshot. Its `etag` /
+   * `lastModified` become `If-None-Match` / `If-Modified-Since` headers only for
+   * a request to that prior's exact resource URL, and a `304` re-serves it as
+   * `notModified` only when at least one of those exact-prior validators was
+   * sent. An unconditional or fresh `200` supplies a new `bodyHash` for the
+   * caller to compare; `fetchSource` does not compare it with the prior hash.
+   * The store is unused (never read) when `revalidate` is falsy, so a plain fetch
+   * never needs one. `fetchSource` only READS the store; persisting a fresh
+   * snapshot stays the caller's / `fetchAndExtract`'s job.
    */
   store?: SnapshotStore;
   /**

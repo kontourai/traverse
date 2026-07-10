@@ -99,6 +99,34 @@ function backoffMs(attempt: number, random: () => number): number {
   return Math.floor(random() * ceil);
 }
 
+/** Serialized HTTP request identity: exact URL, including query, excluding fragment. */
+function requestUrlIdentity(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSameRequestResource(left: string, right: string): boolean {
+  const leftIdentity = requestUrlIdentity(left);
+  const rightIdentity = requestUrlIdentity(right);
+  return leftIdentity !== undefined && rightIdentity !== undefined && leftIdentity === rightIdentity;
+}
+
+function withoutConditionalHeaders(base: Record<string, string>): Record<string, string> {
+  const headers = { ...base };
+  for (const name of Object.keys(headers)) {
+    const lowerName = name.toLowerCase();
+    if (lowerName === "if-none-match" || lowerName === "if-modified-since") {
+      delete headers[name];
+    }
+  }
+  return headers;
+}
+
 interface Resolved {
   fetchImpl: FetchLike;
   now: () => number;
@@ -232,11 +260,11 @@ export async function fetchSource(
 
   // Build headers from caller extras first, then force our honest identity so a
   // caller-supplied `User-Agent` can never override the bot identity/contact.
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     Accept: "text/html,application/xhtml+xml,text/plain,*/*",
     ...(config.headers ?? {}),
   };
-  headers["User-Agent"] = userAgent;
+  baseHeaders["User-Agent"] = userAgent;
 
   // --- rendered fetch (opt-in seam, traverse#41) ---
   // A source opts in with `SourceConfig.render: true`; the caller must ALSO
@@ -365,11 +393,9 @@ export async function fetchSource(
     return withWarnings({ snapshot }, warnings);
   }
 
-  // Conditional GET (opt-in). When `revalidate` is set and a prior snapshot for
-  // this id carries HTTP validators, send them so an unchanged resource returns
-  // a bodyless 304 (handled in the loop below). No store / no validators / no
-  // opt-in => nothing added and behavior is byte-identical to before. The prior
-  // snapshot is also what a 304 re-serves, so it is captured here for the loop.
+  // Conditional GET (opt-in). Capture the latest prior for this source id here;
+  // its validators are attached below only when a request hop exactly matches
+  // the resource URL that produced them.
   let prior: Snapshot | undefined;
   if ((config.revalidate ?? false) && opts.store) {
     // A custom store could reject; never-throws means we degrade to an
@@ -380,8 +406,6 @@ export async function fetchSource(
       warnings.push(`revalidate: prior-snapshot lookup failed (${err instanceof Error ? err.message : String(err)}); fetching unconditionally`);
       prior = undefined;
     }
-    if (prior?.etag) headers["If-None-Match"] = prior.etag;
-    if (prior?.lastModified) headers["If-Modified-Since"] = prior.lastModified;
   }
 
   // --- redirect loop (manual, bounded, robots-checked per hop) ---
@@ -413,8 +437,28 @@ export async function fetchSource(
       }
     }
 
+    // Derive one fresh headers object per resource hop, then reuse that exact
+    // object only for retries of this URL. Caller conditional headers are valid
+    // for the initial request only unless exact-prior validators replace them;
+    // no spelling/casing variant crosses a redirect boundary. Stored validators
+    // are scoped to their exact resource.
+    let requestHeaders = hop === 0 ? { ...baseHeaders } : withoutConditionalHeaders(baseHeaders);
+    const matchesPriorResource = prior !== undefined && isSameRequestResource(currentUrl.href, prior.url);
+    let sentPriorValidator = false;
+    if (prior && matchesPriorResource) {
+      requestHeaders = withoutConditionalHeaders(requestHeaders);
+      if (prior.etag) {
+        requestHeaders["If-None-Match"] = prior.etag;
+        sentPriorValidator = true;
+      }
+      if (prior.lastModified) {
+        requestHeaders["If-Modified-Since"] = prior.lastModified;
+        sentPriorValidator = true;
+      }
+    }
+
     // request with bounded, jittered retries.
-    const attempt = await requestWithRetries(currentUrl.href, headers, timeoutMs, retries, r, warnings);
+    const attempt = await requestWithRetries(currentUrl.href, requestHeaders, timeoutMs, retries, r, warnings);
     // stamp the host's "finished at" for politeness regardless of outcome.
     if (minDelayMs > 0) r.politeness.set(origin, r.now());
 
@@ -425,17 +469,17 @@ export async function fetchSource(
     // confirmed the resource is unchanged, so there is no body to read — re-serve
     // the byte-identical prior snapshot, flagged `notModified` (and `fromCache`).
     // Checked BEFORE the 3xx redirect branch below, since 304 falls in that
-    // range but is emphatically not a redirect. Conditional headers are only ever
-    // sent when a `prior` exists, so a 304 without one is a server-side surprise
-    // rather than our doing — surface it as a typed http-error.
+    // range but is emphatically not a redirect. A prior snapshot authorizes this
+    // cache return only when at least one of its validators was attached to this
+    // exact resource request; any other 304 is a typed server-side surprise.
     if (response.status === 304) {
-      if (!prior) {
+      if (!prior || !matchesPriorResource || !sentPriorValidator) {
         return withWarnings(
           {
             error: {
               kind: "http-error",
               status: 304,
-              message: `unexpected 304 Not Modified from ${currentUrl.href} with no prior snapshot to revalidate`,
+              message: `unexpected 304 Not Modified from ${currentUrl.href} without validators from a matching prior snapshot`,
             },
           },
           warnings,

@@ -1,14 +1,14 @@
 // HTTP validator (conditional GET) tests for fetchSource. Cover: capturing
 // ETag / Last-Modified off a 200, sending If-None-Match / If-Modified-Since on a
 // revalidate re-fetch when a prior snapshot carries validators, re-serving the
-// prior snapshot on a 304 (marked fromCache + notModified), the sha256 fallback
-// when a server offers no validators, and the never-throws discipline (an
-// unsolicited 304 with no prior is a typed http-error). All network-free via the
-// injected fake fetch + an in-memory store.
+// prior snapshot on a 304 (marked fromCache + notModified), fresh body hashes for
+// caller-owned comparison when a server offers no validators, and the never-
+// throws discipline (an unsolicited 304 with no prior is a typed http-error).
+// All network-free via the injected fake fetch + an in-memory store.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { fetchSource } from "../src/fetch/fetch-source.js";
+import { fetchSource, sha256Hex } from "../src/fetch/fetch-source.js";
 import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 import type { FetchSourceOptions, SourceConfig } from "../src/fetch/types.js";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
@@ -43,7 +43,7 @@ describe("fetchSource() — validator capture", () => {
 });
 
 describe("fetchSource() — conditional GET (revalidate)", () => {
-  it("sends If-None-Match / If-Modified-Since when a prior snapshot carries validators", async () => {
+  it("revalidates the same exact URL and re-serves its prior snapshot", async () => {
     const store = createInMemorySnapshotStore();
     const first = fakeFetch({
       "https://example.test/page": { status: 200, headers: { etag: ETAG, "last-modified": LAST_MOD }, body: "hello" },
@@ -65,6 +65,215 @@ describe("fetchSource() — conditional GET (revalidate)", () => {
     assert.equal(result.snapshot!.bodyHash, captured.snapshot!.bodyHash);
   });
 
+  it("does not forward stored validators across a cross-host redirect", async () => {
+    const store = createInMemorySnapshotStore();
+    const captured = await fetchSource(
+      cfg(),
+      fastOpts({
+        fetch: fakeFetch({
+          "https://example.test/page": {
+            status: 200,
+            headers: { etag: ETAG, "last-modified": LAST_MOD },
+            body: "prior",
+          },
+        }),
+      }),
+    );
+    await store.put(captured.snapshot!);
+
+    const fetch = fakeFetch({
+      "https://example.test/page": {
+        status: 302,
+        headers: { location: "https://redirect.test/final" },
+      },
+      "https://redirect.test/final": { status: 200, body: "fresh" },
+    });
+    const result = await fetchSource(
+      cfg({
+        revalidate: true,
+        headers: {
+          "if-none-match": '"caller-etag"',
+          "if-modified-since": "Tue, 20 Oct 2026 07:28:00 GMT",
+          "X-Trace-Id": "trace-1",
+        },
+      }),
+      fastOpts({ fetch, store }),
+    );
+
+    assert.equal(fetch.calls.length, 2);
+    assert.equal(fetch.calls[0].headers["X-Trace-Id"], "trace-1");
+    assert.equal(fetch.calls[0].headers["If-None-Match"], ETAG);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], LAST_MOD);
+    assert.deepEqual(
+      Object.keys(fetch.calls[0].headers).filter((name) =>
+        ["if-none-match", "if-modified-since"].includes(name.toLowerCase()),
+      ),
+      ["If-None-Match", "If-Modified-Since"],
+    );
+    assert.deepEqual(
+      Object.keys(fetch.calls[1].headers).filter((name) =>
+        ["if-none-match", "if-modified-since"].includes(name.toLowerCase()),
+      ),
+      [],
+    );
+    assert.equal(result.snapshot!.url, "https://redirect.test/final");
+    assert.equal(result.snapshot!.body, "fresh");
+  });
+
+  it("does not reuse validators when a stable source id changes URL", async () => {
+    const store = createInMemorySnapshotStore();
+    const oldUrl = "https://example.test/old";
+    const newUrl = "https://example.test/new";
+    const captured = await fetchSource(
+      cfg({ url: oldUrl }),
+      fastOpts({
+        fetch: fakeFetch({
+          [oldUrl]: {
+            status: 200,
+            headers: { etag: ETAG, "last-modified": LAST_MOD },
+            body: "prior",
+          },
+        }),
+      }),
+    );
+    await store.put(captured.snapshot!);
+
+    const fetch = fakeFetch({ [newUrl]: { status: 200, body: "fresh" } });
+    const result = await fetchSource(
+      cfg({ url: newUrl, revalidate: true }),
+      fastOpts({ fetch, store }),
+    );
+
+    assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
+    assert.equal(result.snapshot!.body, "fresh");
+    assert.equal(result.snapshot!.bodyHash, sha256Hex("fresh"));
+    assert.notEqual(result.snapshot!.bodyHash, captured.snapshot!.bodyHash);
+  });
+
+  it("treats a query-string change as a different resource", async () => {
+    const store = createInMemorySnapshotStore();
+    const priorUrl = "https://example.test/page?version=1";
+    const currentUrl = "https://example.test/page?version=2";
+    const captured = await fetchSource(
+      cfg({ url: priorUrl }),
+      fastOpts({
+        fetch: fakeFetch({
+          [priorUrl]: {
+            status: 200,
+            headers: { etag: ETAG, "last-modified": LAST_MOD },
+            body: "prior",
+          },
+        }),
+      }),
+    );
+    await store.put(captured.snapshot!);
+
+    const fetch = fakeFetch({ [currentUrl]: { status: 200, body: "fresh" } });
+    const result = await fetchSource(
+      cfg({ url: currentUrl, revalidate: true }),
+      fastOpts({ fetch, store }),
+    );
+
+    assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
+    assert.equal(result.snapshot!.url, currentUrl);
+    assert.equal(result.snapshot!.body, "fresh");
+  });
+
+  it("revalidates only the exact prior final URL in a redirect chain", async () => {
+    const store = createInMemorySnapshotStore();
+    const startUrl = "https://example.test/start";
+    const finalUrl = "https://example.test/final";
+    const captured = await fetchSource(
+      cfg({ url: startUrl }),
+      fastOpts({
+        fetch: fakeFetch({
+          [startUrl]: { status: 302, headers: { location: finalUrl } },
+          [finalUrl]: {
+            status: 200,
+            headers: { etag: ETAG, "last-modified": LAST_MOD },
+            body: "prior final",
+          },
+        }),
+      }),
+    );
+    await store.put(captured.snapshot!);
+
+    const fetch = fakeFetch({
+      [startUrl]: { status: 302, headers: { location: finalUrl } },
+      [finalUrl]: { status: 304 },
+    });
+    const result = await fetchSource(
+      cfg({ url: startUrl, revalidate: true }),
+      fastOpts({ fetch, store }),
+    );
+
+    assert.equal(fetch.calls.length, 2);
+    assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
+    assert.equal(fetch.calls[1].headers["If-None-Match"], ETAG);
+    assert.equal(fetch.calls[1].headers["If-Modified-Since"], LAST_MOD);
+    assert.equal(result.error, undefined);
+    assert.equal(result.snapshot!.url, finalUrl);
+    assert.equal(result.snapshot!.body, "prior final");
+    assert.equal(result.snapshot!.bodyHash, captured.snapshot!.bodyHash);
+    assert.equal(result.snapshot!.fromCache, true);
+    assert.equal(result.snapshot!.notModified, true);
+  });
+
+  it("rejects a 304 when no validator from the matching prior was sent", async () => {
+    const store = createInMemorySnapshotStore();
+    const priorUrl = "https://example.test/old";
+    const currentUrl = "https://example.test/new";
+    const captured = await fetchSource(
+      cfg({ url: priorUrl }),
+      fastOpts({
+        fetch: fakeFetch({
+          [priorUrl]: { status: 200, headers: { etag: ETAG }, body: "prior" },
+        }),
+      }),
+    );
+    await store.put(captured.snapshot!);
+
+    const fetch = fakeFetch({ [currentUrl]: { status: 304 } });
+    const result = await fetchSource(
+      cfg({ url: currentUrl, revalidate: true }),
+      fastOpts({ fetch, store }),
+    );
+
+    assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
+    assert.equal(result.snapshot, undefined);
+    assert.equal(result.error!.kind, "http-error");
+    assert.equal(result.error!.status, 304);
+  });
+
+  it("treats a malformed prior snapshot URL as nonmatching and fetches unconditionally", async () => {
+    const store = createInMemorySnapshotStore();
+    const captured = await fetchSource(
+      cfg(),
+      fastOpts({
+        fetch: fakeFetch({
+          "https://example.test/page": {
+            status: 200,
+            headers: { etag: ETAG, "last-modified": LAST_MOD },
+            body: "prior",
+          },
+        }),
+      }),
+    );
+    await store.put({ ...captured.snapshot!, url: "not a valid URL" });
+
+    const fetch = fakeFetch({ "https://example.test/page": { status: 200, body: "fresh" } });
+    const result = await fetchSource(cfg({ revalidate: true }), fastOpts({ fetch, store }));
+
+    assert.equal(result.error, undefined);
+    assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
+    assert.equal(result.snapshot!.body, "fresh");
+  });
+
   it("does NOT send conditional headers when revalidate is off, even with a prior snapshot", async () => {
     const store = createInMemorySnapshotStore();
     const first = fakeFetch({ "https://example.test/page": { headers: { etag: ETAG }, body: "hello" } });
@@ -81,10 +290,10 @@ describe("fetchSource() — conditional GET (revalidate)", () => {
     const result = await fetchSource(cfg({ revalidate: true }), fastOpts({ fetch, store }));
     assert.equal(fetch.calls[0].headers["If-None-Match"], undefined);
     assert.equal(fetch.calls[0].headers["If-Modified-Since"], undefined);
-    assert.equal(result.snapshot!.body, "fresh"); // normal 200, hash-compare fallback path
+    assert.equal(result.snapshot!.body, "fresh"); // caller can compare the fresh bodyHash with any prior
   });
 
-  it("does NOT send conditional headers when the prior snapshot has no validators (sha256 fallback)", async () => {
+  it("does NOT send conditional headers when the prior snapshot has no validators (caller compares bodyHash)", async () => {
     const store = createInMemorySnapshotStore();
     const first = fakeFetch({ "https://example.test/page": { body: "hello" } }); // no validators
     await store.put((await fetchSource(cfg(), fastOpts({ fetch: first }))).snapshot!);
@@ -92,7 +301,7 @@ describe("fetchSource() — conditional GET (revalidate)", () => {
     const second = fakeFetch({ "https://example.test/page": { body: "hello-changed" } });
     const result = await fetchSource(cfg({ revalidate: true }), fastOpts({ fetch: second, store }));
     assert.equal(second.calls[0].headers["If-None-Match"], undefined);
-    assert.equal(result.snapshot!.body, "hello-changed"); // full body fetched; drift is caught by hash compare
+    assert.equal(result.snapshot!.body, "hello-changed"); // full body and fresh hash are returned for caller comparison
   });
 
   it("a fresh 200 during revalidate captures the server's NEW validators", async () => {
