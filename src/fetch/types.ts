@@ -83,9 +83,12 @@ export interface SourceConfig {
    * `etag` / `lastModified` to the matching request and sends `If-None-Match` /
    * `If-Modified-Since`. A `304 Not Modified` re-serves the prior snapshot marked
    * `fromCache` + `notModified` only when at least one validator from that exact
-   * prior was sent. A validator-free or nonmatching request is unconditional;
-   * its fresh `200` is captured with a new `bodyHash` for the CALLER to compare
-   * with any prior. `fetchSource` does not perform the prior-hash comparison.
+   * prior was sent. No validators from the stored prior are added to a
+   * validator-free or nonmatching request; caller-supplied conditional headers
+   * may remain on the initial hop. A `304` without prior validators sent is
+   * never treated as `notModified`. A fresh `200` is captured with a new
+   * `bodyHash` for the CALLER to compare with any prior. `fetchSource` does not
+   * perform the prior-hash comparison.
    * Default `false` — behavior is byte-identical to before this option existed.
    * See docs/decisions/http-validators.md and kontourai/ops#75.
    */
