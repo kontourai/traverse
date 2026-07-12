@@ -67,6 +67,8 @@ export type {
   RobotsRules,
   RenderResult,
   RenderImpl,
+  RenderPolicy,
+  RenderEscalation,
 } from "./types.js";
 export {
   DEFAULT_USER_AGENT,

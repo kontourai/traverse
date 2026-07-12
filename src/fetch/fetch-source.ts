@@ -18,6 +18,7 @@ import type {
   FetchLike,
   FetchLikeResponse,
   FetchResult,
+  RenderPolicy,
   RenderResult,
   RobotsRules,
   Snapshot,
@@ -34,6 +35,8 @@ import {
 } from "./types.js";
 import { isPathAllowed, parseRobots } from "./robots.js";
 import type { ContentType } from "../types.js";
+import { prepareContent } from "../content-prep.js";
+import { isPureJsShellWarning } from "../embedded.js";
 
 /** Process-wide politeness ledger (per host), used when none is injected. */
 const GLOBAL_POLITENESS = new Map<string, number>();
@@ -232,6 +235,155 @@ async function loadRobots(
  * redirects) and returning a `FetchResult`. Never throws.
  */
 export async function fetchSource(
+  config: SourceConfig,
+  opts: FetchSourceOptions = {},
+): Promise<FetchResult> {
+  const policy = resolveRenderPolicy(config);
+  if (typeof policy !== "string") return { error: policy };
+
+  if (policy === "never") {
+    const result = await fetchSourceAttempt({ ...config, renderPolicy: undefined, render: false }, opts);
+    return withEscalation(result, {
+      policy,
+      shellWarningDetected: false,
+      renderAttempted: false,
+      outcome: "not-needed",
+    });
+  }
+
+  if (policy === "always") {
+    let result = await fetchSourceAttempt(
+      { ...config, renderPolicy: undefined, render: true, revalidate: false },
+      opts,
+    );
+    if (config.revalidate ?? false) {
+      result = appendWarning(
+        result,
+        "revalidation has no effect for a rendered fetch (SourceConfig.render is true); no conditional GET is sent and no HTTP validators are captured",
+      );
+    }
+    if (!result.snapshot) return result;
+    return withEscalation(result, {
+      policy,
+      shellWarningDetected: false,
+      renderAttempted: true,
+      outcome: "rendered",
+    });
+  }
+
+  const first = await fetchSourceAttempt(
+    { ...config, renderPolicy: undefined, render: false },
+    opts,
+  );
+  const snapshot = first.snapshot;
+  if (
+    !snapshot ||
+    snapshot.contentType !== "html" ||
+    snapshot.rendered === true ||
+    snapshot.notModified === true
+  ) {
+    return withEscalation(first, {
+      policy,
+      shellWarningDetected: false,
+      renderAttempted: false,
+      outcome: "not-needed",
+    });
+  }
+
+  const prep = prepareContent(snapshot.body, "html");
+  const shellWarningDetected = (prep.warnings ?? []).some(isPureJsShellWarning);
+  if (!shellWarningDetected) {
+    return withEscalation(first, {
+      policy,
+      shellWarningDetected: false,
+      renderAttempted: false,
+      outcome: "not-needed",
+    });
+  }
+
+  const firstSnapshotRef = buildSnapshotRef(snapshot);
+  if (!opts.renderImpl) {
+    return withEscalation(first, {
+      policy,
+      shellWarningDetected: true,
+      renderAttempted: false,
+      outcome: "renderer-unavailable-fallback",
+      firstSnapshotRef,
+    });
+  }
+
+  // A rendered retry is an entirely validator-free acquisition. In
+  // particular, it cannot read the store, inherit conditional headers, return
+  // a 304, or capture validators.
+  const rendered = await fetchSourceAttempt(
+    {
+      ...config,
+      renderPolicy: undefined,
+      render: true,
+      revalidate: false,
+      headers: withoutConditionalHeaders(config.headers ?? {}),
+    },
+    { ...opts, store: undefined },
+  );
+  if (rendered.snapshot) {
+    return withEscalation(rendered, {
+      policy,
+      shellWarningDetected: true,
+      renderAttempted: true,
+      outcome: "rendered",
+      firstSnapshotRef,
+    });
+  }
+  return withEscalation(first, {
+    policy,
+    shellWarningDetected: true,
+    renderAttempted: true,
+    outcome: "render-failed-fallback",
+    firstSnapshotRef,
+    ...(rendered.error ? { renderError: rendered.error } : {}),
+  });
+}
+
+function resolveRenderPolicy(config: SourceConfig): RenderPolicy | FetchError {
+  const requested = config?.renderPolicy;
+  if (
+    requested !== undefined &&
+    requested !== "never" &&
+    requested !== "always" &&
+    requested !== "on-shell-warning"
+  ) {
+    return { kind: "invalid-config", message: `unsupported SourceConfig.renderPolicy: ${String(requested)}` };
+  }
+  if (requested !== undefined && config.render !== undefined) {
+    const legacyPolicy: RenderPolicy = config.render ? "always" : "never";
+    if (requested !== legacyPolicy) {
+      return {
+        kind: "invalid-config",
+        message: `SourceConfig.render (${String(config.render)}) conflicts with renderPolicy (${requested})`,
+      };
+    }
+  }
+  return requested ?? (config?.render === true ? "always" : "never");
+}
+
+function buildSnapshotRef(snapshot: Snapshot): string {
+  const params = new URLSearchParams({
+    url: snapshot.url,
+    sha256: snapshot.bodyHash,
+    fetchedAt: snapshot.fetchedAt,
+  });
+  return `traverse-snapshot:${encodeURIComponent(snapshot.sourceId)}?${params.toString()}`;
+}
+
+function withEscalation(result: FetchResult, renderEscalation: NonNullable<FetchResult["renderEscalation"]>): FetchResult {
+  return { ...result, renderEscalation };
+}
+
+function appendWarning(result: FetchResult, warning: string): FetchResult {
+  return { ...result, warnings: [...(result.warnings ?? []), warning] };
+}
+
+async function fetchSourceAttempt(
   config: SourceConfig,
   opts: FetchSourceOptions = {},
 ): Promise<FetchResult> {
