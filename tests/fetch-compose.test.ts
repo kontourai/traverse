@@ -32,6 +32,7 @@ const cardsHtml = readFileSync(
   "utf8",
 );
 const CHUNK_SIZE = 400;
+const SPA_SHELL = readFileSync(new URL("../../tests/fixtures/spa-shell-empty.html", import.meta.url), "utf8");
 
 function cfg(overrides: Partial<SourceConfig> = {}): SourceConfig {
   return { id: "listing-1", url: "https://example.test/listing", respectRobots: false, ...overrides };
@@ -466,5 +467,74 @@ describe("fetchAndExtract() — rendered snapshot cost-guard parity (traverse#41
 
     assert.equal(result.extraction!.providerCalls, 6);
     assert.ok(!result.extraction!.warnings?.some((w) => /maxProviderCalls/.test(w)));
+  });
+});
+
+describe("fetchAndExtract() — render escalation provenance", () => {
+  it("calls the provider once for only the selected render and captures only that snapshot", async () => {
+    const renderedBody = "<main><h1>Rendered Winner</h1><p>Selected content only.</p></main>";
+    const provider = mockProvider();
+    const store = createInMemorySnapshotStore();
+    const result = await fetchAndExtract(cfg({ renderPolicy: "on-shell-warning" }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "live-with-capture",
+      fetchOptions: {
+        fetch: fakeFetch({ "https://example.test/listing": { headers: { "content-type": "text/html" }, body: SPA_SHELL } }),
+        renderImpl: fakeRenderImpl({ "https://example.test/listing": { html: renderedBody, warnings: ["render-selected"] } }),
+        sleep: async () => {},
+        random: () => 0,
+        clock: () => "2026-07-12T00:00:00.000Z",
+      },
+    });
+
+    assert.equal(provider.calls.length, 1, "classification does not spend a provider call on the plain shell");
+    assert.match(provider.calls[0].content, /Rendered Winner/);
+    assert.doesNotMatch(provider.calls[0].content, /Loading/);
+    assert.equal(result.fetch.snapshot?.body, renderedBody);
+    assert.equal(result.fetch.snapshot?.rendered, true);
+    assert.deepEqual(result.fetch.warnings, ["render-selected"]);
+    assert.equal(result.fetch.warnings?.some((warning) => warning.startsWith("js-shell-suspected:")) ?? false, false);
+    const parsed = parseSnapshotSourceRef(result.sourceRef!);
+    assert.equal(parsed?.bodyHash, sha256Hex(renderedBody));
+    assert.equal(parsed?.bodyHash, result.fetch.snapshot?.bodyHash);
+    const stored = await store.list("listing-1");
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].body, renderedBody);
+    assert.equal(stored[0].bodyHash, parsed?.bodyHash);
+  });
+
+  it("render failure calls the provider only for and pins sourceRef/capture to the first snapshot", async () => {
+    const firstBody = SPA_SHELL.replace(
+      '<div id="root"></div>',
+      '<div id="root"></div><p>Loading fallback snapshot</p>',
+    );
+    const provider = mockProvider();
+    const store = createInMemorySnapshotStore();
+    const result = await fetchAndExtract(cfg({ renderPolicy: "on-shell-warning" }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      store,
+      mode: "live-with-capture",
+      fetchOptions: {
+        fetch: fakeFetch({ "https://example.test/listing": { headers: { "content-type": "text/html" }, body: firstBody } }),
+        renderImpl: fakeRenderImpl({ "https://example.test/listing": { throws: "renderer offline" } }),
+        sleep: async () => {},
+        random: () => 0,
+        clock: () => "2026-07-12T00:00:00.000Z",
+      },
+    });
+
+    assert.equal(result.fetch.renderEscalation?.outcome, "render-failed-fallback");
+    assert.equal(result.fetch.renderEscalation?.renderError?.kind, "adapter-error");
+    assert.equal(result.fetch.snapshot?.body, firstBody);
+    assert.equal(provider.calls.length, 1);
+    assert.match(provider.calls[0].content, /Loading/);
+    const parsed = parseSnapshotSourceRef(result.sourceRef!);
+    assert.equal(parsed?.bodyHash, sha256Hex(firstBody));
+    const stored = await store.list("listing-1");
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].body, firstBody);
   });
 });

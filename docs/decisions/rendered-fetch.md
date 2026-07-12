@@ -19,17 +19,23 @@ runtime dependencies for this: a caller plugs in any renderer (Playwright,
 Puppeteer, a remote rendering service, a test stub) that satisfies the
 `RenderImpl` signature.
 
-### 1. Two-key opt-in gate
+### 1. Render policy and compatibility
 
-The seam is gated by TWO keys, an exact structural mirror of the existing
-`SourceConfig.revalidate` + `FetchSourceOptions.store` pattern:
-`SourceConfig.render?: boolean` (the source opts in) AND
-`FetchSourceOptions.renderImpl?: RenderImpl` (the caller configures a
-renderer). `fetchSource` never renders unless BOTH are set. `render: true`
-with no `renderImpl` configured is a typed `invalid-config` error
-("SourceConfig.render is true but no FetchSourceOptions.renderImpl is
-configured") — never a silent fall-through to a normal HTTP fetch, mirroring
-the `mode: "replay"` + no `store` precedent in `compose.ts`/`crawl.ts`.
+`SourceConfig.renderPolicy` is the orchestration control:
+
+| Policy | Attempts | Validator rule | Selected result |
+| --- | --- | --- | --- |
+| `never` | One plain attempt | Exact-resource revalidation is unchanged | Plain result |
+| `always` | One rendered attempt | Revalidation is suppressed; no validator-store read, conditional header, 304, or validator capture | Rendered result; a missing renderer is typed `invalid-config` |
+| `on-shell-warning` | One plain attempt, then zero or one rendered attempt | Only the plain attempt may use validators; the render retry receives no revalidation state | A successful rendered snapshot wins; a failed or unavailable renderer falls back to the successful plain snapshot |
+
+The deprecated `SourceConfig.render?: boolean` spelling remains compatible:
+with no `renderPolicy`, `render: true` maps to `always` and `render: false` or
+an absent value maps to `never`. When both keys are supplied, they must agree
+semantically: `true` only agrees with `always`, and `false` only agrees with
+`never`. All other combinations return a typed `invalid-config` result before
+I/O. This is an additive, semver-minor API change; the legacy key is not
+removed.
 
 ### 2. `RenderImpl` signature and the `timeoutMs` hint
 
@@ -103,16 +109,17 @@ If a future consumer needs render-provenance without a store round-trip
 (e.g. a log/UI reading raw sourceRef strings with no snapshot access), that
 is the trigger to revisit this — not built preemptively here.
 
-### 6. Validators skipped, with an explicit warning on the config mistake
+### 6. Validators never enter a rendered attempt
 
-HTTP validators (`etag`/`lastModified`/conditional GET) are SKIPPED entirely
-for a rendered fetch — a renderer has no real HTTP response headers to
-report, so no `If-None-Match`/`If-Modified-Since` is ever sent and
-`etag`/`lastModified` stay unset on the resulting snapshot. When a caller
-sets BOTH `render: true` AND `revalidate: true`, `fetchSource` pushes an
-explicit `FetchResult.warnings` note ("revalidation has no effect for a
-rendered fetch...") rather than silently ignoring the combination — masking
-that config mistake would be worse than a normal, unconditional render.
+HTTP validators (`etag`/`lastModified`/conditional GET) are skipped entirely
+for every rendered attempt — a renderer has no real HTTP response headers to
+report, so no `If-None-Match`/`If-Modified-Since` is sent and `etag`/
+`lastModified` stay unset. This includes the second attempt under
+`on-shell-warning`: stored validators and conditional headers belong only to
+the initial plain attempt, and `revalidate` is suppressed before rendering.
+A trustworthy plain `304 notModified` is final and never triggers rendering.
+An explicit warning still records when revalidation was configured but is
+inert for an `always` rendered fetch.
 
 ### 7. Headers and retries are also not forwarded — warn, don't silently drop
 
@@ -168,13 +175,50 @@ forwarding, unchanged. `discoverSameHostLinks` composes unchanged too — it
 operates on `Snapshot.body` gated on `contentType === "html"`, both of which
 a rendered snapshot satisfies exactly like a wire-fetched one.
 
-### 10. Cost guards untouched
+### 10. Shell classification, winner, fallback, and audit
+
+`on-shell-warning` classifies a successful, fresh, unrendered HTML snapshot
+during fetch orchestration, using the same bounded HTML preparation and
+inspection path extraction uses. It escalates only for the exact pure warning
+prefix `js-shell-suspected:`. The distinct
+`js-shell-suspected-embedded-state-available:` warning defined by
+[`ADR 0005`](../adr/0005-embedded-state-sidecar.md) does not escalate. Neither
+do first-attempt errors, binary/text snapshots, already-rendered snapshots, or
+trustworthy 304 results. Classification happens before extraction, so a
+discarded plain shell never causes a provider pass.
+
+The renderer is invoked at most once per public `fetchSource` call. Any
+successful rendered snapshot wins regardless of its size or eventual proposal
+count. Render failure or absence under `on-shell-warning` falls back to the
+successful first snapshot; `always` without a renderer remains
+`invalid-config`. `FetchResult.renderEscalation` is typed audit metadata, not a
+second result bag. The selected top-level snapshot/error and warnings remain
+authoritative. A discarded attempt's shell warnings are not merged into the
+successful rendered attempt's extraction-facing warning channel, while
+`firstSnapshotRef` and `renderError` make replacement or fallback auditable.
+
+### 11. Cost guards and ownership
 
 Rendering happens inside `acquire()` (`compose.ts`), strictly before the
 resulting snapshot is handed to `extract()`. `maxProviderCalls`/
 `maxTotalTokens` accounting is entirely `extract()`-side and never sees
 whether a snapshot was rendered or wire-fetched — `compose.ts` needed no
 code change for this seam.
+
+Traverse owns deterministic attempt selection, but the caller owns renderer
+cost and lifecycle. Traverse adds no browser dependency, passes the existing
+`timeoutMs` hint, and never retries `renderImpl`; callers choose and pay for
+Playwright, Puppeteer, a remote rendering service, or another implementation.
+
+### 12. Consumer migration boundary
+
+The policy seam is ready for the original downstream ingestion pipeline, its
+check coordinator, and the check-runner package itself to forward policy and
+consume Traverse's one selected result. Those migrations are follow-up lanes:
+this change does not modify consumer repositories, preserve consumer-specific
+telemetry shapes, or raise their Traverse dependency. Consumers should remove
+local shell parsing, second-fetch coordination, and proposal-count winner rules
+only when they adopt the minor release containing this seam.
 
 ## Non-goals (explicit, matching the issue)
 

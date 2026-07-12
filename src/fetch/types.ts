@@ -94,6 +94,14 @@ export interface SourceConfig {
    */
   revalidate?: boolean;
   /**
+   * Policy controlling use of the caller-supplied renderer. `never` performs
+   * one plain fetch, `always` performs one rendered fetch, and
+   * `on-shell-warning` performs a plain fetch followed by at most one rendered
+   * attempt only when canonical content preparation reports the pure
+   * `js-shell-suspected:` warning. Default `never`.
+   */
+  renderPolicy?: RenderPolicy;
+  /**
    * Opt IN this source to a caller-supplied {@link FetchSourceOptions.renderImpl}
    * instead of a plain HTTP GET — e.g. an SPA/JS-rendered page whose real
    * content only exists after client-side JavaScript runs. Default `false`
@@ -112,8 +120,16 @@ export interface SourceConfig {
    * silent no-op) whenever the caller actually set one. See
    * docs/decisions/rendered-fetch.md.
    */
+  /**
+   * @deprecated Use {@link SourceConfig.renderPolicy}. For compatibility,
+   * `true` maps to `always` and `false` maps to `never`. Supplying both forms
+   * is valid only when they agree semantically.
+   */
   render?: boolean;
 }
+
+/** The renderer orchestration policy for one source acquisition. */
+export type RenderPolicy = "never" | "always" | "on-shell-warning";
 
 /**
  * The immutable record of one successful fetch — the unit of replay. It is
@@ -234,6 +250,18 @@ export interface FetchError {
   status?: number;
 }
 
+/** Audit facts for renderer policy orchestration; the selected result remains authoritative. */
+export interface RenderEscalation {
+  policy: RenderPolicy;
+  shellWarningDetected: boolean;
+  renderAttempted: boolean;
+  outcome: "not-needed" | "rendered" | "render-failed-fallback" | "renderer-unavailable-fallback";
+  /** Ref of the successful plain snapshot when it was replaced or retained as fallback. */
+  firstSnapshotRef?: string;
+  /** Typed rendered-attempt failure when the successful plain snapshot was retained. */
+  renderError?: FetchError;
+}
+
 /**
  * The result of `fetchSource()` / `replaySource()`. Exactly one of
  * `snapshot`/`error` is populated; `warnings` collects non-fatal notes (e.g. an
@@ -244,6 +272,8 @@ export interface FetchResult {
   snapshot?: Snapshot;
   error?: FetchError;
   warnings?: string[];
+  /** Observational policy audit metadata; never a second snapshot/result bag. */
+  renderEscalation?: RenderEscalation;
 }
 
 /**

@@ -75,6 +75,11 @@ export const SHELL_WARNING_CODE = "js-shell-suspected";
  */
 export const SHELL_WARNING_CODE_EMBEDDED = "js-shell-suspected-embedded-state-available";
 
+/** True only for the canonical pure-shell warning, never its embedded-state variant. */
+export function isPureJsShellWarning(warning: string): boolean {
+  return warning.startsWith(`${SHELL_WARNING_CODE}:`);
+}
+
 /** Client-render mount element ids whose emptiness is a shell signal. */
 const MOUNT_IDS = ["root", "__next", "app"];
 

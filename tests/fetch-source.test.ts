@@ -572,3 +572,137 @@ describe("fetchSource() — renderImpl is never invoked without render: true (tr
     assert.equal(renderImpl.calls.length, 0);
   });
 });
+
+const SPA_SHELL = readFileSync(new URL("../../tests/fixtures/spa-shell-empty.html", import.meta.url), "utf8");
+const EMBEDDED_SHELL = readFileSync(new URL("../../tests/fixtures/js-shell-next.html", import.meta.url), "utf8");
+const RICH_HTML = readFileSync(new URL("../../tests/fixtures/content-rich-heavy-scripts.html", import.meta.url), "utf8");
+
+describe("fetchSource() — render policy compatibility", () => {
+  it("maps legacy render values and accepts semantically agreeing forms", async () => {
+    for (const [config, expectedRendered] of [
+      [{ render: false }, false],
+      [{}, false],
+      [{ render: true }, true],
+      [{ render: false, renderPolicy: "never" }, false],
+      [{ render: true, renderPolicy: "always" }, true],
+    ] as const) {
+      const fetch = fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body: RICH_HTML } });
+      const renderImpl = fakeRenderImpl({ "https://example.test/page": { html: "<main>rendered</main>" } });
+      const result = await fetchSource(cfg(config), fastOpts({ fetch, renderImpl }));
+      assert.equal(result.error, undefined);
+      assert.equal(result.snapshot!.rendered === true, expectedRendered);
+    }
+  });
+
+  it("rejects semantic conflicts and unknown runtime policy before I/O", async () => {
+    for (const config of [
+      { render: true, renderPolicy: "never" },
+      { render: false, renderPolicy: "always" },
+      { render: true, renderPolicy: "on-shell-warning" },
+      { renderPolicy: "sometimes" },
+    ]) {
+      const fetch = fakeFetch({ "https://example.test/page": { body: RICH_HTML } });
+      const result = await fetchSource(cfg(config as Partial<SourceConfig>), fastOpts({ fetch }));
+      assert.equal(result.error?.kind, "invalid-config");
+      assert.equal(fetch.calls.length, 0);
+    }
+  });
+});
+
+describe("fetchSource() — render policy attempts", () => {
+  it("never makes exactly one plain attempt and always makes exactly one rendered attempt", async () => {
+    const fetch = fakeFetch({ "https://example.test/page": { body: SPA_SHELL } });
+    const renderImpl = fakeRenderImpl({ "https://example.test/page": { html: "<main>rendered winner</main>" } });
+    const never = await fetchSource(cfg({ renderPolicy: "never" }), fastOpts({ fetch, renderImpl }));
+    assert.equal(fetch.calls.length, 1);
+    assert.equal(renderImpl.calls.length, 0);
+    assert.equal(never.renderEscalation?.outcome, "not-needed");
+
+    const always = await fetchSource(cfg({ renderPolicy: "always" }), fastOpts({ fetch, renderImpl }));
+    assert.equal(fetch.calls.length, 1, "always does not perform a plain page fetch");
+    assert.equal(renderImpl.calls.length, 1);
+    assert.equal(always.snapshot?.rendered, true);
+  });
+
+  it("on-shell-warning invokes the renderer at most once", async () => {
+    const fetch = fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body: SPA_SHELL } });
+    const renderImpl = fakeRenderImpl({ "https://example.test/page": [{ html: SPA_SHELL }, { html: "<main>second</main>" }] });
+    const result = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({ fetch, renderImpl }));
+    assert.equal(fetch.calls.length, 1);
+    assert.equal(renderImpl.calls.length, 1);
+    assert.equal(result.snapshot?.rendered, true);
+  });
+});
+
+describe("fetchSource() — on-shell-warning classification", () => {
+  it("escalates only the exact pure js-shell-suspected: warning", async () => {
+    const renderImpl = fakeRenderImpl({ "https://example.test/page": { html: "<main>rendered</main>" } });
+    const pure = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({
+      fetch: fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body: SPA_SHELL } }),
+      renderImpl,
+    }));
+    assert.equal(pure.renderEscalation?.shellWarningDetected, true);
+    assert.equal(renderImpl.calls.length, 1);
+
+    for (const body of [EMBEDDED_SHELL, RICH_HTML]) {
+      const localRenderer = fakeRenderImpl({ "https://example.test/page": { html: "<main>must not run</main>" } });
+      const result = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({
+        fetch: fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body } }),
+        renderImpl: localRenderer,
+      }));
+      assert.equal(localRenderer.calls.length, 0);
+      assert.equal(result.renderEscalation?.outcome, "not-needed");
+    }
+  });
+
+  it("does not render after a first fetch error or for non-HTML content", async () => {
+    const renderImpl = fakeRenderImpl({ "https://example.test/page": { html: "<main>must not run</main>" } });
+    const failed = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({
+      fetch: fakeFetch({ "https://example.test/page": { status: 500 } }), renderImpl,
+    }));
+    assert.equal(failed.error?.kind, "http-error");
+    const text = await fetchSource(cfg({ renderPolicy: "on-shell-warning", contentType: "text" }), fastOpts({
+      fetch: fakeFetch({ "https://example.test/page": { body: SPA_SHELL } }), renderImpl,
+    }));
+    assert.equal(text.snapshot?.contentType, "text");
+    const binary = await fetchSource(cfg({ renderPolicy: "on-shell-warning", contentType: "png" }), fastOpts({
+      fetch: fakeFetch({ "https://example.test/page": { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) } }), renderImpl,
+    }));
+    assert.equal(binary.snapshot?.contentType, "png");
+    assert.equal(renderImpl.calls.length, 0);
+  });
+});
+
+describe("fetchSource() — render escalation winner selection", () => {
+  it("a successful rendered snapshot wins without merging discarded shell warnings", async () => {
+    const renderedBody = "<main>tiny rendered winner</main>";
+    const result = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({
+      fetch: fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body: SPA_SHELL } }),
+      renderImpl: fakeRenderImpl({ "https://example.test/page": { html: renderedBody, warnings: ["renderer-note"] } }),
+    }));
+    assert.equal(result.snapshot?.body, renderedBody);
+    assert.equal(result.snapshot?.rendered, true);
+    assert.equal(result.renderEscalation?.outcome, "rendered");
+    assert.ok(result.renderEscalation?.firstSnapshotRef);
+    assert.deepEqual(result.warnings, ["renderer-note"]);
+    assert.equal(result.warnings?.some((warning) => warning.startsWith("js-shell-suspected:")) ?? false, false);
+  });
+
+  it("missing, throwing, and non-2xx renderers retain the successful first snapshot with audit metadata", async () => {
+    const cases = [
+      { renderImpl: undefined, outcome: "renderer-unavailable-fallback", attempted: false, error: undefined },
+      { renderImpl: fakeRenderImpl({ "https://example.test/page": { throws: "boom" } }), outcome: "render-failed-fallback", attempted: true, error: "adapter-error" },
+      { renderImpl: fakeRenderImpl({ "https://example.test/page": { status: 503, html: "down" } }), outcome: "render-failed-fallback", attempted: true, error: "http-error" },
+    ] as const;
+    for (const testCase of cases) {
+      const result = await fetchSource(cfg({ renderPolicy: "on-shell-warning" }), fastOpts({
+        fetch: fakeFetch({ "https://example.test/page": { headers: { "content-type": "text/html" }, body: SPA_SHELL } }),
+        ...(testCase.renderImpl ? { renderImpl: testCase.renderImpl } : {}),
+      }));
+      assert.equal(result.snapshot?.body, SPA_SHELL);
+      assert.equal(result.renderEscalation?.outcome, testCase.outcome);
+      assert.equal(result.renderEscalation?.renderAttempted, testCase.attempted);
+      assert.equal(result.renderEscalation?.renderError?.kind, testCase.error);
+    }
+  });
+});
