@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/kontourai/traverse/compare/v0.14.1...v0.15.0) (2026-07-12)
+
+
+### Features
+
+* render-escalation policy seam (never|always|on-shell-warning) ([#53](https://github.com/kontourai/traverse/issues/53)) ([af0b5e3](https://github.com/kontourai/traverse/commit/af0b5e3b52980852bc58ac7dccd23f18fd7719b8))
+
 ## [0.14.1](https://github.com/kontourai/traverse/compare/v0.14.0...v0.14.1) (2026-07-10)
 
 
