@@ -85,17 +85,21 @@ test).
   the query-handling and replay-semantics decisions.
 - **Rendered Fetch**: the `@kontourai/traverse/fetch` subpath's opt-in seam
   for ingesting SPA/JS-rendered pages without traverse core taking a browser
-  dependency. A source opts in with `SourceConfig.render: true` AND the
-  caller configures `FetchSourceOptions.renderImpl` (any renderer —
-  Playwright, Puppeteer, a remote rendering service, a test stub); both keys
-  are required or `fetchSource` returns a typed `invalid-config` error,
-  never a silent normal fetch. `robots.txt` is checked once against the
-  requested URL before `renderImpl` ever runs. A successful render becomes a
-  normal, replayable `Snapshot` (`contentType: "html"`) carrying an honest
-  `rendered: true` marker, so trust surfaces can distinguish wire-HTML from
-  rendered-HTML; HTTP validators are skipped for a rendered fetch.
-  Composes with `crawlSource` unchanged: `render` is inherited by every
-  discovered page alongside `revalidate`/`respectRobots`. See
+  dependency. `SourceConfig.renderPolicy` selects `never` (one plain
+  attempt), `always` (one rendered attempt), or `on-shell-warning` (one plain
+  attempt and at most one rendered retry for the exact pure
+  `js-shell-suspected:` prefix). The embedded-state-available shell warning
+  does not escalate. The deprecated `render` key maps `true` to `always` and
+  false/absent to `never`; semantically conflicting keys return typed
+  `invalid-config`. The caller injects and owns the cost/lifecycle of
+  `FetchSourceOptions.renderImpl`; Traverse owns attempt selection. Rendered
+  attempts never receive revalidation state or validators. A successful
+  rendered snapshot wins, while an on-warning render failure/unavailable
+  renderer falls back to the plain snapshot with typed `renderEscalation`
+  audit metadata. Only the selected result reaches extraction/capture, and
+  discarded-attempt warnings are not merged into its extraction-facing
+  warnings. This is an additive minor boundary; consumer migrations remain
+  follow-up work. Composes with `crawlSource` unchanged. See
   [`docs/decisions/rendered-fetch.md`](docs/decisions/rendered-fetch.md).
 - **Binary Snapshot Body** (`Snapshot.bodyBytes`): raw response bytes captured
   for binary-classified content types (`pdf`, `png`, `jpeg`) instead of lossy
