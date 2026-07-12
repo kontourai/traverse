@@ -12,6 +12,8 @@ import { fetchSource, sha256Hex } from "../src/fetch/fetch-source.js";
 import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 import type { FetchSourceOptions, SourceConfig } from "../src/fetch/types.js";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
+import { fakeRenderImpl } from "./fixtures/fake-render.js";
+import { readFileSync } from "node:fs";
 
 function cfg(overrides: Partial<SourceConfig> = {}): SourceConfig {
   return { id: "src-1", url: "https://example.test/page", respectRobots: false, ...overrides };
@@ -22,6 +24,7 @@ function fastOpts(extra: FetchSourceOptions = {}): FetchSourceOptions {
 
 const ETAG = '"v1-abc123"';
 const LAST_MOD = "Wed, 21 Oct 2026 07:28:00 GMT";
+const SPA_SHELL = readFileSync(new URL("../../tests/fixtures/spa-shell-empty.html", import.meta.url), "utf8");
 
 describe("fetchSource() — validator capture", () => {
   it("captures ETag and Last-Modified from a 200 response onto the snapshot", async () => {
@@ -345,5 +348,74 @@ describe("fetchSource() — conditional GET (revalidate)", () => {
     assert.equal(result.snapshot, undefined);
     assert.equal(result.error!.kind, "http-error");
     assert.equal(result.error!.status, 304);
+  });
+});
+
+describe("fetchSource() — render escalation never carries validators", () => {
+  it("keeps store reads and conditional headers on the plain attempt and captures no rendered validators", async () => {
+    const backing = createInMemorySnapshotStore();
+    const prior = await fetchSource(cfg(), fastOpts({ fetch: fakeFetch({
+      "https://example.test/page": {
+        headers: { "content-type": "text/html", etag: ETAG, "last-modified": LAST_MOD },
+        body: "<main>older trustworthy body</main>",
+      },
+    }) }));
+    await backing.put(prior.snapshot!);
+
+    const ledger = { latest: 0, get: 0, put: 0, list: 0 };
+    const hostileStore = {
+      async latest(sourceId: string) { ledger.latest += 1; return backing.latest(sourceId); },
+      async get(sourceId: string, hash: string) { ledger.get += 1; return backing.get(sourceId, hash); },
+      async put(snapshot: Parameters<typeof backing.put>[0]) { ledger.put += 1; return backing.put(snapshot); },
+      async list(sourceId: string) { ledger.list += 1; return backing.list(sourceId); },
+    };
+    const fetch = fakeFetch({
+      "https://example.test/page": {
+        status: 200,
+        headers: { "content-type": "text/html", etag: '"plain-new"', "last-modified": LAST_MOD },
+        body: SPA_SHELL,
+      },
+    });
+    const renderImpl = fakeRenderImpl({
+      "https://example.test/page": { html: "<main>rendered fresh</main>" },
+    });
+    const result = await fetchSource(
+      cfg({
+        renderPolicy: "on-shell-warning",
+        revalidate: true,
+        headers: { "if-none-match": '"caller-hostile"', "If-Modified-Since": "yesterday" },
+      }),
+      fastOpts({ fetch, renderImpl, store: hostileStore }),
+    );
+
+    assert.equal(fetch.calls.length, 1, "renderer retry is not a FetchLike/304 path");
+    assert.equal(fetch.calls[0].headers["If-None-Match"], ETAG);
+    assert.equal(fetch.calls[0].headers["If-Modified-Since"], LAST_MOD);
+    assert.equal(renderImpl.calls.length, 1);
+    assert.deepEqual(ledger, { latest: 1, get: 0, put: 0, list: 0 }, "render retry never touches the store");
+    assert.equal(result.snapshot?.rendered, true);
+    assert.equal(result.snapshot?.status, 200);
+    assert.equal(result.snapshot?.notModified, undefined);
+    assert.equal(result.snapshot?.etag, undefined);
+    assert.equal(result.snapshot?.lastModified, undefined);
+  });
+});
+
+describe("fetchSource() — 304 never renders", () => {
+  it("returns the trustworthy cached snapshot without invoking renderImpl", async () => {
+    const store = createInMemorySnapshotStore();
+    const prior = await fetchSource(cfg(), fastOpts({ fetch: fakeFetch({
+      "https://example.test/page": { headers: { "content-type": "text/html", etag: ETAG }, body: SPA_SHELL },
+    }) }));
+    await store.put(prior.snapshot!);
+    const renderImpl = fakeRenderImpl({ "https://example.test/page": { html: "<main>must not render</main>" } });
+    const result = await fetchSource(
+      cfg({ renderPolicy: "on-shell-warning", revalidate: true }),
+      fastOpts({ fetch: fakeFetch({ "https://example.test/page": { status: 304 } }), store, renderImpl }),
+    );
+    assert.equal(result.snapshot?.notModified, true);
+    assert.equal(result.snapshot?.fromCache, true);
+    assert.equal(renderImpl.calls.length, 0);
+    assert.equal(result.renderEscalation?.outcome, "not-needed");
   });
 });
