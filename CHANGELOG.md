@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/kontourai/traverse/compare/v0.15.0...v0.16.0) (2026-07-14)
+
+
+### Features
+
+* crawlAndExtract composes forage.crawl + traverse.extract (traverse[#55](https://github.com/kontourai/traverse/issues/55)) ([#56](https://github.com/kontourai/traverse/issues/56)) ([bf83ded](https://github.com/kontourai/traverse/commit/bf83dedc0eb547b850223f4cd074568c0f74bff4))
+
 ## [0.15.0](https://github.com/kontourai/traverse/compare/v0.14.1...v0.15.0) (2026-07-12)
 
 
