@@ -202,6 +202,22 @@ describe("fetchSource() — config validation (never throws)", () => {
   });
 });
 
+describe("fetchSource() — default egress is SSRF-guarded", () => {
+  it("denies a cloud-metadata target when no fetch is injected", async () => {
+    // No `fetch` override → the forage-guarded default transport. The metadata
+    // IP is link-local (169.254.0.0/16), so the guard denies it before any
+    // connection — deterministically, without DNS or network access. The thrown
+    // egress-policy error surfaces through timedGet as a `network` result error.
+    const result = await fetchSource(
+      cfg({ url: "http://169.254.169.254/latest/meta-data/" }),
+      fastOpts(),
+    );
+    assert.equal(result.snapshot, undefined);
+    assert.ok(result.error, "expected the guarded default to deny the metadata target");
+    assert.equal(result.error!.kind, "network");
+  });
+});
+
 describe("fetchSource() — HTTP errors, retries, timeout", () => {
   it("retries a 500 then succeeds, recording retry warnings", async () => {
     const fetch = fakeFetch({

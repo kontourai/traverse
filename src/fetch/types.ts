@@ -370,7 +370,12 @@ export type RenderImpl = (
  * timer-free runs.
  */
 export interface FetchSourceOptions {
-  /** the fetch implementation; defaults to `globalThis.fetch` (undici). */
+  /**
+   * the fetch implementation; defaults to forage's SSRF-pinned guarded fetch,
+   * which denies private / link-local / loopback / cloud-metadata targets and
+   * pins vetted IPs through connect. Inject to bypass the guard (tests, a
+   * browser-pinned crawler).
+   */
   fetch?: FetchLike;
   /** wall-clock reader (ms) for politeness accounting; defaults to `Date.now`. */
   now?: () => number;
