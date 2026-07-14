@@ -53,6 +53,12 @@ export type {
   YtDlpCaptionTrack,
   YtDlpMetadata,
 } from "./youtube.js";
+export { crawlAndExtract } from "./crawl-extract.js";
+export type {
+  CrawlAndExtractOptions,
+  CrawlAndExtractPageResult,
+  CrawlAndExtractResult,
+} from "./crawl-extract.js";
 export { parseRobots, isPathAllowed, productToken } from "./robots.js";
 export type {
   SourceConfig,

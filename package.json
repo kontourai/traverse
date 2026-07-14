@@ -45,6 +45,7 @@
     "check:pack": "node scripts/check-package-contents.mjs"
   },
   "dependencies": {
+    "@kontourai/forage": "^0.1.0",
     "linkedom": "^0.18.12",
     "turndown": "^7.2.4"
   },
