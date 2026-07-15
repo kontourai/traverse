@@ -37,6 +37,22 @@ import { isPathAllowed, parseRobots } from "./robots.js";
 import type { ContentType } from "../types.js";
 import { prepareContent } from "../content-prep.js";
 import { isPureJsShellWarning } from "../embedded.js";
+import { createGuardedFetch } from "@kontourai/forage/egress";
+
+/**
+ * The default egress transport: forage's SSRF-pinned guarded fetch. It resolves
+ * DNS, denies private / link-local / loopback / cloud-metadata targets, and pins
+ * the vetted IP through connect — so extracting from an untrusted URL cannot be
+ * redirected at the network layer to an internal service. Callers that need a
+ * different transport (tests, a browser-pinned crawler) still inject `opts.fetch`,
+ * which bypasses this default entirely. Created lazily and cached so we don't
+ * re-instantiate the guard per fetch.
+ */
+let cachedGuardedFetch: FetchLike | undefined;
+function defaultGuardedFetch(): FetchLike {
+  cachedGuardedFetch ??= createGuardedFetch() as unknown as FetchLike;
+  return cachedGuardedFetch;
+}
 
 /** Process-wide politeness ledger (per host), used when none is injected. */
 const GLOBAL_POLITENESS = new Map<string, number>();
@@ -142,7 +158,7 @@ interface Resolved {
 }
 
 function resolveOptions(opts: FetchSourceOptions): Resolved {
-  const fetchImpl = opts.fetch ?? (globalThis.fetch as unknown as FetchLike);
+  const fetchImpl = opts.fetch ?? defaultGuardedFetch();
   return {
     fetchImpl,
     now: opts.now ?? Date.now,
