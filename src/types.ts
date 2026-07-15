@@ -142,6 +142,30 @@ export interface ExtractionProposal {
    * to still hold the original `targetSchema` in scope.
    */
   inferenceType?: "explicit" | "inferred";
+  /**
+   * The declared value TYPE of the matched `TargetFieldSchema` entry (looked
+   * up by the declared/normalized `fieldPath`, same recovery path as
+   * `pathIndices`/`inferenceType`) — absent when no schema entry matched.
+   * Carried onto the proposal so a downstream reviewer can render/validate the
+   * candidate against its declared shape (a `date` picker, a `number` field, an
+   * `enum` select) WITHOUT still holding the original `targetSchema` in scope —
+   * the same decoupling rationale as `inferenceType`. This is the schema's
+   * declared type, NOT an assertion about `candidateValue`'s runtime typeof; a
+   * provider can still return a malformed value, which is exactly what a typed
+   * reviewer validates against. Additive/optional: a schema whose entries all
+   * carry a `type` (they always do) makes this present on every matched
+   * proposal, but a consumer that ignores it sees no behavior change.
+   */
+  valueType?: TargetFieldSchema["type"];
+  /**
+   * The allowed values of the matched `TargetFieldSchema` entry, present ONLY
+   * when that entry declared a non-empty `enumValues` (typically alongside
+   * `valueType: "enum"`). Absent otherwise. Lets a reviewer render a constrained
+   * choice (a select) and reject an out-of-set candidate, again without holding
+   * the original `targetSchema`. Constraint metadata only — `extract()` does not
+   * itself drop a proposal whose `candidateValue` falls outside this set.
+   */
+  enumValues?: string[];
 }
 
 /**

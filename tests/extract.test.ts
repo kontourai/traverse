@@ -299,6 +299,94 @@ describe("extract()", () => {
       assert.deepEqual(result.proposals[0].pathIndices, [0]);
       assert.equal(result.proposals[0].inferenceType, "inferred");
     });
+
+    it("echoes the matched schema's value type onto the proposal (so a reviewer can render/validate it)", async () => {
+      // "title" is declared type "string"; "priceAmount" type "number". The
+      // declared type travels with the value — no enumValues on a plain type.
+      const provider = createMockExtractionProvider(
+        output([
+          proposal(),
+          proposal({
+            fieldPath: "priceAmount",
+            candidateValue: 25,
+            provenance: { excerpt: "Beginner Bouldering Session", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content: "Beginner Bouldering Session details.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: genericTargetSchema,
+        provider,
+      });
+      const byPath = new Map(result.proposals.map((p) => [p.fieldPath, p]));
+      assert.equal(byPath.get("title")!.valueType, "string");
+      assert.equal(byPath.get("title")!.enumValues, undefined);
+      assert.equal(byPath.get("priceAmount")!.valueType, "number");
+    });
+
+    it("echoes enumValues (a defensive copy) when the matched schema declares a constrained set", async () => {
+      const enumSchema = [
+        {
+          path: "difficulty",
+          type: "enum" as const,
+          enumValues: ["beginner", "intermediate", "advanced"],
+          description: "The difficulty tier of the session.",
+        },
+      ];
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "difficulty",
+            candidateValue: "beginner",
+            provenance: { excerpt: "Beginner Bouldering Session", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content: "Beginner Bouldering Session details.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: enumSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].valueType, "enum");
+      assert.deepEqual(result.proposals[0].enumValues, ["beginner", "intermediate", "advanced"]);
+      // Defensive copy — mutating the proposal's array never reaches the schema.
+      result.proposals[0].enumValues!.push("expert");
+      assert.deepEqual(enumSchema[0].enumValues, ["beginner", "intermediate", "advanced"]);
+    });
+
+    it("looks up valueType/enumValues by the DECLARED (normalized) path, not the raw indexed one", async () => {
+      const taggedSchema = [
+        {
+          path: "schedules[].startDate",
+          type: "date" as const,
+          description: "The start date of one schedule item in a repeating series.",
+        },
+      ];
+      const provider = createMockExtractionProvider(
+        output([
+          proposal({
+            fieldPath: "schedules[0].startDate",
+            candidateValue: "2026-03-03",
+            provenance: { excerpt: "March 3", locator: "provisional" },
+          }),
+        ]),
+      );
+      const result = await extract({
+        content: "Session begins March 3.",
+        contentType: "text",
+        sourceRef: "ref",
+        targetSchema: taggedSchema,
+        provider,
+      });
+      assert.equal(result.proposals.length, 1);
+      assert.equal(result.proposals[0].fieldPath, "schedules[].startDate");
+      assert.equal(result.proposals[0].valueType, "date");
+    });
   });
 
   it("drops proposals lacking a provenance excerpt", async () => {

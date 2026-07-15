@@ -498,8 +498,10 @@ function normalizeChunkProposals(
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
-    const inferenceType = schemaByPath.get(effectiveFieldPath)?.inferenceType;
-    if (inferenceType !== undefined) proposal.inferenceType = inferenceType;
+    const matchedSchema = schemaByPath.get(effectiveFieldPath);
+    if (matchedSchema?.inferenceType !== undefined) proposal.inferenceType = matchedSchema.inferenceType;
+    if (matchedSchema?.type !== undefined) proposal.valueType = matchedSchema.type;
+    if (matchedSchema?.enumValues?.length) proposal.enumValues = [...matchedSchema.enumValues];
     proposals.push(proposal);
   }
 

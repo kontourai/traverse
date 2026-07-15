@@ -99,6 +99,31 @@ not gated by Traverse (see
 [`docs/decisions/extraction-proposals.md`](docs/decisions/extraction-proposals.md)
 for the full rationale and the deferred stricter-verification follow-up).
 
+## Typed values travel onto the proposal (`valueType` / `enumValues`)
+
+Your `TargetFieldSchema` already declares each field's `type` (and, for an
+`enum`, its `enumValues`). By the same conditional-attach idiom as
+`inferenceType`, `extract()` echoes those constraints onto every matched
+proposal as `ExtractionProposal.valueType` and (when declared)
+`ExtractionProposal.enumValues`:
+
+```ts
+// schema: { path: "difficulty", type: "enum", enumValues: ["beginner", "advanced"] }
+// proposal: { fieldPath: "difficulty", candidateValue: "beginner",
+//             valueType: "enum", enumValues: ["beginner", "advanced"], ... }
+```
+
+This lets a downstream review UI render and validate the candidate against its
+declared shape — a `date` picker, a `number` field, an `enum` select that
+rejects an out-of-set value — **without still holding the original
+`targetSchema` in scope**, exactly the decoupling `inferenceType` and
+`pathIndices` provide. It is the schema's *declared* type, not an assertion
+about `candidateValue`'s runtime `typeof`: a provider can still return a
+malformed value, which is precisely what a typed reviewer checks. `extract()`
+itself adds **no new drop behavior** — constraint metadata only. Additive and
+optional: a consumer that ignores these fields sees no change. `enumValues` is
+a defensive copy, so mutating it never reaches the caller's schema.
+
 ## Quickstart
 
 ```ts
