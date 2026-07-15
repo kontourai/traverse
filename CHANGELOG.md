@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/kontourai/traverse/compare/v0.16.0...v0.17.0) (2026-07-15)
+
+
+### Features
+
+* default egress to forage's SSRF-guarded fetch (traverse[#41](https://github.com/kontourai/traverse/issues/41)) ([#58](https://github.com/kontourai/traverse/issues/58)) ([4ca0f3e](https://github.com/kontourai/traverse/commit/4ca0f3e8d5efe112c72faa0347821bb7582f0252))
+* echo schema valueType/enumValues onto ExtractionProposal (traverse[#44](https://github.com/kontourai/traverse/issues/44)) ([#59](https://github.com/kontourai/traverse/issues/59)) ([fdf2279](https://github.com/kontourai/traverse/commit/fdf227951e54500dea9d39d95c5c694e86061f99))
+
 ## [0.16.0](https://github.com/kontourai/traverse/compare/v0.15.0...v0.16.0) (2026-07-14)
 
 
