@@ -944,6 +944,44 @@ The versioned corpus remains the gold oracle in both modes. See the
 [benchmark decision](docs/decisions/grounded-extraction-benchmark.md) for the
 evidence contract and known-limitation policy.
 
+## Versioned task guidance and examples
+
+Callers that need reproducible instructions or few-shot examples can create a
+provider-neutral task spec. Examples are validated against the schema and their
+prepared source text before any provider call; successful results carry the task
+and example digests for audit.
+
+```ts
+import { createExtractionTaskSpec, extract } from "@kontourai/traverse";
+
+const targetSchema = [{ path: "title", type: "string" as const }];
+const taskSpec = createExtractionTaskSpec({
+  version: "1.0.0",
+  targetSchema,
+  guidance: "Copy titles exactly as written.",
+  examples: [{
+    content: "Title: Alpine Week",
+    proposals: [{
+      fieldPath: "title",
+      candidateValue: "Alpine Week",
+      excerpt: "Alpine Week",
+    }],
+  }],
+});
+
+const result = await extract({
+  content,
+  contentType: "html",
+  sourceRef,
+  targetSchema,
+  taskSpec,
+  provider,
+});
+```
+
+See the [versioned extraction tasks decision](docs/decisions/versioned-extraction-tasks.md)
+for validation, compatibility, and digest boundaries.
+
 ## Requirements
 
 - Node.js `>= 22`

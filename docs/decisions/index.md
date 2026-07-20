@@ -22,3 +22,4 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [image-content-preparation](./image-content-preparation.md) | current | Image content preparation |
 | [rendered-fetch](./rendered-fetch.md) | current | Rendered Fetch |
 | [transcript-content-type](./transcript-content-type.md) | current | YouTube / transcript (WebVTT) content type |
+| [versioned-extraction-tasks](./versioned-extraction-tasks.md) | current | Versioned extraction tasks |

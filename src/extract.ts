@@ -69,6 +69,7 @@
  */
 
 import { prepareAndChunk } from "./chunk.js";
+import { validateExtractionTaskSpec } from "./task.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import type {
@@ -101,6 +102,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
+    if (input.taskSpec) {
+      const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
+      if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
+    }
     // Invalid-config validation: pure input validation independent of
     // content, so it runs before prepareAndChunk (before any content-prep or
     // provider work). maxProviderCalls is validated first.
@@ -261,6 +266,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           contentType: input.contentType,
           targetSchema: input.targetSchema,
           fieldHints: input.fieldHints,
+          ...(input.taskSpec ? { taskSpec: input.taskSpec } : {}),
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -337,7 +343,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       );
     }
 
-    const result: ExtractionResult = { proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed };
+    const result: ExtractionResult = {
+      proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed,
+      ...(input.taskSpec ? { taskDigest: input.taskSpec.digest, exampleDigests: input.taskSpec.examples?.map((example) => example.digest) ?? [] } : {}),
+    };
     if (warnings.length > 0) result.warnings = warnings;
     // Attach the whole-page embedded-state sidecar once (never per chunk).
     if (prepared.embedded) result.embedded = prepared.embedded;

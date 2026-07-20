@@ -373,6 +373,14 @@ export function createAnthropicExtractionProvider(
       const hintLines = input.fieldHints
         ? Object.entries(input.fieldHints).map(([field, hint]) => `  - ${field}: ${hint}`)
         : [];
+      const taskLines = input.taskSpec
+        ? [
+            input.taskSpec.guidance ? `\nTask guidance:\n${input.taskSpec.guidance}` : "",
+            ...(input.taskSpec.examples ?? []).map((example, index) =>
+              `\nValidated example ${index + 1}:\nContent:\n${example.content}\nExpected proposals:\n${JSON.stringify(example.proposals)}`
+            ),
+          ]
+        : [];
 
       const systemPrompt = [
         "You are a schema-directed content extractor.",
@@ -382,6 +390,7 @@ export function createAnthropicExtractionProvider(
         "Return honest confidence scores; omit fields you cannot find.",
         hintLines.length ? "\nPer-field hints:" : "",
         ...hintLines,
+        ...taskLines,
       ]
         .filter(Boolean)
         .join("\n");

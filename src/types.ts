@@ -63,6 +63,28 @@ export interface TargetFieldSchema {
   inferenceType?: "explicit" | "inferred";
 }
 
+/** One caller-authored, grounded demonstration for an extraction task. */
+export interface ExtractionExample {
+  content: string;
+  contentType?: "html" | "text" | "transcript";
+  proposals: Array<Pick<ExtractionProposal, "fieldPath" | "candidateValue"> & {
+    /** Verbatim excerpt in the example's prepared content. */
+    excerpt: string;
+  }>;
+  /** SHA-256 of the canonical example payload (excluding this field). */
+  digest: string;
+}
+
+/** Versioned, provider-neutral instructions and demonstrations for a task. */
+export interface ExtractionTaskSpec {
+  version: string;
+  targetSchema: TargetFieldSchema[];
+  guidance?: string;
+  examples?: ExtractionExample[];
+  /** SHA-256 of the canonical task payload (excluding this field). */
+  digest: string;
+}
+
 /**
  * Provenance is required on every proposal. `excerpt` is a verbatim quote
  * against the CONTENT-PREPARED text `extract()` hands to the provider — i.e.
@@ -241,6 +263,10 @@ export interface ExtractionResult {
    * `ExtractInput.maxTotalTokens`.
    */
   totalTokensUsed: number;
+  /** Present only when this run used a validated versioned task spec. */
+  taskDigest?: string;
+  /** Canonical example digests, in task order. */
+  exampleDigests?: string[];
   /**
    * Machine-readable state harvested from the raw HTML (JSON-LD, `__NEXT_DATA__`,
    * hydration blobs) — present ONLY for `"html"` content that carried some. This
@@ -307,6 +333,7 @@ export interface ExtractionProvider {
     contentType: ContentType;
     targetSchema: TargetFieldSchema[];
     fieldHints?: Record<string, string>;
+    taskSpec?: ExtractionTaskSpec;
   }): Promise<ProviderExtractionOutput>;
 }
 
@@ -371,6 +398,8 @@ export interface ExtractInput {
   /** stable ref for provenance — maps to Survey RawSource.sourceRef. */
   sourceRef: string;
   targetSchema: TargetFieldSchema[];
+  /** Optional validated instructions/examples; its schema must equal targetSchema. */
+  taskSpec?: ExtractionTaskSpec;
   fieldHints?: Record<string, string>;
   provider: ExtractionProvider;
   /**
