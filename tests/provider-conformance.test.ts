@@ -40,7 +40,18 @@ describe("bundled provider conformance", () => {
       assert.equal(result.taskDigest, taskSpec.digest);
       assert.deepEqual(result.proposals.map(({ fieldPath, candidateValue, confidence, provenance, inferenceType, valueType }) => ({ fieldPath, candidateValue, confidence, provenance, inferenceType, valueType })), [{
         fieldPath: "title", candidateValue: "Alpine", confidence: 0.9,
-        provenance: { excerpt: "Alpine", locator: "chars:7-13" },
+        provenance: {
+          excerpt: "Alpine",
+          locator: "chars:7-13",
+          occurrence: {
+            resolverVersion: "exact-occurrence-v1",
+            count: 1,
+            selected: { index: 0, start: 7, end: 13 },
+            selection: "source-order",
+            hintUsed: false,
+            ambiguous: false,
+          },
+        },
         inferenceType: "explicit", valueType: "string",
       }]);
     });

@@ -197,6 +197,7 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
       "  - value: the extracted value (typed per the field),",
       "  - confidence: 0.0-1.0,",
       "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
+      "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",
       "Only propose fields you can ground in a verbatim excerpt. Omit fields you cannot find.",
       "",
       "Target fields:",
@@ -217,6 +218,11 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
               locator: {
                 type: "string",
                 description: "Optional locator; defaults to \"field:<fieldPath>\" if omitted.",
+              },
+              occurrenceHint: {
+                type: "integer",
+                minimum: 1,
+                description: "Optional 1-based occurrence of the exact repeated excerpt.",
               },
             },
             required: ["fieldPath", "value", "confidence", "excerpt"],
@@ -265,6 +271,7 @@ interface RawProposalItem {
   confidence?: unknown;
   excerpt?: unknown;
   locator?: unknown;
+  occurrenceHint?: unknown;
 }
 
 /**
@@ -313,6 +320,9 @@ export function parseProposals(
     }
 
     const locator = stringOrUndefined(raw.locator) ?? `${contentType}:field:${fieldPath}`;
+    const occurrenceHint = typeof raw.occurrenceHint === "number" && Number.isInteger(raw.occurrenceHint)
+      ? raw.occurrenceHint
+      : undefined;
 
     results.push({
       fieldPath,
@@ -320,6 +330,7 @@ export function parseProposals(
       confidence,
       provenance: { excerpt, locator },
       extractor: extractorName,
+      ...(occurrenceHint === undefined ? {} : { occurrenceHint }),
     });
   });
   return { proposals: results, warnings };

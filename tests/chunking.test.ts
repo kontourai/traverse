@@ -136,7 +136,7 @@ describe("extract() chunked path", () => {
     });
     assert.equal(result.proposals.length, 1);
     assert.equal(result.proposals[0].provenance.locator, "chars:85-91");
-    assert.ok(result.warnings?.some((w) => /dropped 1 duplicate proposal \(same field \+ source span\)/.test(w)));
+    assert.ok(result.warnings?.some((w) => /dropped 1 duplicate proposal \(same field \+ value \+ source span\)/.test(w)));
   });
 
   it("keeps two distinct records that share a value but come from different spans", async () => {

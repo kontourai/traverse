@@ -21,10 +21,10 @@ provider module and model and are non-hermetic.
 
 Each case records the corpus revision, task digest, provider/model identity,
 exact-span and value quality, type validity, grounding failures, schema
-coverage, calls, tokens, latency, and typed failures. The corpus deliberately
-retains known limitations as measured results. In particular, identical
-excerpts at distinct source locations expose the current first-occurrence
-locator behavior instead of allowing aggregate scores to conceal it.
+coverage, calls, tokens, latency, and typed failures. The corpus includes
+identical excerpts at distinct source locations with bounded occurrence hints,
+so aggregate scores prove that exact repeated spans remain distinct rather than
+silently collapsing onto a first match.
 
 Run the hermetic lane with:
 

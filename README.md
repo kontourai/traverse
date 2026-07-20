@@ -39,18 +39,23 @@ Every `ExtractionProposal` carries required `provenance`, and `extract()`
   headings, and lists survive; see [Large pages & chunking](#large-pages--chunking));
   pass `prep: "text"` for the legacy flat-text strip. A proposal without an
   excerpt is not something Traverse emits.
-- **Occurrence is checked, not assumed.** `extract()`'s normalization step
-  verifies `excerpt` actually occurs in that prepared text via
-  `String.prototype.indexOf`. A proposal whose excerpt cannot be found there is
-  **dropped** with the warning `"excerpt not found in prepared content"` — an
-  LLM that paraphrases, translates, or reformats instead of quoting verbatim
-  produces no proposal, not a false one.
+- **Occurrence is enumerated, not assumed.** `extract()` verifies an excerpt
+  against the chunk the provider saw, enumerates every exact match in both that
+  visible slice and the full prepared text, and records the selected span in
+  `provenance.occurrence`. A provider may supply an untrusted 1-based
+  `occurrenceHint`; only an integer in bounds for the visible slice can select
+  a match, which is then mapped to its global occurrence metadata. Otherwise
+  source-order allocation selects a visible exact match. A proposal
+  whose excerpt cannot be found is **dropped** with the warning `"excerpt not
+  found in prepared content"` — paraphrases, translations, reformats, and
+  hallucinations receive no approximate offset.
 - **`locator`** — a fixed, defined scheme: `"chars:<start>-<end>"`, where
-  `<start>`/`<end>` are 0-based UTF-16 code-unit offsets of the *first*
-  `indexOf` match of `excerpt` within the prepared text. `extract()` always
-  derives/overwrites `locator` itself from the verified offset — a
-  provider/adapter-supplied `locator` is never trusted as-is, because only
-  `extract()` holds the prepared text needed to verify one.
+  `<start>`/`<end>` are 0-based UTF-16 code-unit offsets of the selected exact
+  occurrence. `extract()` always derives/overwrites `locator` itself from that
+  verified span — a provider/adapter-supplied `locator` is never trusted as-is.
+  `provenance.occurrence` exposes resolver version, exact count, selected span,
+  selection mode, hint use, and ambiguity; ambiguity is evidence to review, not
+  a certainty claim.
 
 Because the excerpt and the offsets it implies are anchored to the
 **prepared** text and not the caller's original document, a consumer that
@@ -316,12 +321,15 @@ When a provider implements optional `extractBatch()`, Traverse can put up to
 
 **Offset-correct provenance across chunks.** Each chunk is an exact contiguous
 substring of one `fullText`. A proposal's `excerpt` is verified against the
-chunk the provider saw, its offset shifted into `fullText`, and re-verified
-there before `locator = "chars:<start>-<end>"` is trusted — the `"chars:"`
-scheme still means "offsets into the full prepared text." Proposals repeated
-across chunks (overlap windows, or a value repeated across cards) are
-**deduped** by `fieldPath` + `pathIndices` + canonical value, keeping the
-highest confidence.
+chunk the provider saw, then resolved from an enumeration of exact full-text
+occurrences, bounded to that chunk's visible matches, before
+`locator = "chars:<start>-<end>"` is trusted — the `"chars:"`
+scheme still means "offsets into the full prepared text." Resolution is folded
+in original chunk/proposal order, so batching and concurrency cannot change it.
+Only identical `fieldPath` + `pathIndices` + canonical value + selected span
+are **deduped**; shared spans for different fields and repeated values at
+distinct visible spans remain separate proposals. Overlap never allocates an
+unseen later occurrence merely because an earlier span was already selected.
 
 **Options** (all optional, on `extract()`):
 

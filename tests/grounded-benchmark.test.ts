@@ -11,7 +11,7 @@ function runBenchmark(): string {
   return result.stdout;
 }
 
-test("grounded extraction benchmark is deterministic and exposes the first-occurrence limitation", () => {
+test("grounded extraction benchmark is deterministic and covers repeated exact occurrences", () => {
   const first = runBenchmark();
   const second = runBenchmark();
   assert.equal(second, first);
@@ -35,8 +35,8 @@ test("grounded extraction benchmark is deterministic and exposes the first-occur
     }
   }
   const repeated = cases.find((record) => record.caseId === "repeated-identical-value-distinct-locators");
-  assert.equal(repeated.expectedLimitation, "first-occurrence-resolver");
-  assert.ok(repeated.metrics.exactSpanRecall < 1);
+  assert.equal(repeated.expectedLimitation, null);
+  assert.equal(repeated.metrics.exactSpanRecall, 1);
   assert.equal(cases.find((record) => record.caseId === "shared-span-multiple-fields").metrics.exactSpanRecall, 1);
   assert.ok(cases.find((record) => record.caseId === "unknown-and-ungrounded-provider-output").metrics.groundedDropRate > 0);
   assert.ok(cases.find((record) => record.caseId === "chunk-boundary-scan").metrics.calls > 1);
