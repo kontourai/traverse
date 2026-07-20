@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/kontourai/traverse/compare/v0.18.0...v0.19.0) (2026-07-20)
+
+
+### Features
+
+* add portable extraction result envelope ([7f93999](https://github.com/kontourai/traverse/commit/7f939999a8a5e3c569ddf59f7002ff67d1b99dc6))
+* add portable extraction result envelope ([6998a7a](https://github.com/kontourai/traverse/commit/6998a7a113bb2ed2b8a8c1930ab9aa257a77cdcb))
+
 ## [0.18.0](https://github.com/kontourai/traverse/compare/v0.17.0...v0.18.0) (2026-07-20)
 
 
