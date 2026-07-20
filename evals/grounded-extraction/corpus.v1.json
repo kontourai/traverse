@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "1.0",
+  "fixtureRevision": "grounded-extraction-corpus-v1",
+  "cases": [
+    {
+      "id": "repeated-identical-value-distinct-locators",
+      "contentType": "text",
+      "content": "Trail North is open. Trail South is open. Trail North is open.",
+      "schema": [{ "path": "routeName", "type": "string", "inferenceType": "explicit" }],
+      "providerProposals": [
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.96, "excerpt": "Trail North" },
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.95, "excerpt": "Trail North" }
+      ],
+      "gold": [
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 1 },
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 2 }
+      ],
+      "expectedLimitation": "first-occurrence-resolver"
+    },
+    {
+      "id": "shared-span-multiple-fields",
+      "contentType": "text",
+      "content": "Access window: 09:00-17:00 daily.",
+      "schema": [
+        { "path": "opensAt", "type": "string", "inferenceType": "explicit" },
+        { "path": "closesAt", "type": "string", "inferenceType": "explicit" }
+      ],
+      "providerProposals": [
+        { "fieldPath": "opensAt", "candidateValue": "09:00", "confidence": 0.99, "excerpt": "Access window: 09:00-17:00 daily." },
+        { "fieldPath": "closesAt", "candidateValue": "17:00", "confidence": 0.99, "excerpt": "Access window: 09:00-17:00 daily." }
+      ],
+      "gold": [
+        { "fieldPath": "opensAt", "candidateValue": "09:00", "excerpt": "Access window: 09:00-17:00 daily.", "occurrence": 1 },
+        { "fieldPath": "closesAt", "candidateValue": "17:00", "excerpt": "Access window: 09:00-17:00 daily.", "occurrence": 1 }
+      ]
+    },
+    {
+      "id": "unknown-and-ungrounded-provider-output",
+      "contentType": "text",
+      "content": "Capacity is 24.",
+      "schema": [{ "path": "capacity", "type": "number", "inferenceType": "explicit" }],
+      "providerProposals": [
+        { "fieldPath": "capacity", "candidateValue": 24, "confidence": 0.92, "excerpt": "Capacity is 24." },
+        { "fieldPath": "unknownField", "candidateValue": "x", "confidence": 0.8, "excerpt": "Capacity is 24." },
+        { "fieldPath": "capacity", "candidateValue": 24, "confidence": 0.8, "excerpt": "Capacity is twenty four." },
+        { "fieldPath": "capacity", "candidateValue": 24, "confidence": 0.8, "excerpt": "Holds 24 participants." }
+      ],
+      "gold": [{ "fieldPath": "capacity", "candidateValue": 24, "excerpt": "Capacity is 24.", "occurrence": 1 }]
+    },
+    {
+      "id": "explicit-and-inferred-values",
+      "contentType": "text",
+      "content": "The route climbs 450 meters over 8 kilometers.",
+      "schema": [
+        { "path": "elevationGain", "type": "number", "inferenceType": "explicit" },
+        { "path": "difficulty", "type": "enum", "enumValues": ["easy", "moderate", "hard"], "inferenceType": "inferred" }
+      ],
+      "providerProposals": [
+        { "fieldPath": "elevationGain", "candidateValue": 450, "confidence": 0.97, "excerpt": "450 meters" },
+        { "fieldPath": "difficulty", "candidateValue": "moderate", "confidence": 0.72, "excerpt": "The route climbs 450 meters over 8 kilometers." }
+      ],
+      "gold": [
+        { "fieldPath": "elevationGain", "candidateValue": 450, "excerpt": "450 meters", "occurrence": 1 },
+        { "fieldPath": "difficulty", "candidateValue": "moderate", "excerpt": "The route climbs 450 meters over 8 kilometers.", "occurrence": 1 }
+      ]
+    },
+    {
+      "id": "chunk-boundary-scan",
+      "contentType": "text",
+      "content": "Checkpoint Alpha is active. xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx Checkpoint Omega is active.",
+      "schema": [{ "path": "checkpoint", "type": "string", "inferenceType": "explicit" }],
+      "scanTerms": ["Checkpoint Alpha", "Checkpoint Omega"],
+      "chunkSize": 56,
+      "chunkOverlap": 20,
+      "gold": [
+        { "fieldPath": "checkpoint", "candidateValue": "Checkpoint Alpha", "excerpt": "Checkpoint Alpha", "occurrence": 1 },
+        { "fieldPath": "checkpoint", "candidateValue": "Checkpoint Omega", "excerpt": "Checkpoint Omega", "occurrence": 1 }
+      ]
+    },
+    {
+      "id": "html-markdown-preparation",
+      "contentType": "html",
+      "content": "<main><h2>Schedule</h2><p>Open Tuesday at 10:00.</p></main>",
+      "schema": [{ "path": "schedule", "type": "string", "inferenceType": "explicit" }],
+      "scanTerms": ["Open Tuesday at 10:00."],
+      "gold": [{ "fieldPath": "schedule", "candidateValue": "Open Tuesday at 10:00.", "excerpt": "Open Tuesday at 10:00.", "occurrence": 1 }]
+    },
+    {
+      "id": "pdf-page-offset-grounding",
+      "contentType": "pdf",
+      "binaryText": "Page one summary.\fPage two value 73.",
+      "schema": [{ "path": "pageValue", "type": "number", "inferenceType": "explicit" }],
+      "providerProposals": [{ "fieldPath": "pageValue", "candidateValue": 73, "confidence": 0.94, "excerpt": "Page two value 73." }],
+      "gold": [{ "fieldPath": "pageValue", "candidateValue": 73, "excerpt": "Page two value 73.", "occurrence": 1 }]
+    },
+    {
+      "id": "ocr-location-grounding",
+      "contentType": "png",
+      "binaryText": "Sign text: Entry closes at 18:00.",
+      "schema": [{ "path": "closesAt", "type": "string", "inferenceType": "explicit" }],
+      "providerProposals": [{ "fieldPath": "closesAt", "candidateValue": "18:00", "confidence": 0.9, "excerpt": "Entry closes at 18:00." }],
+      "gold": [{ "fieldPath": "closesAt", "candidateValue": "18:00", "excerpt": "Entry closes at 18:00.", "occurrence": 1 }]
+    }
+  ]
+}

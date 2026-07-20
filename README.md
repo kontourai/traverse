@@ -922,6 +922,28 @@ binary-content error with zero provider calls. Fetched PNG/JPEG snapshots are
 captured as raw `bodyBytes`, so `fetchAndExtract()` can forward the same
 extractor end-to-end for live or replayed snapshots.
 
+## Grounded extraction benchmark
+
+`npm run eval:grounded` runs the credential-free, deterministic gold corpus and
+emits JSONL with exact-span precision/recall, value and type accuracy, grounding
+failures, schema coverage, calls, tokens, latency, and typed failures. Every
+record binds the corpus revision, task digest, package revision, provider,
+model, and extraction configuration. The corpus covers repeated/shared spans,
+invalid provider output, explicit and inferred values, chunk boundaries,
+HTML/Markdown preparation, PDF page offsets, and OCR-derived text.
+
+An optional non-hermetic provider can be supplied explicitly after building:
+
+```sh
+node evals/grounded-extraction/run.mjs \
+  --provider-module ./local-provider.mjs \
+  --model provider-model-id
+```
+
+The versioned corpus remains the gold oracle in both modes. See the
+[benchmark decision](docs/decisions/grounded-extraction-benchmark.md) for the
+evidence contract and known-limitation policy.
+
 ## Requirements
 
 - Node.js `>= 22`
