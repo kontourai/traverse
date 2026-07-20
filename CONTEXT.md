@@ -63,7 +63,8 @@ test).
 - **Extraction Cost Guard**: `extract()`'s optional
   `ExtractInput.maxProviderCalls` / `maxTotalTokens` ceilings on a single
   run's provider spend. Once a configured ceiling is reached, `extract()`
-  stops issuing further `provider.extract()` calls (never mid-call), returns
+  stops issuing further physical provider operations (`provider.extract()` or
+  optional `provider.extractBatch()`, never mid-call), returns
   the proposals already collected, and records a warning naming which
   ceiling fired and how much was consumed — mirroring the `maxChunks`
   truncation precedent, never throwing. Accumulated spend

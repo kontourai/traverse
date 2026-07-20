@@ -246,8 +246,9 @@ export interface ExtractionResult {
   /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */
   warnings?: string[];
   /**
-   * Number of `provider.extract()` calls actually issued during this run
-   * (attempted, whether they succeeded or threw) — REQUIRED, always populated,
+   * Number of physical provider operations actually issued during this run
+   * (one `extract()` or optional `extractBatch()` call; attempted whether it
+   * succeeded or threw) — REQUIRED, always populated,
    * even on an early return where zero calls were made (invalid-config,
    * pdf-deferred) and even with no `ExtractInput.maxProviderCalls`/
    * `maxTotalTokens` ceiling configured, so spend is observable by default.
@@ -263,6 +264,12 @@ export interface ExtractionResult {
    * `ExtractInput.maxTotalTokens`.
    */
   totalTokensUsed: number;
+  /**
+   * Present when extraction intentionally stopped before all prepared chunks
+   * could be dispatched. This is a typed completion state, so callers never
+   * have to infer a partial run by parsing a warning string.
+   */
+  partial?: ExtractionPartial;
   /** Provider failures normalized for control flow while retaining native diagnostics. */
   providerFailures?: ExtractionProviderFailure[];
   /** Present only when this run used a validated versioned task spec. */
@@ -301,6 +308,26 @@ export interface ExtractionResult {
   ocrDerived?: true;
 }
 
+/** Why an extraction run stopped before dispatching every prepared chunk. */
+export type ExtractionPartialReason = "cancelled" | "max-provider-calls" | "max-total-tokens";
+
+/**
+ * Typed progress retained when a run ends early. `completedChunks` counts
+ * chunks whose provider work completed (successfully or with a reported
+ * provider failure); `remainingChunks` were never dispatched.
+ */
+export interface ExtractionPartial {
+  reason: ExtractionPartialReason;
+  completedChunks: number;
+  remainingChunks: number;
+  /**
+   * Present when the configured token ceiling was crossed in the preceding
+   * bounded wave, including when another ceiling is the reported stop reason.
+   * The overshoot is limited to that completed wave.
+   */
+  tokenOvershoot?: number;
+}
+
 /**
  * What an ExtractionProvider hands back.
  *
@@ -331,6 +358,10 @@ export type ExtractionProviderCapability =
 
 export interface ExtractionProviderCapabilities {
   supported: ExtractionProviderCapability[];
+  /** Maximum physical requests this provider permits concurrently. */
+  maxConcurrency?: number;
+  /** Maximum logical extraction inputs accepted by one `extractBatch()` call. */
+  maxBatchSize?: number;
 }
 
 /** Normalized failure classification with the untouched native diagnostic. */
@@ -342,6 +373,18 @@ export interface ExtractionProviderFailure {
   native: unknown;
 }
 
+/** One prepared-content request passed to an extraction provider. */
+export interface ProviderExtractionInput {
+  /** already normalized to text by the package's content-prep step. */
+  content: string;
+  contentType: ContentType;
+  targetSchema: TargetFieldSchema[];
+  fieldHints?: Record<string, string>;
+  taskSpec?: ExtractionTaskSpec;
+  /** Lets a provider cooperatively stop an already-dispatched request. */
+  signal?: AbortSignal;
+}
+
 /**
  * A pluggable extraction backend. The bundled Anthropic adapter (subpath
  * `@kontourai/traverse/anthropic`) is one implementation; callers may inject any
@@ -351,14 +394,12 @@ export interface ExtractionProvider {
   name: string;
   /** Optional for legacy custom providers; required on bundled adapters. */
   capabilities?: ExtractionProviderCapabilities;
-  extract(input: {
-    /** already normalized to text by the package's content-prep step. */
-    content: string;
-    contentType: ContentType;
-    targetSchema: TargetFieldSchema[];
-    fieldHints?: Record<string, string>;
-    taskSpec?: ExtractionTaskSpec;
-  }): Promise<ProviderExtractionOutput>;
+  extract(input: ProviderExtractionInput): Promise<ProviderExtractionOutput>;
+  /**
+   * Optional physical batching operation. Outputs must correspond to inputs
+   * by index. Omit it to retain the legacy one-input-per-call behavior.
+   */
+  extractBatch?(inputs: ProviderExtractionInput[]): Promise<ProviderExtractionOutput[]>;
 }
 
 /**
@@ -461,8 +502,23 @@ export interface ExtractInput {
   /** Cap on number of chunks; extras are dropped with a warning (default 40). */
   maxChunks?: number;
   /**
-   * Ceiling on the number of `provider.extract()` calls issued in ONE
-   * `extract()` run (across all chunks). Default unset = unbounded. Once
+   * Maximum provider calls in flight at once. Defaults to 1, preserving the
+   * historical sequential dispatcher. The effective value is capped by an
+   * optionally declared provider capability.
+   */
+  concurrency?: number;
+  /**
+   * Maximum logical chunks grouped into one physical `extractBatch()` call.
+   * Defaults to 1 and is only used when the provider implements that optional
+   * operation; otherwise the legacy single-call path is used.
+   */
+  batchSize?: number;
+  /** Stops new waves from dispatching; already-dispatched work is retained. */
+  signal?: AbortSignal;
+  /**
+   * Ceiling on physical provider operations issued in ONE `extract()` run
+   * (one `extract()` or optional `extractBatch()` call). Default unset =
+   * unbounded. Once
    * reached, `extract()` stops issuing further calls (never mid-call), keeps
    * whatever proposals were already collected, and records a warning naming
    * the ceiling and how many calls were made — mirroring the `maxChunks`
@@ -482,7 +538,7 @@ export interface ExtractInput {
    * checked BEFORE each call using only tokens already spent by calls that
    * have already completed, because a call's cost is unknown until it
    * returns — actual total tokens consumed by a run can therefore exceed
-   * this ceiling by up to one call's usage. Once reached, `extract()` stops
+   * this ceiling by the completed bounded wave's usage. Once reached, `extract()` stops
    * issuing further calls (never mid-call), keeps proposals already
    * collected, and records a warning naming the ceiling and tokens
    * consumed — same never-throws contract as `maxProviderCalls`. Must be a
