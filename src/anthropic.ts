@@ -36,6 +36,7 @@ import type {
   ProviderExtractionOutput,
   TargetFieldSchema,
 } from "./types.js";
+import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 
 // ---------------------------------------------------------------------------
 // Minimal client interface — mirrors @anthropic-ai/sdk Message API surface.
@@ -365,6 +366,7 @@ export function createAnthropicExtractionProvider(
 
   return {
     name,
+    capabilities: EXTRACTION_CONFORMANCE_CAPABILITIES,
 
     async extract(input): Promise<ProviderExtractionOutput> {
       const client = await resolveClient(opts);

@@ -263,6 +263,8 @@ export interface ExtractionResult {
    * `ExtractInput.maxTotalTokens`.
    */
   totalTokensUsed: number;
+  /** Provider failures normalized for control flow while retaining native diagnostics. */
+  providerFailures?: ExtractionProviderFailure[];
   /** Present only when this run used a validated versioned task spec. */
   taskDigest?: string;
   /** Canonical example digests, in task order. */
@@ -320,6 +322,26 @@ export interface ProviderExtractionOutput {
   warnings?: string[];
 }
 
+export type ExtractionProviderCapability =
+  | "structured-output"
+  | "exact-excerpts"
+  | "task-specifications"
+  | "usage"
+  | "warnings";
+
+export interface ExtractionProviderCapabilities {
+  supported: ExtractionProviderCapability[];
+}
+
+/** Normalized failure classification with the untouched native diagnostic. */
+export interface ExtractionProviderFailure {
+  provider: string;
+  kind: "authentication" | "rate-limit" | "timeout" | "invalid-request" | "unavailable" | "unknown";
+  retryable: boolean;
+  message: string;
+  native: unknown;
+}
+
 /**
  * A pluggable extraction backend. The bundled Anthropic adapter (subpath
  * `@kontourai/traverse/anthropic`) is one implementation; callers may inject any
@@ -327,6 +349,8 @@ export interface ProviderExtractionOutput {
  */
 export interface ExtractionProvider {
   name: string;
+  /** Optional for legacy custom providers; required on bundled adapters. */
+  capabilities?: ExtractionProviderCapabilities;
   extract(input: {
     /** already normalized to text by the package's content-prep step. */
     content: string;
