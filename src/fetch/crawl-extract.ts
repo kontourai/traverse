@@ -30,6 +30,7 @@ import { crawl as forageCrawl } from "@kontourai/forage";
 import type { CrawlManifest, CrawlPolicy, Page, Seed } from "@kontourai/forage";
 import { extract } from "../extract.js";
 import { resolveContentType } from "./fetch-source.js";
+import type { PreparedArtifactStore } from "../prepared-artifact.js";
 import type {
   ExtractionProvider,
   ExtractionResult,
@@ -65,6 +66,10 @@ export interface CrawlAndExtractOptions {
   pdfTextExtractor?: PdfTextExtractor;
   /** injected image OCR extractor, forwarded to `extract()`. */
   imageTextExtractor?: ImageTextExtractor;
+  /** caller-owned storage for exact per-page prepared text. */
+  preparedArtifactStore?: PreparedArtifactStore;
+  /** preparation implementation version included in each page artifact identity. */
+  preparationVersion?: string;
   /**
    * Injected crawl seam (defaults to forage's `crawl`). Present so tests can
    * drive a deterministic manifest without a live crawl; production callers
@@ -123,6 +128,11 @@ export async function crawlAndExtract(
       maxTotalTokens: opts.maxTotalTokens,
       pdfTextExtractor: opts.pdfTextExtractor,
       imageTextExtractor: opts.imageTextExtractor,
+      preparedArtifact: {
+        store: opts.preparedArtifactStore,
+        sourceSnapshotRef: page.sourceRef,
+        preparationVersion: opts.preparationVersion,
+      },
     });
     pages.push({ page, sourceRef: page.sourceRef, extraction });
   }

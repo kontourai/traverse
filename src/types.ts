@@ -12,6 +12,11 @@
  * `ProviderExtractionOutput` below.
  */
 
+import type {
+  PreparedArtifact,
+  PreparedArtifactStore,
+} from "./prepared-artifact.js";
+
 /**
  * Content encodings Traverse can prepare for extraction. `"pdf"` is declared
  * here so callers can pass it through a stable union today, but content-prep for
@@ -306,6 +311,12 @@ export interface ExtractionResult {
    * anchors to the prepared OCR text.
    */
   ocrDerived?: true;
+  /**
+   * Identity of the exact full prepared text behind every chars: locator.
+   * The text is deliberately not embedded; resolve it through an injected
+   * PreparedArtifactStore when an authorized caller needs to inspect it.
+   */
+  preparedArtifact?: PreparedArtifact;
 }
 
 /** Why an extraction run stopped before dispatching every prepared chunk. */
@@ -462,6 +473,17 @@ export interface ExtractInput {
   contentType: ContentType;
   /** stable ref for provenance — maps to Survey RawSource.sourceRef. */
   sourceRef: string;
+  /**
+   * Optional caller-owned persistence seam for the exact prepared text.
+   * Without a store, extract() still returns a deterministic identity but no
+   * text is retained by Traverse. sourceSnapshotRef is supplied by adapters
+   * that already own immutable capture/replay identity.
+   */
+  preparedArtifact?: {
+    store?: PreparedArtifactStore;
+    sourceSnapshotRef?: string;
+    preparationVersion?: string;
+  };
   targetSchema: TargetFieldSchema[];
   /** Optional validated instructions/examples; its schema must equal targetSchema. */
   taskSpec?: ExtractionTaskSpec;

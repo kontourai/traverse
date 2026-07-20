@@ -60,6 +60,18 @@ test).
   `ocrDerived?: true` is an additive presence marker used only when image OCR
   text was the prepared content, so trust surfaces can distinguish OCR-derived
   excerpts from directly parsed text.
+- **Prepared Artifact** (`PreparedArtifact`): Traverse's versioned identity
+  for the exact complete prepared text behind an extraction result's
+  `chars:<start>-<end>` locators. It carries a SHA-256 text digest,
+  deterministic reference, preparation mode/version, UTF-16 content length,
+  and optional source snapshot reference — never the text itself. An
+  authorized caller resolves text through an injected `PreparedArtifactStore`,
+  whose typed outcomes distinguish available, unavailable, storage-error,
+  invalid-artifact, identity-mismatch, and digest-mismatch. Artifact and
+  resolved-text strings must be well-formed Unicode, and preparation mode
+  records the path actually used (including transcript cleanup or HTML's text
+  fallback). See
+  [`docs/decisions/prepared-artifact.md`](docs/decisions/prepared-artifact.md).
 - **Extraction Cost Guard**: `extract()`'s optional
   `ExtractInput.maxProviderCalls` / `maxTotalTokens` ceilings on a single
   run's provider spend. Once a configured ceiling is reached, `extract()`

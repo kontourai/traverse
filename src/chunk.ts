@@ -72,6 +72,8 @@ export interface PreparedChunks {
   /** chunks dropped by the `maxChunks` cap (0 when none). */
   truncatedChunks: number;
   warnings: string[];
+  /** The preparation actually used, including markdown's fail-closed text fallback. */
+  effectivePrepMode: "text" | "markdown" | "transcript";
   /** typed prep error (pdf / binary); when set, `chunks` is empty. */
   error?: string;
   /**
@@ -121,8 +123,8 @@ function resolvePrep(contentType: ContentType, prep?: PrepMode): PrepMode {
   return contentType === "html" ? "markdown" : "text";
 }
 
-function emptyError(error: string): PreparedChunks {
-  return { fullText: "", chunks: [], structural: false, cardCount: 0, truncatedChunks: 0, warnings: [], error };
+function emptyError(error: string, effectivePrepMode: PreparedChunks["effectivePrepMode"]): PreparedChunks {
+  return { fullText: "", chunks: [], structural: false, cardCount: 0, truncatedChunks: 0, warnings: [], effectivePrepMode, error };
 }
 
 /** Non-structural result: character-window `fullText` (single-chunk when small). */
@@ -132,9 +134,10 @@ function windowResult(
   overlap: number,
   maxChunks: number,
   warnings: string[],
+  effectivePrepMode: PreparedChunks["effectivePrepMode"],
 ): PreparedChunks {
   const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
-  return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings };
+  return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings, effectivePrepMode };
 }
 
 // ---------------------------------------------------------------------------
@@ -328,8 +331,9 @@ export function prepareAndChunk(
   const prep = resolvePrep(contentType, options.prep);
   const warnings: string[] = [];
 
-  if (contentType === "pdf") return emptyError(PDF_PREP_ERROR);
-  if (typeof content !== "string") return emptyError(binaryPrepError(contentType));
+  const requestedMode: PreparedChunks["effectivePrepMode"] = contentType === "transcript" ? "transcript" : prep;
+  if (contentType === "pdf") return emptyError(PDF_PREP_ERROR, requestedMode);
+  if (typeof content !== "string") return emptyError(binaryPrepError(contentType), requestedMode);
 
   // text/transcript passthrough or html with the prep:'text' escape hatch.
   // Embedded-state harvesting + shell detection still apply to html here (they
@@ -344,7 +348,8 @@ export function prepareAndChunk(
         : contentType === "transcript"
           ? vttToText(content, SAFETY_CAP)
           : content.slice(0, SAFETY_CAP);
-    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    const effectivePrepMode = contentType === "transcript" ? "transcript" : "text";
+    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings, effectivePrepMode);
     if (contentType === "html") augmentHtml(result, content);
     return result;
   }
@@ -369,6 +374,7 @@ export function prepareAndChunk(
           cardCount: built.cardCount,
           truncatedChunks: built.truncatedChunks,
           warnings,
+          effectivePrepMode: "markdown",
         };
         augmentHtml(result, content);
         return result;
@@ -380,14 +386,14 @@ export function prepareAndChunk(
     // string so Turndown's own parser handles it (see content-prep.htmlToMarkdown).
     const source = doc.body && doc.body.innerHTML.length > 0 ? doc.body.innerHTML : content;
     const fullText = collapseMarkdown(td.turndown(source), SAFETY_CAP);
-    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings);
+    const result = windowResult(fullText, chunkSize, overlap, maxChunks, warnings, "markdown");
     augmentHtml(result, content);
     return result;
   } catch (err) {
     warnings.push(
       `markdown/structural prep failed (${err instanceof Error ? err.message : String(err)}); fell back to text chunking`,
     );
-    const result = windowResult(htmlToText(content, SAFETY_CAP), chunkSize, overlap, maxChunks, warnings);
+    const result = windowResult(htmlToText(content, SAFETY_CAP), chunkSize, overlap, maxChunks, warnings, "text");
     augmentHtml(result, content);
     return result;
   }

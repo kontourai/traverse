@@ -74,6 +74,8 @@ import { validateExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
+import { createPreparedArtifact } from "./prepared-artifact.js";
+import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
   ExtractInput,
   ExtractionProposal,
@@ -93,6 +95,16 @@ import type {
  */
 const PDF_FULL_TEXT_CAP = 5_000_000;
 const IMAGE_FULL_TEXT_CAP = 5_000_000;
+
+function preparationModeFor(
+  prepared: PreparedChunks,
+  usedPdfExtractor: boolean,
+  usedImageExtractor: boolean,
+): PreparedArtifactPreparationMode {
+  if (usedPdfExtractor) return "pdf-text";
+  if (usedImageExtractor) return "image-ocr";
+  return prepared.effectivePrepMode;
+}
 
 const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
@@ -388,6 +400,18 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const { fullText, chunks } = prepared;
     const warnings: string[] = [...prepared.warnings];
+    const preparedArtifact: PreparedArtifact = createPreparedArtifact(fullText, {
+      preparationMode: preparationModeFor(prepared, input.contentType === "pdf" && !!input.pdfTextExtractor, ocrDerived),
+      preparationVersion: input.preparedArtifact?.preparationVersion,
+      sourceSnapshotRef: input.preparedArtifact?.sourceSnapshotRef,
+    });
+    if (input.preparedArtifact?.store?.put) {
+      try {
+        await input.preparedArtifact.store.put(preparedArtifact, fullText);
+      } catch (error) {
+        warnings.push("prepared artifact storage failed; exact text is unavailable from the configured store");
+      }
+    }
     const collected: ExtractionProposal[] = [];
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
@@ -447,6 +471,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       if (prepared.embedded) failed.embedded = prepared.embedded;
       if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
       if (ocrDerived) failed.ocrDerived = true;
+      failed.preparedArtifact = preparedArtifact;
       return failed;
     }
 
@@ -481,6 +506,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     if (prepared.embedded) result.embedded = prepared.embedded;
     if (pdfPageOffsets) result.pdfPageOffsets = pdfPageOffsets;
     if (ocrDerived) result.ocrDerived = true;
+    result.preparedArtifact = preparedArtifact;
     return result;
   } catch (err) {
     return {

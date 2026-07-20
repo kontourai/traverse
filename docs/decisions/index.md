@@ -20,6 +20,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [grounded-extraction-benchmark](./grounded-extraction-benchmark.md) | current | Grounded extraction benchmark |
 | [http-validators](./http-validators.md) | current | HTTP validators (ETag / conditional GET) on snapshots |
 | [image-content-preparation](./image-content-preparation.md) | current | Image content preparation |
+| [prepared-artifact](./prepared-artifact.md) | current | Prepared artifact |
 | [provider-conformance](./provider-conformance.md) | current | Extraction provider conformance |
 | [rendered-fetch](./rendered-fetch.md) | current | Rendered Fetch |
 | [transcript-content-type](./transcript-content-type.md) | current | YouTube / transcript (WebVTT) content type |
