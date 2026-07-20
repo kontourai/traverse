@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.0](https://github.com/kontourai/traverse/compare/v0.17.0...v0.18.0) (2026-07-20)
+
+
+### Features
+
+* add bounded batch extraction ([820c709](https://github.com/kontourai/traverse/commit/820c70953ac8572d392aaee8beb91477bfb7af28))
+* add bounded batch extraction ([27c497e](https://github.com/kontourai/traverse/commit/27c497eadd351bb9589ddd86df45390a5188ba3d))
+* add versioned extraction task specs ([0b68581](https://github.com/kontourai/traverse/commit/0b6858110e5adfc56be7c342f22d8e6f555b960d))
+* add versioned extraction task specs ([096be51](https://github.com/kontourai/traverse/commit/096be51496e8e1459ec7944a6ade62f5570a9774))
+* bind extraction to prepared artifacts ([bab0658](https://github.com/kontourai/traverse/commit/bab06584b12a3089d3e5debdac394a5bf9392431))
+* bind extraction to prepared artifacts ([9eb9c1c](https://github.com/kontourai/traverse/commit/9eb9c1c1f0d68bcb065faee7e8d27664a107647c))
+* enforce provider extraction conformance ([be769b3](https://github.com/kontourai/traverse/commit/be769b35bf8f49538335f0825f793076bfd3a6c0))
+* enforce provider extraction conformance ([eaf9b6f](https://github.com/kontourai/traverse/commit/eaf9b6fb128ccbe8ffcc2470ad7a69ab4b735cdb))
+* **evals:** benchmark grounded extraction quality ([bc945e4](https://github.com/kontourai/traverse/commit/bc945e4ecff03625b6d07bf8adfb38fa0d2b97f0))
+* **evals:** benchmark grounded extraction quality ([3229eb5](https://github.com/kontourai/traverse/commit/3229eb592be2526a1af17ed9bc74ac7f19dae77e))
+* resolve exact excerpt occurrences ([19f832a](https://github.com/kontourai/traverse/commit/19f832a542fbfc4a8f50908d9c8bcad5dfd4c441))
+* resolve exact excerpt occurrences ([cef0b0b](https://github.com/kontourai/traverse/commit/cef0b0b38db4104753f9cbe8b2fb034561fc8f3b))
+
 ## [0.17.0](https://github.com/kontourai/traverse/compare/v0.16.0...v0.17.0) (2026-07-15)
 
 
