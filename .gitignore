@@ -8,3 +8,4 @@ playwright-report/
 .kontourai/
 site/
 *.tgz
+.surface/
