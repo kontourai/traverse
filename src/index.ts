@@ -9,6 +9,30 @@
 
 export { extract } from "./extract.js";
 export {
+  PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT,
+  PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION,
+  toPortablePreparedArtifactState,
+  serializePortableExtractionResult,
+  deserializePortableExtractionResult,
+  validatePortableExtractionResultEnvelope,
+  serializeExtractionResultEnvelope,
+  deserializeExtractionResultEnvelope,
+  validateExtractionResultEnvelope,
+} from "./extraction-result-envelope.js";
+export type {
+  PortableExtractionSource,
+  PortableExtractionProposal,
+  PortableExtractionProviderFailure,
+  PortableRawProviderResponse,
+  PortableExtractionOutcome,
+  PortableExtractionWarning,
+  PortablePreparedArtifactState,
+  PortableExtractionResult,
+  PortableExtractionResultEnvelope,
+  PortableExtractionResultOptions,
+  PortableExtractionResultEnvelopeValidation,
+} from "./extraction-result-envelope.js";
+export {
   EXACT_OCCURRENCE_RESOLVER_VERSION,
   enumerateExactOccurrences,
   ExactOccurrenceResolver,

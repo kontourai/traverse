@@ -57,9 +57,26 @@ test).
   normalized `proposals`, the provider's `raw` response for audit, an
   `extractedAt` timestamp, an optional `error` (Traverse never throws for
   provider/parse failure), and optional `warnings` for dropped proposals.
+  Every result also carries a stable top-level provider identity, source
+  reference, and opaque per-run identity, including zero-proposal successes and
+  early failures.
   `ocrDerived?: true` is an additive presence marker used only when image OCR
   text was the prepared content, so trust surfaces can distinguish OCR-derived
   excerpts from directly parsed text.
+- **Portable Extraction-Result Envelope** (`PortableExtractionResultEnvelope`):
+  Traverse's versioned, canonical JSON-safe projection of a complete result.
+  It retains provider/run/model/usage identity, source and prepared-artifact
+  identity, exact locator/occurrence records, field metadata, task digests, and
+  typed outcome, warning classification, partial/provider/artifact states. Its
+  artifact resolution projection binds a requested reference to the canonical
+  result-artifact reference without embedding a second contradictory artifact.
+  The default projection omits prepared
+  text, embedded raw-source sidecars, and diagnostic strings (`raw.response`, errors, warnings, failure
+  messages/native objects) and rejects credential-bearing source references.
+  Validation rejects unknown versions, unsupported locator or occurrence
+  semantics, non-lossless JSON objects, and artifact-state identity drift before
+  a consumer treats the record as grounded. See
+  [`docs/decisions/portable-extraction-result-envelope.md`](docs/decisions/portable-extraction-result-envelope.md).
 - **Prepared Artifact** (`PreparedArtifact`): Traverse's versioned identity
   for the exact complete prepared text behind an extraction result's
   `chars:<start>-<end>` locators. It carries a SHA-256 text digest,

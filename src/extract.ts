@@ -76,6 +76,7 @@ import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact } from "./prepared-artifact.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
+import { randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
   ExtractInput,
@@ -253,16 +254,19 @@ async function dispatchBoundedWaves(
 
 export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const extractedAt = new Date().toISOString();
+  const sourceRef = input.sourceRef;
+  const provider = input.provider.name;
+  const runId = `traverse-extraction-run:${randomUUID()}`;
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
     if (input.taskSpec) {
       const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
-      if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
+      if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
     }
     const unsupportedCapability = unsupportedProviderCapability(input);
     if (unsupportedCapability) return {
-      proposals: [], raw: EMPTY_RAW, extractedAt,
+      proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId,
       error: `provider ${input.provider.name} does not support required capability "${unsupportedCapability}"`,
       providerCalls: 0, totalTokensUsed: 0,
     };
@@ -275,7 +279,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: `invalid maxProviderCalls: must be a positive integer (got ${JSON.stringify(v)})`,
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -288,7 +292,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: `invalid maxTotalTokens: must be a positive finite number (got ${JSON.stringify(v)})`,
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -299,7 +303,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const v = input.concurrency;
       if (!(Number.isInteger(v) && v > 0)) {
         return {
-          proposals: [], raw: EMPTY_RAW, extractedAt,
+          proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId,
           error: `invalid concurrency: must be a positive integer (got ${JSON.stringify(v)})`,
           providerCalls: 0, totalTokensUsed: 0,
         };
@@ -309,7 +313,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const v = input.batchSize;
       if (!(Number.isInteger(v) && v > 0)) {
         return {
-          proposals: [], raw: EMPTY_RAW, extractedAt,
+          proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId,
           error: `invalid batchSize: must be a positive integer (got ${JSON.stringify(v)})`,
           providerCalls: 0, totalTokensUsed: 0,
         };
@@ -334,7 +338,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: pdfBytesRequiredError(),
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -345,7 +349,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: pdfPrep.error,
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -363,7 +367,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: imageBytesRequiredError(),
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -374,7 +378,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         return {
           proposals: [],
           raw: EMPTY_RAW,
-          extractedAt,
+          extractedAt, sourceRef, provider, runId,
           error: imagePrep.error,
           providerCalls: 0,
           totalTokensUsed: 0,
@@ -396,7 +400,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       });
     }
     if (prepared.error !== undefined) {
-      return { proposals: [], raw: EMPTY_RAW, extractedAt, error: prepared.error, providerCalls: 0, totalTokensUsed: 0 };
+      return { proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId, error: prepared.error, providerCalls: 0, totalTokensUsed: 0 };
     }
 
     const { fullText, chunks } = prepared;
@@ -464,6 +468,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         proposals: [],
         raw: EMPTY_RAW,
         extractedAt,
+        sourceRef,
+        provider,
+        runId,
         error: providerErrors[0],
         providerCalls,
         totalTokensUsed,
@@ -498,7 +505,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     }
 
     const result: ExtractionResult = {
-      proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed,
+      proposals, raw: lastRaw, extractedAt, sourceRef, provider, runId, providerCalls, totalTokensUsed,
       ...(partial ? { partial } : {}),
       ...(input.taskSpec ? { taskDigest: input.taskSpec.digest, exampleDigests: input.taskSpec.examples?.map((example) => example.digest) ?? [] } : {}),
       ...(providerFailures.length ? { providerFailures } : {}),
@@ -515,6 +522,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       proposals: [],
       raw: EMPTY_RAW,
       extractedAt,
+      sourceRef,
+      provider,
+      runId,
       error: err instanceof Error ? err.message : String(err),
       providerCalls: 0,
       totalTokensUsed: 0,

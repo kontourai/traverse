@@ -118,6 +118,43 @@ The Forage-backed `crawlAndExtract()` composition accepts the same options and
 binds each page artifact to that page's existing `sourceRef`, so byte-stable
 Forage replay produces the same prepared-artifact identity and resolution.
 
+### Portable extraction-result envelopes
+
+Traverse owns a versioned, canonical JSON envelope for moving a completed
+result across process or product boundaries:
+
+```ts
+import {
+  deserializePortableExtractionResult,
+  serializePortableExtractionResult,
+  validatePortableExtractionResultEnvelope,
+} from "@kontourai/traverse";
+
+const bytes = serializePortableExtractionResult(result);
+const envelope = deserializePortableExtractionResult(bytes);
+const validation = validatePortableExtractionResultEnvelope(JSON.parse(bytes));
+```
+
+`extract()` assigns every result a top-level `provider` and opaque `runId`, even
+for a successful run with zero proposals. The envelope retains those identities,
+model and usage counters, source/snapshot and prepared-artifact identity, exact
+locator/occurrence metadata, task/example digests, partial state, and typed
+provider/artifact failures. A typed `outcome` distinguishes empty success,
+partial work, invalid configuration/task, preparation, provider, and unexpected
+failure; warning strings become non-sensitive category/code records. Provider,
+model, failure-provider, and proposal-extractor identities use a strict,
+credential-free grammar. Canonical key ordering makes a validated
+deserialize/re-serialize byte-stable.
+
+The default export is deliberately diagnostic-safe: it omits `raw.response`,
+`ExtractionResult.error`, warning strings, provider-failure messages/native
+objects, embedded raw-source sidecars, prepared text, stores, and authorization configuration. Source refs
+with URL credentials or credential-shaped query parameters are rejected. Keep
+the full in-process `ExtractionResult` inside its original trust boundary when
+raw diagnostics are required; Traverse does not provide a diagnostic-rich wire
+export. Candidate values and grounding excerpts are intentional result data and
+still require the caller's domain-specific disclosure policy.
+
 ## Explicit vs. inferred fields (`inferenceType`)
 
 Every `ExtractionProposal` above is grounded by a verbatim `excerpt` — but
