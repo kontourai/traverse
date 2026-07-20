@@ -172,7 +172,7 @@ const result = await extract({
 // result.raw            — the provider's raw response, for audit
 // result.error          — set (never thrown) if a stage failed
 // result.warnings       — merged provider + normalization notes (dropped/adjusted proposals)
-// result.providerCalls  — provider.extract() calls issued this run, always populated
+// result.providerCalls  — physical provider operations issued this run, always populated
 // result.totalTokensUsed — accumulated raw.tokensUsed from successful calls, always populated
 // see "Cost guards" below for the maxProviderCalls/maxTotalTokens options that bound these
 ```
@@ -258,8 +258,11 @@ detects the repeated-sibling "card" container of a listing, cutting chunk
 boundaries **on card boundaries** so a card is never split. When no repeated
 structure is found (or for `text` / `prep: "text"`), it falls back to a
 character window with overlap so a value straddling a boundary is not lost.
-Each chunk is sent to the provider **sequentially** (rate-limit friendly;
-concurrency is future work).
+Chunks dispatch in bounded waves. `concurrency` and `batchSize` both default to
+`1`, so existing callers and providers keep the historical sequential behavior.
+When a provider implements optional `extractBatch()`, Traverse can put up to
+`batchSize` chunks into one physical provider call; declared provider limits
+(`maxConcurrency`, `maxBatchSize`) always cap caller settings.
 
 **Offset-correct provenance across chunks.** Each chunk is an exact contiguous
 substring of one `fullText`. A proposal's `excerpt` is verified against the
@@ -279,6 +282,9 @@ highest confidence.
 | `chunkOverlap` | `200` | character-window overlap (fallback path) |
 | `maxChunks` | `40` | cap on chunks; extras dropped with a warning |
 | `maxContentChars` | `32_000` | **per-chunk** provider content budget (each chunk truncated to it) |
+| `concurrency` | `1` | maximum physical provider calls in flight; capped by a declared provider limit |
+| `batchSize` | `1` | logical chunks per optional physical `extractBatch()` call; capped by a declared provider limit |
+| `signal` | unset | stops dispatching new waves while retaining the completed wave's results |
 
 These bound CONTENT (how much is prepared/chunked). To bound provider SPEND
 (how many calls / how many tokens one run issues), see
@@ -301,7 +307,7 @@ large or many-chunk page:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `maxProviderCalls` | unset (unbounded) | cap on `provider.extract()` calls issued in ONE `extract()` run, across all chunks |
+| `maxProviderCalls` | unset (unbounded) | cap on physical `extract()`/`extractBatch()` operations issued in ONE run |
 | `maxTotalTokens` | unset (unbounded) | cap on accumulated `raw.tokensUsed`, summed across every SUCCESSFUL call in that run |
 
 ```ts
@@ -317,7 +323,7 @@ const result = await extract({
 ```
 
 **Stop-issuing, never mid-call, never throws.** Once a configured ceiling is
-reached, `extract()` stops issuing further `provider.extract()` calls (it
+reached, `extract()` stops issuing further physical provider operations (it
 never aborts a call already in flight), keeps whatever proposals were
 already collected from calls that did run, and appends a warning to
 `result.warnings` naming the ceiling and how much was consumed, e.g.:
@@ -339,10 +345,17 @@ error.
 
 **Not a hard spend cap.** `maxTotalTokens` can only be checked using tokens
 already spent by calls that have already *completed* — a call's cost is
-unknown until it returns — so actual total tokens consumed by a run CAN
-exceed the configured ceiling by up to one call's usage. Treat it as "stop
-issuing further calls once this much has been spent," not "never cross this
-number."
+unknown until it returns. With concurrent work, Traverse checks between bounded
+waves, so actual total can exceed the ceiling by the completed wave's usage.
+That overshoot is reported as `result.partial.tokenOvershoot`; no subsequent
+wave starts. Treat it as "stop issuing further calls once this much has been
+spent," not "never cross this number."
+
+**Typed partial progress.** A call ceiling, token ceiling, or an aborted
+`signal` sets `result.partial` with a machine-readable reason plus completed
+and undispatched chunk counts. Already-dispatched calls are allowed to finish
+and their normalized proposals remain in the result; cancellation never
+silently looks like a complete extraction.
 
 **Independent of `maxChunks`.** `maxChunks` (see
 [Large pages & chunking](#large-pages--chunking)) truncates how many chunks

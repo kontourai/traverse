@@ -103,11 +103,13 @@ construction). See 0.5.1.
 
 ### D5 - Per-chunk provider errors -> partial results
 
-Providers are called SEQUENTIALLY (rate-limit friendly; concurrency is future
-work). A provider error on one chunk is recorded as a warning and the remaining
-chunks still run. Only if EVERY chunk's call fails does `extract()` surface a
-`result.error` - preserving the single-shot contract for the common 1-chunk case
-(a lone page whose only call throws is still an error, not an empty success).
+Providers dispatch in caller-bounded waves. Both concurrency and optional
+provider batching default to one, so the original rate-limit-friendly sequential
+behavior remains the default. A provider error on one chunk is recorded as a
+warning and the remaining chunks still run. Only if EVERY chunk's call fails
+does `extract()` surface a `result.error` - preserving the single-shot contract
+for the common 1-chunk case (a lone page whose only call throws is still an
+error, not an empty success).
 
 ### D6 - `maxContentChars` is the per-chunk provider budget; new options
 

@@ -10,8 +10,9 @@
  * Large-page chunking (0.5.0). `prepareAndChunk` turns the input into one
  * `fullText` plus offset-correct `chunks` (structural card boundaries for a
  * repeated-card listing, else a character window with overlap — see
- * src/chunk.ts and docs/adr/0004-large-page-chunking.md). Chunks are sent to the
- * provider SEQUENTIALLY (rate-limit friendly; concurrency is future work).
+ * src/chunk.ts and docs/adr/0004-large-page-chunking.md). Chunks dispatch in
+ * bounded waves: concurrency and batch size both default to one, preserving the
+ * historical sequential behavior until a caller opts in.
  * `maxContentChars` is the PER-CHUNK provider budget: each chunk handed to the
  * provider is truncated to it (identical to the pre-0.5.0 whole-text truncation
  * in the common single-chunk case).
@@ -76,7 +77,10 @@ import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, prepa
 import type {
   ExtractInput,
   ExtractionProposal,
+  ExtractionProviderFailure,
   ExtractionResult,
+  ExtractionPartial,
+  ProviderExtractionInput,
   ProviderExtractionOutput,
   RawProviderResponse,
 } from "./types.js";
@@ -94,8 +98,144 @@ const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
 
+interface ChunkDispatch {
+  index: number;
+  content: string;
+}
+
+interface ChunkOutcome extends ChunkDispatch {
+  output?: ProviderExtractionOutput;
+  error?: unknown;
+}
+
 function isImageContentType(contentType: ExtractInput["contentType"]): boolean {
   return contentType === "png" || contentType === "jpeg";
+}
+
+interface BoundedDispatchResult {
+  outcomes: Array<ChunkOutcome | undefined>;
+  providerCalls: number;
+  totalTokensUsed: number;
+  partial?: ExtractionPartial;
+  warnings: string[];
+}
+
+/**
+ * Reserve and dispatch bounded waves without folding their results. Keeping
+ * dispatch separate makes the concurrency/budget state independently testable;
+ * `extract()` owns the deterministic index-order normalization/fold below.
+ */
+async function dispatchBoundedWaves(
+  input: ExtractInput,
+  chunks: PreparedChunks["chunks"],
+  maxChars: number,
+): Promise<BoundedDispatchResult> {
+  const outcomes: Array<ChunkOutcome | undefined> = new Array(chunks.length);
+  const warnings: string[] = [];
+  let providerCalls = 0;
+  let totalTokensUsed = 0;
+  let nextChunk = 0;
+  let partial: ExtractionPartial | undefined;
+  const requestedConcurrency = input.concurrency ?? 1;
+  const providerConcurrency = input.provider.capabilities?.maxConcurrency;
+  const effectiveConcurrency = Math.min(
+    requestedConcurrency,
+    Number.isInteger(providerConcurrency) && providerConcurrency! > 0 ? providerConcurrency! : requestedConcurrency,
+  );
+  const requestedBatchSize = input.batchSize ?? 1;
+  const providerBatchSize = input.provider.capabilities?.maxBatchSize;
+  const effectiveBatchSize = input.provider.extractBatch
+    ? Math.min(
+      requestedBatchSize,
+      Number.isInteger(providerBatchSize) && providerBatchSize! > 0 ? providerBatchSize! : requestedBatchSize,
+    )
+    : 1;
+  const partialState = (reason: ExtractionPartial["reason"], remainingChunks: number): ExtractionPartial => {
+    const tokenOvershoot = input.maxTotalTokens === undefined ? 0 : totalTokensUsed - input.maxTotalTokens;
+    return {
+      reason,
+      completedChunks: nextChunk,
+      remainingChunks,
+      ...(tokenOvershoot > 0 ? { tokenOvershoot } : {}),
+    };
+  };
+
+  // Calls are reserved before Promise.all starts so maxProviderCalls cannot be
+  // exceeded by concurrently launched work.
+  while (nextChunk < chunks.length) {
+    const remainingChunks = chunks.length - nextChunk;
+    if (input.signal?.aborted) {
+      partial = partialState("cancelled", remainingChunks);
+      warnings.push(`stopped after ${providerCalls} provider call(s): cancelled; ${remainingChunks} chunk(s) not processed`);
+      break;
+    }
+    if (input.maxProviderCalls !== undefined && providerCalls >= input.maxProviderCalls) {
+      partial = partialState("max-provider-calls", remainingChunks);
+      warnings.push(
+        `stopped after ${providerCalls} provider call(s): maxProviderCalls (${input.maxProviderCalls}) reached; ${remainingChunks} chunk(s) not processed`,
+      );
+      break;
+    }
+    if (input.maxTotalTokens !== undefined && totalTokensUsed >= input.maxTotalTokens) {
+      partial = partialState("max-total-tokens", remainingChunks);
+      warnings.push(
+        `stopped after ${providerCalls} provider call(s): maxTotalTokens (${input.maxTotalTokens}) reached (${totalTokensUsed} tokens used); ${remainingChunks} chunk(s) not processed`,
+      );
+      break;
+    }
+
+    const callSlots = input.maxProviderCalls === undefined
+      ? effectiveConcurrency
+      : Math.min(effectiveConcurrency, input.maxProviderCalls - providerCalls);
+    const wave: ChunkDispatch[][] = [];
+    while (nextChunk < chunks.length && wave.length < callSlots) {
+      const group: ChunkDispatch[] = [];
+      while (nextChunk < chunks.length && group.length < effectiveBatchSize) {
+        const chunk = chunks[nextChunk];
+        group.push({ index: nextChunk, content: chunk.text.slice(0, maxChars) });
+        nextChunk++;
+      }
+      wave.push(group);
+    }
+
+    // Reservation happens before dispatch, one count per physical operation,
+    // including one extractBatch() operation for a multi-input group.
+    providerCalls += wave.length;
+    const waveOutcomes = await Promise.all(wave.map(async (group): Promise<ChunkOutcome[]> => {
+      const requests: ProviderExtractionInput[] = group.map(({ content }) => ({
+        content,
+        contentType: input.contentType,
+        targetSchema: input.targetSchema,
+        fieldHints: input.fieldHints,
+        ...(input.taskSpec ? { taskSpec: input.taskSpec } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      }));
+      try {
+        const outputs = group.length > 1 && input.provider.extractBatch
+          ? await input.provider.extractBatch(requests)
+          : [await input.provider.extract(requests[0])];
+        if (!Array.isArray(outputs) || outputs.length !== group.length) {
+          throw new Error(`provider batch returned ${Array.isArray(outputs) ? outputs.length : "non-array"} output(s) for ${group.length} input(s)`);
+        }
+        return group.map((dispatch, index) => ({ ...dispatch, output: outputs[index] }));
+      } catch (error) {
+        return group.map((dispatch) => ({ ...dispatch, error }));
+      }
+    }));
+    for (const group of waveOutcomes) {
+      for (const outcome of group) outcomes[outcome.index] = outcome;
+    }
+    // Token usage is knowable only after the entire bounded wave completes.
+    for (const group of waveOutcomes) {
+      for (const outcome of group) {
+        if (outcome.output && typeof outcome.output.raw?.tokensUsed === "number") {
+          totalTokensUsed += outcome.output.raw.tokensUsed;
+        }
+      }
+    }
+  }
+
+  return { outcomes, providerCalls, totalTokensUsed, ...(partial ? { partial } : {}), warnings };
 }
 
 export async function extract(input: ExtractInput): Promise<ExtractionResult> {
@@ -139,6 +279,26 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           error: `invalid maxTotalTokens: must be a positive finite number (got ${JSON.stringify(v)})`,
           providerCalls: 0,
           totalTokensUsed: 0,
+        };
+      }
+    }
+    if (input.concurrency !== undefined) {
+      const v = input.concurrency;
+      if (!(Number.isInteger(v) && v > 0)) {
+        return {
+          proposals: [], raw: EMPTY_RAW, extractedAt,
+          error: `invalid concurrency: must be a positive integer (got ${JSON.stringify(v)})`,
+          providerCalls: 0, totalTokensUsed: 0,
+        };
+      }
+    }
+    if (input.batchSize !== undefined) {
+      const v = input.batchSize;
+      if (!(Number.isInteger(v) && v > 0)) {
+        return {
+          proposals: [], raw: EMPTY_RAW, extractedAt,
+          error: `invalid batchSize: must be a positive integer (got ${JSON.stringify(v)})`,
+          providerCalls: 0, totalTokensUsed: 0,
         };
       }
     }
@@ -231,77 +391,32 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     const collected: ExtractionProposal[] = [];
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
-    const providerFailures = [];
+    const providerFailures: ExtractionProviderFailure[] = [];
     let chunksSucceeded = 0;
-    // Cost-guard accumulators: providerCalls counts every ISSUED call
-    // (attempted, success or throw); totalTokensUsed sums raw.tokensUsed from
-    // SUCCESSFUL calls only (a provider that omits tokensUsed contributes 0).
-    let providerCalls = 0;
-    let totalTokensUsed = 0;
+    const dispatched = await dispatchBoundedWaves(input, chunks, maxChars);
+    warnings.push(...dispatched.warnings);
+    const { outcomes, providerCalls, totalTokensUsed, partial } = dispatched;
 
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-
-      // In-loop cost-guard checks, at the top of each iteration, before the
-      // content slice or provider call below. Both ceilings are validated
-      // > 0 above, so on i = 0 both checks are always false (providerCalls
-      // and totalTokensUsed start at 0) — the first call is never blocked.
-      // maxProviderCalls is checked first; whichever check trips first is
-      // the only one to emit a warning for that stop.
-      if (input.maxProviderCalls !== undefined && providerCalls >= input.maxProviderCalls) {
-        warnings.push(
-          `stopped after ${providerCalls} provider call(s): maxProviderCalls (${input.maxProviderCalls}) reached; ${chunks.length - i} chunk(s) not processed`,
-        );
-        break;
-      }
-      if (input.maxTotalTokens !== undefined && totalTokensUsed >= input.maxTotalTokens) {
-        warnings.push(
-          `stopped after ${providerCalls} provider call(s): maxTotalTokens (${input.maxTotalTokens}) reached (${totalTokensUsed} tokens used); ${chunks.length - i} chunk(s) not processed`,
-        );
-        break;
-      }
-
-      // Per-chunk provider budget: the provider sees at most `maxChars` of this
-      // chunk. The slice is still a prefix-substring of `fullText` at
-      // `chunk.start`, so verified offsets stay correct against `fullText`.
-      const chunkContent = chunk.text.slice(0, maxChars);
-
-      let output: ProviderExtractionOutput;
-      providerCalls++;
-      try {
-        output = await input.provider.extract({
-          content: chunkContent,
-          contentType: input.contentType,
-          targetSchema: input.targetSchema,
-          fieldHints: input.fieldHints,
-          ...(input.taskSpec ? { taskSpec: input.taskSpec } : {}),
-        });
-      } catch (err) {
-        const failure = normalizeProviderFailure(input.provider, err);
+    // Fold completed work strictly by original chunk index. Completion timing
+    // therefore cannot alter proposal ordering, warnings, raw audit output, or
+    // exact locator derivation.
+    for (let i = 0; i < outcomes.length; i++) {
+      const outcome = outcomes[i];
+      if (!outcome) continue;
+      if (outcome.error !== undefined) {
+        const failure = normalizeProviderFailure(input.provider, outcome.error);
         providerFailures.push(failure);
-        const msg = failure.message;
-        providerErrors.push(msg);
-        warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${msg}`);
+        providerErrors.push(failure.message);
+        warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${failure.message}`);
         continue;
       }
-
+      const output = outcome.output as ProviderExtractionOutput;
       chunksSucceeded++;
       if (output.warnings) warnings.push(...output.warnings);
-      if (output.raw) {
-        lastRaw = output.raw;
-        if (typeof output.raw.tokensUsed === "number") totalTokensUsed += output.raw.tokensUsed;
-      }
-
-      // Isolate normalization per chunk too: a misbehaving provider (e.g. a
-      // proposal with a throwing getter) must not discard proposals already
-      // collected from earlier chunks — the "partial results survive" guarantee.
+      if (output.raw) lastRaw = output.raw;
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
-          output.proposals,
-          input,
-          chunkContent,
-          chunk.start,
-          fullText,
+          output.proposals, input, outcome.content, chunks[i].start, fullText,
         );
         warnings.push(...normalizationWarnings);
         collected.push(...chunkProposals);
@@ -326,6 +441,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         error: providerErrors[0],
         providerCalls,
         totalTokensUsed,
+        ...(partial ? { partial } : {}),
         ...(providerFailures.length ? { providerFailures } : {}),
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
@@ -356,6 +472,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const result: ExtractionResult = {
       proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed,
+      ...(partial ? { partial } : {}),
       ...(input.taskSpec ? { taskDigest: input.taskSpec.digest, exampleDigests: input.taskSpec.examples?.map((example) => example.digest) ?? [] } : {}),
       ...(providerFailures.length ? { providerFailures } : {}),
     };

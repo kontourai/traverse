@@ -25,9 +25,9 @@ owner-accepted scope override recorded 2026-07-03 in
 
 ## Decision
 
-- `ExtractInput.maxProviderCalls?: number` caps the number of
-  `provider.extract()` calls issued in one `extract()` run (across all
-  chunks); `ExtractInput.maxTotalTokens?: number` caps accumulated
+- `ExtractInput.maxProviderCalls?: number` caps the number of physical
+  `provider.extract()` / optional `provider.extractBatch()` operations issued
+  in one `extract()` run (across all chunks); `ExtractInput.maxTotalTokens?: number` caps accumulated
   `raw.tokensUsed` summed across those calls. Both default unset =
   unbounded. Distinct from the content-bound `maxContentChars`/`maxChunks`
   options and from the Anthropic adapter's own
@@ -48,9 +48,10 @@ owner-accepted scope override recorded 2026-07-03 in
   check trips first is the only one to emit a warning for that stop.
 - `maxTotalTokens` is a **stop-issuing bound, not a hard spend cap**: it can
   only be checked using tokens already spent by calls that have already
-  completed (a call's cost is unknown until it returns), so actual total
-  tokens consumed by a run can exceed the configured ceiling by up to one
-  call's usage.
+  completed (a call's cost is unknown until it returns). Concurrent extraction
+  checks between bounded waves, so actual total can exceed the configured
+  ceiling by a completed wave's usage; the typed partial result reports that
+  amount as `tokenOvershoot` and no subsequent wave begins.
 - `ExtractionResult` gains two new **required** fields, `providerCalls` and
   `totalTokensUsed`, populated on every return path (success,
   ceiling-stopped, invalid-config, pdf-deferred, all-chunks-failed) so spend
