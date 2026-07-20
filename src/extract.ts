@@ -70,6 +70,7 @@
 
 import { prepareAndChunk } from "./chunk.js";
 import { validateExtractionTaskSpec } from "./task.js";
+import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import type {
@@ -106,6 +107,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
       if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
     }
+    const unsupportedCapability = unsupportedProviderCapability(input);
+    if (unsupportedCapability) return {
+      proposals: [], raw: EMPTY_RAW, extractedAt,
+      error: `provider ${input.provider.name} does not support required capability "${unsupportedCapability}"`,
+      providerCalls: 0, totalTokensUsed: 0,
+    };
     // Invalid-config validation: pure input validation independent of
     // content, so it runs before prepareAndChunk (before any content-prep or
     // provider work). maxProviderCalls is validated first.
@@ -224,6 +231,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     const collected: ExtractionProposal[] = [];
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
+    const providerFailures = [];
     let chunksSucceeded = 0;
     // Cost-guard accumulators: providerCalls counts every ISSUED call
     // (attempted, success or throw); totalTokensUsed sums raw.tokensUsed from
@@ -269,7 +277,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           ...(input.taskSpec ? { taskSpec: input.taskSpec } : {}),
         });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const failure = normalizeProviderFailure(input.provider, err);
+        providerFailures.push(failure);
+        const msg = failure.message;
         providerErrors.push(msg);
         warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${msg}`);
         continue;
@@ -316,6 +326,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         error: providerErrors[0],
         providerCalls,
         totalTokensUsed,
+        ...(providerFailures.length ? { providerFailures } : {}),
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
       if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
@@ -346,6 +357,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     const result: ExtractionResult = {
       proposals, raw: lastRaw, extractedAt, providerCalls, totalTokensUsed,
       ...(input.taskSpec ? { taskDigest: input.taskSpec.digest, exampleDigests: input.taskSpec.examples?.map((example) => example.digest) ?? [] } : {}),
+      ...(providerFailures.length ? { providerFailures } : {}),
     };
     if (warnings.length > 0) result.warnings = warnings;
     // Attach the whole-page embedded-state sidecar once (never per chunk).

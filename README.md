@@ -476,6 +476,27 @@ the model's response is truncated: `stop_reason === "max_tokens"` adds
 `warnings`, so a truncated proposal set is never mistaken for a complete one.
 For tests, inject a client: `createAnthropicExtractionProvider({ client })`.
 
+## Provider conformance and additional adapters
+
+Bundled adapters declare the same discoverable capability contract and pass one
+deterministic conformance suite. Unsupported declared capabilities fail before
+a provider call. Provider failures expose normalized retryability while keeping
+the original native diagnostic on `ExtractionResult.providerFailures`.
+
+OpenAI and Gemini are optional subpath adapters, following the same injected
+client and dynamic optional-peer pattern as the Anthropic adapter:
+
+```ts
+import { createOpenAIExtractionProvider } from "@kontourai/traverse/openai";
+import { createGeminiExtractionProvider } from "@kontourai/traverse/gemini";
+
+const openaiProvider = createOpenAIExtractionProvider({ model: "gpt-4.1-mini" });
+const geminiProvider = createGeminiExtractionProvider({ model: "gemini-2.5-flash" });
+```
+
+Traverse does not choose a default provider. See the
+[provider conformance decision](docs/decisions/provider-conformance.md).
+
 The adapter's own synthesized/provided `locator` on each proposal is
 **provisional** — `extract()`'s normalization step is the sole owner of the
 final `locator` value, which it derives from a verified excerpt offset (see

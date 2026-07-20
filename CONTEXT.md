@@ -40,9 +40,12 @@ test).
   `docs/decisions/image-content-preparation.md`.
 - **Extraction Provider** (`ExtractionProvider`): a pluggable backend that
   receives prepared content plus the target schema and returns
-  `{ proposals, raw }`. The bundled Anthropic adapter (subpath
-  `@kontourai/traverse/anthropic`) is one implementation; callers can inject any
-  other, including test mocks.
+  `{ proposals, raw }`. Bundled adapters live behind provider-specific subpaths
+  and declare a shared capability contract. The core checks declared required
+  capabilities before paid work, normalizes retryable/terminal failures while
+  retaining native diagnostics, and applies identical proposal semantics after
+  every adapter. Callers can still inject legacy custom providers without a
+  capability declaration.
 - **Extraction Proposal** (`ExtractionProposal`): one proposed field value with
   a `confidence` in `0..1`, an `extractor` identity string, and required
   `provenance` (`excerpt` and `locator`). This is the whole identity of the

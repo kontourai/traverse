@@ -22,6 +22,14 @@
       "types": "./dist/src/anthropic.d.ts",
       "default": "./dist/src/anthropic.js"
     },
+    "./openai": {
+      "types": "./dist/src/openai.d.ts",
+      "default": "./dist/src/openai.js"
+    },
+    "./gemini": {
+      "types": "./dist/src/gemini.d.ts",
+      "default": "./dist/src/gemini.js"
+    },
     "./fetch": {
       "types": "./dist/src/fetch/index.d.ts",
       "default": "./dist/src/fetch/index.js"
@@ -51,11 +59,19 @@
     "turndown": "^7.2.4"
   },
   "peerDependencies": {
+    "@google/genai": ">=1.0.0",
     "@anthropic-ai/sdk": ">=0.20.0",
+    "openai": ">=4.0.0",
     "typescript": ">=5.0.0"
   },
   "peerDependenciesMeta": {
+    "@google/genai": {
+      "optional": true
+    },
     "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "openai": {
       "optional": true
     },
     "typescript": {

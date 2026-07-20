@@ -10,6 +10,11 @@
 export { extract } from "./extract.js";
 export { createExtractionTaskSpec, validateExtractionTaskSpec } from "./task.js";
 export {
+  EXTRACTION_CONFORMANCE_CAPABILITIES,
+  unsupportedProviderCapability,
+  normalizeProviderFailure,
+} from "./provider-conformance.js";
+export {
   prepareContent,
   htmlToText,
   htmlToMarkdown,
@@ -52,6 +57,9 @@ export type {
   ExtractionResult,
   ProviderExtractionOutput,
   ExtractionProvider,
+  ExtractionProviderCapability,
+  ExtractionProviderCapabilities,
+  ExtractionProviderFailure,
   ExtractInput,
   PdfExtractedText,
   PdfTextExtractor,
