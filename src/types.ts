@@ -253,6 +253,16 @@ export interface RawProviderResponse {
  */
 export interface ExtractionResult {
   proposals: ExtractionProposal[];
+  /** Stable identity of the provider implementation selected for this run. */
+  provider?: string;
+  /** Opaque identity generated once for this extraction run. */
+  runId?: string;
+  /**
+   * Caller-supplied stable source identity for this extraction. This is carried
+   * through from ExtractInput so a portable result can retain source provenance
+   * without depending on a fetch implementation.
+   */
+  sourceRef?: string;
   /** raw provider response — kept for audit. */
   raw: RawProviderResponse;
   extractedAt: string;
