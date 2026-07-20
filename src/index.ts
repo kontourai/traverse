@@ -8,6 +8,7 @@
  */
 
 export { extract } from "./extract.js";
+export { createExtractionTaskSpec, validateExtractionTaskSpec } from "./task.js";
 export {
   prepareContent,
   htmlToText,
@@ -42,6 +43,8 @@ export {
 export type {
   ContentType,
   TargetFieldSchema,
+  ExtractionExample,
+  ExtractionTaskSpec,
   ExtractionProvenance,
   ExtractionProposal,
   EmbeddedState,
