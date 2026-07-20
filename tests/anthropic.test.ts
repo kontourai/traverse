@@ -218,12 +218,27 @@ describe("buildExtractionTool / parseProposals (units)", () => {
       items: { required: string[] };
     }).items.required;
     assert.deepEqual([...itemRequired].sort(), ["confidence", "excerpt", "fieldPath", "value"]);
+    const properties = (tool.input_schema.properties.proposals as {
+      items: { properties: Record<string, { type?: string; minimum?: number }> };
+    }).items.properties;
+    assert.deepEqual(properties.occurrenceHint, {
+      type: "integer",
+      minimum: 1,
+      description: "Optional 1-based occurrence of the exact repeated excerpt.",
+    });
   });
 
   it("returns empty proposals/warnings for non-record / missing proposals input", () => {
     assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [] });
     assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), { proposals: [], warnings: [] });
     assert.deepEqual(parseProposals("string", "x", "html"), { proposals: [], warnings: [] });
+  });
+
+  it("preserves an optional integer occurrence hint for exact resolver verification", () => {
+    const parsed = parseProposals({
+      proposals: [{ fieldPath: "title", value: "Alpha", confidence: 0.8, excerpt: "Alpha", occurrenceHint: 2 }],
+    }, "fixture", "text");
+    assert.equal(parsed.proposals[0].occurrenceHint, 2);
   });
 
   describe("inferenceType prompt guidance", () => {
@@ -239,6 +254,7 @@ describe("buildExtractionTool / parseProposals (units)", () => {
           "  - value: the extracted value (typed per the field),",
           "  - confidence: 0.0-1.0,",
           "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
+          "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",
           "Only propose fields you can ground in a verbatim excerpt. Omit fields you cannot find.",
           "",
           "Target fields:",

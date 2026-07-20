@@ -8,14 +8,13 @@
       "content": "Trail North is open. Trail South is open. Trail North is open.",
       "schema": [{ "path": "routeName", "type": "string", "inferenceType": "explicit" }],
       "providerProposals": [
-        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.96, "excerpt": "Trail North" },
-        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.95, "excerpt": "Trail North" }
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.96, "excerpt": "Trail North", "occurrenceHint": 1 },
+        { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.95, "excerpt": "Trail North", "occurrenceHint": 2 }
       ],
       "gold": [
         { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 1 },
         { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 2 }
-      ],
-      "expectedLimitation": "first-occurrence-resolver"
+      ]
     },
     {
       "id": "shared-span-multiple-fields",

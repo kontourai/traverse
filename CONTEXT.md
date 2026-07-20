@@ -130,3 +130,11 @@ test).
   match the declared path, the proposal is accepted under the declared
   `fieldPath`, and the stripped indices are preserved on
   `ExtractionProposal.pathIndices`.
+- **Exact Occurrence Resolution**: `extract()`'s provenance step that
+  binds an excerpt to exact spans inside the provider-visible prepared-text
+  slice, then chooses an in-bounds local hint or deterministic source order and
+  maps the selection into complete-artifact occurrence metadata.
+  The resulting `provenance.occurrence` metadata records version, count,
+  selected span, selection mode, hint use, and ambiguity. It never assigns a
+  `chars:` locator from fuzzy or paraphrased evidence; see
+  [`docs/decisions/exact-occurrence-resolution.md`](docs/decisions/exact-occurrence-resolution.md).

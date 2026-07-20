@@ -444,7 +444,7 @@ describe("extract()", () => {
     );
   });
 
-  it("anchors the locator to the FIRST occurrence when the excerpt appears more than once", async () => {
+  it("records ambiguity while source-order selects the first occurrence for one unhinted proposal", async () => {
     const content = "Beginner Bouldering Session (repeat: Beginner Bouldering Session).";
     const provider = createMockExtractionProvider(output([proposal()]));
     const result = await extract({
@@ -455,8 +455,15 @@ describe("extract()", () => {
       provider,
     });
     assert.equal(result.proposals.length, 1);
-    // indexOf finds the first match (offset 0), not the later repeated one.
     assert.equal(result.proposals[0].provenance.locator, "chars:0-27");
+    assert.deepEqual(result.proposals[0].provenance.occurrence, {
+      resolverVersion: "exact-occurrence-v1",
+      count: 2,
+      selected: { index: 0, start: 0, end: 27 },
+      selection: "source-order",
+      hintUsed: false,
+      ambiguous: true,
+    });
   });
 
   it("clamps out-of-range confidence into 0..1 and warns", async () => {

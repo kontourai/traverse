@@ -75,6 +75,7 @@ import { normalizeProviderFailure, unsupportedProviderCapability } from "./provi
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact } from "./prepared-artifact.js";
+import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
   ExtractInput,
@@ -399,6 +400,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     }
 
     const { fullText, chunks } = prepared;
+    const occurrenceResolver = new ExactOccurrenceResolver();
     const warnings: string[] = [...prepared.warnings];
     const preparedArtifact: PreparedArtifact = createPreparedArtifact(fullText, {
       preparationMode: preparationModeFor(prepared, input.contentType === "pdf" && !!input.pdfTextExtractor, ocrDerived),
@@ -440,7 +442,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       if (output.raw) lastRaw = output.raw;
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
-          output.proposals, input, outcome.content, chunks[i].start, fullText,
+          output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
         );
         warnings.push(...normalizationWarnings);
         collected.push(...chunkProposals);
@@ -478,7 +480,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     const { proposals, dropped } = dedupeProposals(collected);
     if (dropped > 0) {
       warnings.push(
-        `dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} (same field + source span)`,
+        `dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} (same field + value + source span)`,
       );
     }
 
@@ -522,13 +524,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
 /**
  * Cross-chunk dedup. A duplicate is the SAME field extracted from the SAME
- * verified source span — i.e. the same `fieldPath` + `pathIndices` + `locator`
- * (which encodes the `chars:<start>-<end>` offset into `fullText`). This
- * collapses the true duplicates chunking creates — an overlap window seeing the
- * same span twice, or the same span landing in two chunks — while NEVER
- * collapsing two genuinely distinct records that merely share a value (e.g. two
- * listing cards with the same price), which come from different spans. Keeps the
- * highest confidence on a collision; first-seen key order is preserved.
+ * verified source span AND the same candidate value — i.e. `fieldPath` +
+ * `pathIndices` + canonical value + `locator` (which encodes the
+ * `chars:<start>-<end>` offset into `fullText`). This collapses the true
+ * duplicates chunking creates while preserving same-span/different-value and
+ * same-value/different-span proposals. Keeps the highest confidence on a
+ * collision; first-seen key order is preserved.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
@@ -536,14 +537,12 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
   let dropped = 0;
 
   for (const proposal of input) {
-    // JSON-encode the tuple so no field's contents can collide with another's
-    // boundary. `locator` is the verified span, so it discriminates distinct
-    // occurrences of the same value.
-    const key = JSON.stringify([
+    const key = stableProposalIdentity(
       proposal.fieldPath,
-      proposal.pathIndices ?? null,
+      proposal.pathIndices,
+      proposal.candidateValue,
       proposal.provenance.locator,
-    ]);
+    );
 
     const existing = byKey.get(key);
     if (!existing) {
@@ -561,8 +560,8 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
 /**
  * Normalize one chunk's proposals. Identical discipline to the pre-0.5.0
  * single-shot normalizer, except the provenance excerpt is verified against the
- * chunk text (`chunkContent`) the provider saw and the locator offset is shifted
- * by `chunkStart` and re-verified against `fullText` before it is trusted.
+ * chunk text (`chunkContent`) the provider saw before every exact match in the
+ * complete prepared artifact is enumerated and deterministically selected.
  */
 function normalizeChunkProposals(
   raw: unknown,
@@ -570,6 +569,7 @@ function normalizeChunkProposals(
   chunkContent: string,
   chunkStart: number,
   fullText: string,
+  occurrenceResolver: ExactOccurrenceResolver,
 ): { proposals: ExtractionProposal[]; warnings: string[] } {
   const warnings: string[] = [];
   const proposals: ExtractionProposal[] = [];
@@ -626,22 +626,28 @@ function normalizeChunkProposals(
       continue;
     }
 
-    // Provenance contract enforcement. The excerpt must occur verbatim in the
-    // chunk text the provider actually saw (never merely asserted); the offset is
-    // then shifted into `fullText` and re-verified there before the locator is
-    // trusted. Anchoring to the chunk (not `fullText.indexOf`) keeps a value that
-    // repeats across cards pinned to the specific card/chunk it was drawn from.
+    // Provenance contract enforcement begins with the exact chunk text the
+    // provider saw. It then enumerates exact matches across the complete
+    // prepared artifact; no fuzzy/near-match path can produce a chars: locator.
     const localIndex = chunkContent.indexOf(excerpt);
     if (localIndex === -1) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
-    const globalIndex = chunkStart + localIndex;
-    if (fullText.slice(globalIndex, globalIndex + excerpt.length) !== excerpt) {
+    const sourceOrderKey = stableProposalIdentity(effectiveFieldPath, pathIndices, candidate.candidateValue, excerpt);
+    const occurrence = occurrenceResolver.resolve({
+      text: fullText,
+      visibleText: chunkContent,
+      visibleStart: chunkStart,
+      excerpt,
+      occurrenceHint: candidate.occurrenceHint,
+      sourceOrderKey,
+    });
+    if (!occurrence || fullText.slice(occurrence.selected.start, occurrence.selected.end) !== excerpt) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
-    const locator = `chars:${globalIndex}-${globalIndex + excerpt.length}`;
+    const locator = `chars:${occurrence.selected.start}-${occurrence.selected.end}`;
 
     const rawConfidence = candidate.confidence;
     if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
@@ -658,7 +664,7 @@ function normalizeChunkProposals(
       fieldPath: effectiveFieldPath,
       candidateValue: candidate.candidateValue,
       confidence,
-      provenance: { excerpt, locator },
+      provenance: { excerpt, locator, occurrence },
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
@@ -670,6 +676,41 @@ function normalizeChunkProposals(
   }
 
   return { proposals, warnings };
+}
+
+/** A stable identity for source-ordered allocation and true-duplicate folding. */
+function stableProposalIdentity(
+  fieldPath: string,
+  pathIndices: number[] | undefined,
+  candidateValue: unknown,
+  excerpt: string,
+): string {
+  return JSON.stringify([fieldPath, pathIndices ?? null, stableValue(candidateValue), excerpt]);
+}
+
+/**
+ * Canonicalize arbitrary provider values without allowing object key insertion
+ * order to change resolver allocation or deduplication. Unsupported/cyclic
+ * values remain deterministic typed markers rather than escaping as an error.
+ */
+function stableValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null) return ["null"];
+  switch (typeof value) {
+    case "string": return ["string", value];
+    case "boolean": return ["boolean", value];
+    case "undefined": return ["undefined"];
+    case "number": return ["number", Number.isNaN(value) ? "NaN" : value === Infinity ? "Infinity" : value === -Infinity ? "-Infinity" : value];
+    case "bigint": return ["bigint", value.toString()];
+    case "symbol": return ["symbol", String(value)];
+    case "function": return ["function", String(value)];
+    case "object": {
+      if (seen.has(value)) return ["circular"];
+      seen.add(value);
+      if (Array.isArray(value)) return ["array", value.map((entry) => stableValue(entry, seen))];
+      const record = value as Record<string, unknown>;
+      return ["object", Object.keys(record).sort().map((key) => [key, stableValue(record[key], seen)])];
+    }
+  }
 }
 
 /**

@@ -16,6 +16,7 @@ import type {
   PreparedArtifact,
   PreparedArtifactStore,
 } from "./prepared-artifact.js";
+import type { ExactOccurrenceResolution } from "./occurrence-resolver.js";
 
 /**
  * Content encodings Traverse can prepare for extraction. `"pdf"` is declared
@@ -101,11 +102,11 @@ export interface ExtractionTaskSpec {
  *
  * `locator` uses a fixed, defined scheme: `"chars:<start>-<end>"`, where
  * `<start>`/`<end>` are 0-based UTF-16 code-unit offsets of `excerpt` within
- * that SAME prepared text (`start` = the first `indexOf` match, `end` = `start
- * + excerpt.length`). `extract()` always derives/overwrites `locator` itself
- * from the verified excerpt offset — a provider- or adapter-supplied `locator`
- * is never trusted as-is, because only `extract()` holds the prepared text
- * needed to verify it.
+ * that SAME prepared text. `extract()` enumerates every exact match in the
+ * complete prepared artifact, then deterministically selects one and derives/
+ * overwrites `locator` itself — a provider- or adapter-supplied `locator` is
+ * never trusted as-is, because only `extract()` holds the prepared text needed
+ * to verify it.
  *
  * Consequence for consumers: because offsets are anchored to prepared text,
  * NOT the original raw document, a consumer that wants to highlight/locate an
@@ -119,6 +120,8 @@ export interface ExtractionProvenance {
   excerpt: string;
   /** "chars:<start>-<end>" — code-unit offsets of `excerpt` within the prepared text. */
   locator: string;
+  /** Exact-match enumeration and selection audit metadata, attached by extract(). */
+  occurrence?: ExactOccurrenceResolution;
 }
 
 /**
@@ -144,6 +147,13 @@ export interface ExtractionProposal {
   provenance: ExtractionProvenance;
   /** provider identity string, e.g. "anthropic-extraction-provider:claude-sonnet-4-6". */
   extractor: string;
+  /**
+   * Optional, untrusted one-based exact-occurrence hint from a provider. It is
+   * accepted only when it is an integer within the provider-visible chunk's
+   * enumerated exact matches. `extract()` never copies this field into its
+   * output; inspect `provenance.occurrence` for the verified selection.
+   */
+  occurrenceHint?: number;
   /**
    * Present ONLY when `fieldPath` was recovered by normalizing an indexed
    * source path (e.g. "schedules[0].startDate" -> "schedules[].startDate")

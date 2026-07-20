@@ -88,6 +88,7 @@ function fixedProvider(entry) {
           confidence: proposal.confidence,
           provenance: { excerpt: proposal.excerpt, locator: "provider-supplied-untrusted" },
           extractor: "grounded-benchmark-hermetic",
+          ...(proposal.occurrenceHint === undefined ? {} : { occurrenceHint: proposal.occurrenceHint }),
         })),
         raw: { response: "fixture", model: "hermetic-v1", tokensUsed: 7 },
       };

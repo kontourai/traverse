@@ -9,6 +9,16 @@
 
 export { extract } from "./extract.js";
 export {
+  EXACT_OCCURRENCE_RESOLVER_VERSION,
+  enumerateExactOccurrences,
+  ExactOccurrenceResolver,
+} from "./occurrence-resolver.js";
+export type {
+  ExactOccurrence,
+  ExactOccurrenceResolution,
+  ResolveExactOccurrenceInput,
+} from "./occurrence-resolver.js";
+export {
   PREPARED_ARTIFACT_FORMAT,
   PREPARED_ARTIFACT_VERSION,
   PREPARED_ARTIFACT_PREPARATION_VERSION,
