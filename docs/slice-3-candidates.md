@@ -14,6 +14,10 @@ promised; this is a backlog note, not a plan.
   [`docs/decisions/crawl-frontier.md`](decisions/crawl-frontier.md).
 - **Headless-browser rendering** — executing JavaScript to fetch content that
   is not present in the server-rendered HTML. Slice 2 does a plain HTTP GET.
+  The render *seam* (opt-in `renderImpl` on `fetchSource`/`crawlSource`, plus
+  the `render-escalation` policy) shipped in 0.13.0 — traverse still bundles
+  no renderer of its own; a caller supplies one. See "Rendered fetch" in the
+  README.
 - **Scheduling** — recurring/deferred fetch runs, cross-process or distributed
   politeness, rate-limit coordination across many sources. Slice 2's politeness
   is in-process and best-effort only.
@@ -26,9 +30,12 @@ promised; this is a backlog note, not a plan.
 - **Fuller robots engine** — `Crawl-delay`, `Sitemap`, and the `*`/`$` pattern
   language. Slice 2's matcher is product-token group selection + longest-prefix
   Allow/Disallow (Allow wins ties) only.
-- **Conditional GET / caching** — `ETag`/`If-None-Match` and
-  `Last-Modified`/`If-Modified-Since`, with a `304 Not Modified` reusing the
-  prior snapshot (`fromCache: true` without re-downloading the body).
+- **Conditional GET / caching** — shipped. `ETag`/`If-None-Match` and
+  `Last-Modified`/`If-Modified-Since` validators are stored on the snapshot,
+  and an opt-in `revalidate` flag on `fetchSource` sends them on a re-check,
+  reusing the prior snapshot on a bodyless `304` (`fromCache` +
+  `notModified`, no re-download). See "Conditional GET" in the README and
+  [`docs/decisions/http-validators.md`](decisions/http-validators.md).
 - **Snapshot retention / compaction** — the filesystem store keeps every
   snapshot forever; a retention policy (keep-N, keep-since) would belong here.
 - **Non-UTF-8 body decoding** — Slice 2 decodes bodies as UTF-8; charset

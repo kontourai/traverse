@@ -26,7 +26,13 @@ only if you use that adapter:
 npm install @anthropic-ai/sdk
 ```
 
-Traverse has **zero runtime dependencies** of its own.
+Traverse has **zero AI-provider runtime dependencies** — no LLM SDK is bundled
+or required; `@anthropic-ai/sdk`, `openai`, and `@google/genai` are optional
+peer dependencies you only install for the adapter you use. It does declare
+real runtime dependencies for content handling: `linkedom` and `turndown`
+(HTML→DOM parsing and Markdown conversion in content-prep, used by `extract()`
+itself) and `@kontourai/forage` (SSRF-guarded egress and crawling, used by the
+`@kontourai/traverse/fetch` subpath — see "Fetching & snapshots" below).
 
 ## The provenance contract
 
@@ -673,7 +679,13 @@ offline (CI never needs the network). It is exported from the
 package root stays focused on extraction and re-exports none of it. Like
 `extract()`, `fetchSource()` **never throws**: timeouts, retries, robots denial,
 HTTP errors, and bad config surface as a typed `FetchError` on the result. It
-has **zero runtime dependencies** (global `fetch` + `node:crypto`/`node:fs`).
+has no HTTP-client dependency of its own — it's built on global `fetch` plus
+`node:crypto`/`node:fs` — but it does depend on `@kontourai/forage`:
+`fetchSource`/`crawlSource`/`replaySource` route egress through forage's
+SSRF-guarded `createGuardedFetch` (`@kontourai/forage/egress`) by default
+(callers can still inject their own `opts.fetch` to bypass it), and
+`crawlAndExtract` (below) additionally composes forage's own frontier
+`crawl()` (`@kontourai/forage`) for multi-page traversal.
 
 Headless-browser rendering now has an OPT-IN seam — see "Rendered fetch"
 below. Out of scope for this layer (see
@@ -851,6 +863,42 @@ const exactBytes = await store.get(ref!.sourceId, ref!.bodyHash); // the snapsho
 Use `mode: "replay"` to run the identical extraction against a stored snapshot
 with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a
 handy non-persistent store for tests and single-process capture-then-replay.
+
+### Crawl + extract in one call
+
+`crawlAndExtract(seed, opts)` is the multi-page analogue of `fetchAndExtract`:
+it drives a **forage** crawl (`@kontourai/forage`'s frontier — same-host
+discovery, sitemap, rendering, and SSRF-guarded egress all live there, not in
+traverse) and runs `extract()` against every page the crawl returns, threading
+each page's own `sourceRef` into its extraction result:
+
+```ts
+import { crawlAndExtract } from "@kontourai/traverse/fetch";
+
+const result = await crawlAndExtract(
+  { url: "https://example.com/listing" },        // forage Seed
+  {
+    targetSchema,
+    provider,                                     // any ExtractionProvider (mock/Anthropic/...)
+    policy: { maxPages: 20, maxDepth: 2 },        // forage CrawlPolicy — discovery, render, egress, replay store, ...
+  },
+);
+
+// result.manifest        — forage's full CrawlManifest (pages, truncated, warnings)
+// result.pages           — one { page, sourceRef, extraction } per crawled page, in manifest order
+for (const p of result.pages) {
+  p.sourceRef;             // forage's own citable snapshot pointer (forage-snapshot:...)
+  p.extraction.proposals;  // that page's ExtractionProposal[], provenance-checked as usual
+}
+```
+
+Budgets (`maxProviderCalls`/`maxTotalTokens`) apply **per page** as forwarded
+to `extract()`; to bound the whole crawl, cap the frontier itself via
+`policy.maxPages`. Like `fetchSource`/`crawlSource`, this never throws for an
+operational failure — a bad page degrades to a warning in the manifest, and a
+page whose extraction fails still appears in `pages` with that typed result
+attached. For tests, inject `crawlImpl` to drive a deterministic manifest with
+no network, mirroring `fetchOptions` on `fetchAndExtract`.
 
 ### Conditional GET (ETag / Last-Modified)
 
@@ -1114,4 +1162,6 @@ for validation, compatibility, and digest boundaries.
 ## Requirements
 
 - Node.js `>= 22`
+- Optional peer dependency: `@anthropic-ai/sdk` (`>=0.20.0`), only if you use
+  the `@kontourai/traverse/anthropic` adapter — see [Install](#install).
 - License: Apache-2.0
