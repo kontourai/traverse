@@ -63,6 +63,56 @@ Because provenance is required on the type itself AND enforced by
 normalization, the whole package is structurally a provenance-bearing-proposal
 producer — this is its identity, not a convention.
 
+### Resolving exact prepared text
+
+An `ExtractionResult` carries `preparedArtifact`: a compact, versioned
+identity for the complete prepared text behind every `chars:<start>-<end>`
+locator. The result intentionally does **not** embed that text. To retain and
+later verify exact text, inject a caller-owned store and resolve the artifact:
+
+```ts
+import {
+  createInMemoryPreparedArtifactStore,
+  extract,
+  resolvePreparedArtifact,
+} from "@kontourai/traverse";
+
+const preparedStore = createInMemoryPreparedArtifactStore();
+const result = await extract({
+  content,
+  contentType: "html",
+  sourceRef: "caller-owned-ref",
+  targetSchema,
+  provider,
+  preparedArtifact: {
+    store: preparedStore,
+    preparationVersion: "your-preparation-v1",
+  },
+});
+
+const resolved = await resolvePreparedArtifact(result.preparedArtifact!, preparedStore);
+// resolved.status is "available", "unavailable", "storage-error",
+// "invalid-artifact", "identity-mismatch", or "digest-mismatch".
+// Only "available" includes text; slice it with the proposal locator offsets.
+```
+
+The artifact's SHA-256 digest binds exact prepared text; its versioned reference
+also binds the preparation mode/version and optional source snapshot reference.
+This makes a changed preparation implementation visibly produce a new identity.
+Plain-text callers need no migration: `extract()` assigns the deterministic
+inline identity automatically, but retains no text unless a store is supplied.
+Artifact creation rejects ill-formed Unicode rather than allowing UTF-8
+replacement characters to collapse distinct JavaScript strings. Resolution
+validates every metadata field and recomputes the canonical reference before
+calling a store; store exceptions are returned as redacted `storage-error`
+outcomes. `preparationMode` reports the path actually used, including
+`"transcript"` cleanup and `"text"` when HTML markdown preparation falls back.
+
+`fetchAndExtract()` accepts `preparedArtifactStore` and `preparationVersion`.
+The Forage-backed `crawlAndExtract()` composition accepts the same options and
+binds each page artifact to that page's existing `sourceRef`, so byte-stable
+Forage replay produces the same prepared-artifact identity and resolution.
+
 ## Explicit vs. inferred fields (`inferenceType`)
 
 Every `ExtractionProposal` above is grounded by a verbatim `excerpt` — but

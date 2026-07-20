@@ -30,6 +30,7 @@ import type {
   PdfTextExtractor,
   TargetFieldSchema,
 } from "../types.js";
+import type { PreparedArtifactStore } from "../prepared-artifact.js";
 import { fetchSource } from "./fetch-source.js";
 import { replaySource } from "./snapshot-store.js";
 import type { FetchResult, FetchSourceOptions, Snapshot, SnapshotStore, SourceConfig } from "./types.js";
@@ -67,6 +68,10 @@ export interface FetchAndExtractOptions {
   pdfTextExtractor?: PdfTextExtractor;
   /** injected image OCR extractor, forwarded to extract() (see ExtractInput.imageTextExtractor). Needs a PNG/JPEG snapshot with bodyBytes to run through this seam. */
   imageTextExtractor?: ImageTextExtractor;
+  /** Optional caller-owned storage for exact prepared text used by this run. */
+  preparedArtifactStore?: PreparedArtifactStore;
+  /** Optional preparation implementation version included in artifact identity. */
+  preparationVersion?: string;
 }
 
 export interface FetchAndExtractResult {
@@ -174,6 +179,11 @@ export async function fetchAndExtract(
     // that made this option a dead trap before (traverse#28's deferral).
     pdfTextExtractor: opts.pdfTextExtractor,
     imageTextExtractor: opts.imageTextExtractor,
+    preparedArtifact: {
+      store: opts.preparedArtifactStore,
+      sourceSnapshotRef: sourceRef,
+      preparationVersion: opts.preparationVersion,
+    },
   });
 
   return { fetch: fetchResult, extraction, sourceRef };

@@ -4,6 +4,8 @@ import { crawlAndExtract } from "../src/fetch/crawl-extract.js";
 import { sha256Hex } from "../src/fetch/fetch-source.js";
 import { createMockExtractionProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
+import { createInMemoryPreparedArtifactStore, resolvePreparedArtifact } from "../src/prepared-artifact.js";
+import { createForageReplayManifest } from "./fixtures/forage-replay.js";
 import type { CrawlManifest, Page, Seed } from "@kontourai/forage";
 
 // Build a forage-shaped Page without touching the network. `crawlAndExtract`
@@ -40,14 +42,14 @@ function fakeManifest(pages: Page[]): CrawlManifest {
   return { seed: pages[0]?.url ?? "https://example.test/", pages, truncated: false, warnings: [] };
 }
 
-function mockProvider() {
+function mockProvider(excerpt = "Beginner Bouldering Session") {
   return createMockExtractionProvider({
     proposals: [
       {
         fieldPath: "title",
-        candidateValue: "Beginner Bouldering Session",
+        candidateValue: excerpt,
         confidence: 0.9,
-        provenance: { excerpt: "Beginner Bouldering Session", locator: "provisional" },
+        provenance: { excerpt, locator: "provisional" },
         extractor: "mock-extraction-provider",
       },
     ],
@@ -128,5 +130,27 @@ describe("crawlAndExtract", () => {
     });
     assert.equal(result.pages.length, 0);
     assert.equal(result.manifest.pages.length, 0);
+  });
+
+  it("keeps prepared identity and exact resolution stable for a Forage-shaped replay manifest", async () => {
+    const manifest = createForageReplayManifest();
+    const preparedStore = createInMemoryPreparedArtifactStore();
+    const options = {
+      targetSchema: genericTargetSchema,
+      provider: mockProvider("Sample heading"),
+      preparedArtifactStore: preparedStore,
+      preparationVersion: "generic-prep-v1",
+      policy: { mode: "replay" as const },
+      crawlImpl: async () => manifest,
+    };
+    const first = await crawlAndExtract(seed, options);
+    const replay = await crawlAndExtract(seed, { ...options, provider: mockProvider("Sample heading") });
+
+    const firstArtifact = first.pages[0].extraction.preparedArtifact!;
+    const replayArtifact = replay.pages[0].extraction.preparedArtifact!;
+    assert.equal(firstArtifact.ref, replayArtifact.ref);
+    assert.equal(firstArtifact.sourceSnapshotRef, manifest.pages[0].sourceRef);
+    const resolved = await resolvePreparedArtifact(replayArtifact, preparedStore);
+    assert.equal(resolved.status, "available");
   });
 });

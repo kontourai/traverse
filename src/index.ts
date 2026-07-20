@@ -8,6 +8,28 @@
  */
 
 export { extract } from "./extract.js";
+export {
+  PREPARED_ARTIFACT_FORMAT,
+  PREPARED_ARTIFACT_VERSION,
+  PREPARED_ARTIFACT_PREPARATION_VERSION,
+  createPreparedArtifact,
+  parsePreparedArtifactRef,
+  validatePreparedArtifact,
+  resolvePreparedArtifact,
+  createInMemoryPreparedArtifactStore,
+  isWellFormedUnicode,
+} from "./prepared-artifact.js";
+export type {
+  PreparedArtifact,
+  PreparedArtifactRef,
+  PreparedArtifactOptions,
+  PreparedArtifactPreparationMode,
+  PreparedArtifactStore,
+  PreparedArtifactResolution,
+  PreparedArtifactValidation,
+  PreparedArtifactInvalidReason,
+  ParsedPreparedArtifactRef,
+} from "./prepared-artifact.js";
 export { createExtractionTaskSpec, validateExtractionTaskSpec } from "./task.js";
 export {
   EXTRACTION_CONFORMANCE_CAPABILITIES,
