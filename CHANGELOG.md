@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/kontourai/traverse/compare/v0.20.0...v0.20.1) (2026-07-22)
+
+
+### Fixes
+
+* make Relay extraction schemas strict ([#96](https://github.com/kontourai/traverse/issues/96)) ([fa23c37](https://github.com/kontourai/traverse/commit/fa23c37df8c7ac9bf8a94c28e8b91ab9003b3a4c))
+
 ## [0.20.0](https://github.com/kontourai/traverse/compare/v0.19.1...v0.20.0) (2026-07-22)
 
 
