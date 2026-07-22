@@ -21,6 +21,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [grounded-extraction-benchmark](./grounded-extraction-benchmark.md) | current | Grounded extraction benchmark |
 | [http-validators](./http-validators.md) | current | HTTP validators (ETag / conditional GET) on snapshots |
 | [image-content-preparation](./image-content-preparation.md) | current | Image content preparation |
+| [multipass-context-evaluation](./multipass-context-evaluation.md) | current | Extraction Result multipass context evaluation |
 | [portable-extraction-result-envelope](./portable-extraction-result-envelope.md) | current | Portable extraction-result envelope |
 | [prepared-artifact](./prepared-artifact.md) | current | Prepared artifact |
 | [provider-conformance](./provider-conformance.md) | current | Extraction provider conformance |

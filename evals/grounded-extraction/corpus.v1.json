@@ -14,7 +14,15 @@
       "gold": [
         { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 1 },
         { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North", "occurrence": 2 }
-      ]
+      ],
+      "multipassContext": {
+        "firstPassProposals": [
+          { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.96, "excerpt": "Trail North", "occurrenceHint": 1 }
+        ],
+        "laterPassProposals": [
+          { "fieldPath": "routeName", "candidateValue": "Trail North", "confidence": 0.95, "excerpt": "Trail North", "occurrenceHint": 2 }
+        ]
+      }
     },
     {
       "id": "shared-span-multiple-fields",
@@ -31,7 +39,15 @@
       "gold": [
         { "fieldPath": "opensAt", "candidateValue": "09:00", "excerpt": "Access window: 09:00-17:00 daily.", "occurrence": 1 },
         { "fieldPath": "closesAt", "candidateValue": "17:00", "excerpt": "Access window: 09:00-17:00 daily.", "occurrence": 1 }
-      ]
+      ],
+      "multipassContext": {
+        "firstPassProposals": [
+          { "fieldPath": "opensAt", "candidateValue": "09:00", "confidence": 0.99, "excerpt": "Access window: 09:00-17:00 daily." }
+        ],
+        "laterPassProposals": [
+          { "fieldPath": "closesAt", "candidateValue": "17:00", "confidence": 0.99, "excerpt": "Access window: 09:00-17:00 daily." }
+        ]
+      }
     },
     {
       "id": "unknown-and-ungrounded-provider-output",
@@ -61,7 +77,15 @@
       "gold": [
         { "fieldPath": "elevationGain", "candidateValue": 450, "excerpt": "450 meters", "occurrence": 1 },
         { "fieldPath": "difficulty", "candidateValue": "moderate", "excerpt": "The route climbs 450 meters over 8 kilometers.", "occurrence": 1 }
-      ]
+      ],
+      "multipassContext": {
+        "firstPassProposals": [
+          { "fieldPath": "elevationGain", "candidateValue": 450, "confidence": 0.97, "excerpt": "450 meters" }
+        ],
+        "laterPassProposals": [
+          { "fieldPath": "difficulty", "candidateValue": "moderate", "confidence": 0.72, "excerpt": "The route climbs 450 meters over 8 kilometers." }
+        ]
+      }
     },
     {
       "id": "chunk-boundary-scan",
