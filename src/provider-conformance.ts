@@ -35,12 +35,15 @@ export function normalizeProviderFailure(provider: ExtractionProvider, error: un
   if (status === 401 || status === 403 || code.includes("auth")) kind = "authentication";
   else if (status === 429 || code.includes("rate")) kind = "rate-limit";
   else if (timeout || status === 408) kind = "timeout";
+  else if (code.includes("invalid_request")) kind = "invalid-request";
   else if (status !== undefined && status >= 400 && status < 500) kind = "invalid-request";
   else if ((status !== undefined && status >= 500) || code.includes("unavailable")) kind = "unavailable";
   return {
     provider: provider.name,
     kind,
-    retryable: kind === "rate-limit" || kind === "timeout" || kind === "unavailable",
+    retryable: typeof native?.["retryable"] === "boolean"
+      ? native["retryable"] as boolean
+      : kind === "rate-limit" || kind === "timeout" || kind === "unavailable",
     message,
     native: error,
   };

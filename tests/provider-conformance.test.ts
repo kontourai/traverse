@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { FakeModelRuntime } from "@kontourai/relay";
 import {
   createExtractionTaskSpec,
   extract,
@@ -10,6 +11,7 @@ import type { ExtractionProvider, TargetFieldSchema } from "../src/index.js";
 import { createAnthropicExtractionProvider } from "../src/anthropic.js";
 import { createOpenAIExtractionProvider } from "../src/openai.js";
 import { createGeminiExtractionProvider } from "../src/gemini.js";
+import { createRelayExtractionProvider } from "../src/relay.js";
 import { fakeAnthropicClient, fakeAnthropicMessage } from "./fixtures/mock-provider.js";
 
 const schema: TargetFieldSchema[] = [{ path: "title", type: "string", inferenceType: "explicit" }];
@@ -26,6 +28,7 @@ function adapters(): Array<[string, ExtractionProvider]> {
     ["anthropic", createAnthropicExtractionProvider({ client: fakeAnthropicClient(fakeAnthropicMessage("submit_extraction_proposals", rawProposals, { inputTokens: 7, outputTokens: 4 })) })],
     ["openai", createOpenAIExtractionProvider({ client: { async create() { return { model: "openai-test", choices: [{ finish_reason: "tool_calls", message: { tool_calls: [{ function: { name: "submit_extraction_proposals", arguments: JSON.stringify(rawProposals) } }] } }], usage: { total_tokens: 11 } }; } } })],
     ["gemini", createGeminiExtractionProvider({ client: { async generateContent() { return { modelVersion: "gemini-test", functionCalls: [{ name: "submit_extraction_proposals", args: rawProposals }], usageMetadata: { totalTokenCount: 11 } }; } } })],
+    ["relay", createRelayExtractionProvider({ runtime: new FakeModelRuntime([{ provider: "fixture", model: "relay-test", outputText: "", toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: rawProposals }], usage: { totalTokens: 11 }, latencyMs: 0 }]) })],
   ];
 }
 
