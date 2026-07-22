@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/kontourai/traverse/compare/v0.19.1...v0.20.0) (2026-07-22)
+
+
+### Features
+
+* add Relay extraction provider ([#93](https://github.com/kontourai/traverse/issues/93)) ([ad60f91](https://github.com/kontourai/traverse/commit/ad60f9171f68feefdd19b8a4579e71a2041994a4))
+
 ## [0.19.1](https://github.com/kontourai/traverse/compare/v0.19.0...v0.19.1) (2026-07-22)
 
 
