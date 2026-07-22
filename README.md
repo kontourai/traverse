@@ -608,6 +608,20 @@ const openaiProvider = createOpenAIExtractionProvider({ model: "gpt-4.1-mini" })
 const geminiProvider = createGeminiExtractionProvider({ model: "gemini-2.5-flash" });
 ```
 
+The optional Relay adapter accepts any `ModelRuntime`, including direct SDK,
+local, hosted, replay, or host-routed implementations. Traverse still owns the
+extraction prompt, tool schema, proposal parsing, and provenance behavior:
+
+```ts
+import { createRelayExtractionProvider } from "@kontourai/traverse/relay";
+
+const provider = createRelayExtractionProvider({ runtime });
+```
+
+Relay supplies invocation portability only. Applications that need routing,
+budgets, fallbacks, or execution receipts can provide a runtime implementing
+those policies without coupling Traverse to an orchestration product.
+
 Traverse does not choose a default provider. See the
 [provider conformance decision](docs/decisions/provider-conformance.md).
 

@@ -33,6 +33,7 @@ import type {
   ContentType,
   ExtractionProposal,
   ExtractionProvider,
+  ProviderExtractionInput,
   ProviderExtractionOutput,
   TargetFieldSchema,
 } from "./types.js";
@@ -336,6 +337,32 @@ export function parseProposals(
   return { proposals: results, warnings };
 }
 
+/** Build the domain-owned prompt shared by direct-SDK and Relay adapters. */
+export function buildExtractionMessages(input: ProviderExtractionInput): { systemPrompt: string; userMessage: string } {
+  const hintLines = input.fieldHints
+    ? Object.entries(input.fieldHints).map(([field, hint]) => `  - ${field}: ${hint}`)
+    : [];
+  const taskLines = input.taskSpec
+    ? [
+        input.taskSpec.guidance ? `\nTask guidance:\n${input.taskSpec.guidance}` : "",
+        ...(input.taskSpec.examples ?? []).map((example, index) =>
+          `\nValidated example ${index + 1}:\nContent:\n${example.content}\nExpected proposals:\n${JSON.stringify(example.proposals)}`
+        ),
+      ]
+    : [];
+  const systemPrompt = [
+    "You are a schema-directed content extractor.",
+    "Extract the requested target fields from the provided content.",
+    "You are PROPOSING for review — never invent values, and only propose a field",
+    "when you can ground it in a verbatim excerpt from the content.",
+    "Return honest confidence scores; omit fields you cannot find.",
+    hintLines.length ? "\nPer-field hints:" : "",
+    ...hintLines,
+    ...taskLines,
+  ].filter(Boolean).join("\n");
+  return { systemPrompt, userMessage: `Content (${input.contentType}):\n\n${input.content}` };
+}
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -383,32 +410,7 @@ export function createAnthropicExtractionProvider(
       const client = await resolveClient(opts);
       const tool = buildExtractionTool(input.targetSchema);
 
-      const hintLines = input.fieldHints
-        ? Object.entries(input.fieldHints).map(([field, hint]) => `  - ${field}: ${hint}`)
-        : [];
-      const taskLines = input.taskSpec
-        ? [
-            input.taskSpec.guidance ? `\nTask guidance:\n${input.taskSpec.guidance}` : "",
-            ...(input.taskSpec.examples ?? []).map((example, index) =>
-              `\nValidated example ${index + 1}:\nContent:\n${example.content}\nExpected proposals:\n${JSON.stringify(example.proposals)}`
-            ),
-          ]
-        : [];
-
-      const systemPrompt = [
-        "You are a schema-directed content extractor.",
-        "Extract the requested target fields from the provided content.",
-        "You are PROPOSING for review — never invent values, and only propose a field",
-        "when you can ground it in a verbatim excerpt from the content.",
-        "Return honest confidence scores; omit fields you cannot find.",
-        hintLines.length ? "\nPer-field hints:" : "",
-        ...hintLines,
-        ...taskLines,
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const userMessage = `Content (${input.contentType}):\n\n${input.content}`;
+      const { systemPrompt, userMessage } = buildExtractionMessages(input);
 
       const message = await client.create({
         model,
