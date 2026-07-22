@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.19.1](https://github.com/kontourai/traverse/compare/v0.19.0...v0.19.1) (2026-07-22)
+
+
+### Documentation
+
+* content sweep — accuracy and clarity fixes ([#81](https://github.com/kontourai/traverse/issues/81)) ([b89f8d0](https://github.com/kontourai/traverse/commit/b89f8d07b82638ed9090fa449a6506593e0e5093))
+* narrow raw-source locator profiles ([#87](https://github.com/kontourai/traverse/issues/87)) ([e488974](https://github.com/kontourai/traverse/commit/e48897483dda2b80b6cedf857d8b30f4dd2d3bd6))
+* reconcile extraction baseline ([#85](https://github.com/kontourai/traverse/issues/85)) ([a47c28d](https://github.com/kontourai/traverse/commit/a47c28d1bfe7645cb5d048cb6226f210ccb416e3))
+
 ## [0.19.0](https://github.com/kontourai/traverse/compare/v0.18.0...v0.19.0) (2026-07-20)
 
 
