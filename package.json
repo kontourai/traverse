@@ -46,6 +46,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "eval:grounded": "npm run build --silent && node evals/grounded-extraction/run.mjs",
+    "eval:multipass-context": "npm run build --silent && node evals/grounded-extraction/multipass-context.mjs",
     "verify": "npm run check:content-boundary && npm run check:decisions && npm run typecheck && npm test && npm run check:pack",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
