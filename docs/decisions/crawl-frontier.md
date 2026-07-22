@@ -18,6 +18,12 @@ same-host, opt-in link-following capability for the `@kontourai/traverse/fetch`
 subpath (issue #38, the first item picked up from the "Multi-page
 link-following / crawl frontier" candidate in `docs/slice-3-candidates.md`).
 
+This decision describes the legacy fetch-layer `crawlSource` driver only. It
+does not mean package-level crawl/extract composition is absent: the separately
+delivered, exported `crawlAndExtract` in `src/fetch/crawl-extract.ts` composes
+`@kontourai/forage`'s crawl with `extract()`. That composition has its own
+crawl boundary; `crawlSource` remains a bounded same-host fetch manifest.
+
 It reuses `fetchSource()`/`replaySource()` exactly once per discovered page —
 there is no separate HTTP GET, retry, redirect, or robots implementation in
 `crawl.ts`. A single frontier invocation shares one `politenessState` map and
@@ -153,7 +159,7 @@ The following remain explicitly deferred, unchanged from
   pattern language (unchanged from Slice 2 — see ADR 0002).
 - Query-string canonicalization / URL normalization beyond fragment-stripping
   (see decision 1 above).
-- `crawlAndExtract` composition with `extract()` — this slice stays
-  fetch-layer-only; a manifest's per-page `sourceRef` (built via the existing
-  `buildSnapshotSourceRef`) gives a caller who wants extraction the
-  provenance needed to compose it themselves.
+- Adding `crawlAndExtract` composition to `crawl.ts` itself. `crawlSource`
+  stays fetch-layer-only, while the separately delivered, exported
+  `crawlAndExtract` in `src/fetch/crawl-extract.ts` composes
+  `@kontourai/forage`'s crawl with `extract()`.
