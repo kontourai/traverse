@@ -94,6 +94,14 @@ test).
   records the path actually used (including transcript cleanup or HTML's text
   fallback). See
   [`docs/decisions/prepared-artifact.md`](docs/decisions/prepared-artifact.md).
+- **Format-specific Locator Profile**: the documented replay boundary for one
+  preparation format. Every profile keeps a proposal's `chars:<start>-<end>`
+  locator anchored only to its complete prepared artifact; it may expose an
+  existing, replayable format sidecar but does not imply a universal mapping
+  back to raw source offsets. HTML has no DOM-path profile, PDF's existing
+  `pdfPageOffsets` sidecar resolves a character offset to a page, and OCR's
+  `ocrDerived` marker identifies the prepared-text origin. See
+  [`docs/decisions/format-specific-raw-source-locator-profiles.md`](docs/decisions/format-specific-raw-source-locator-profiles.md).
 - **Extraction Cost Guard**: `extract()`'s optional
   `ExtractInput.maxProviderCalls` / `maxTotalTokens` ceilings on a single
   run's provider spend. Once a configured ceiling is reached, `extract()`
