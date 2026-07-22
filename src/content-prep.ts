@@ -1,11 +1,12 @@
 /**
  * Content preparation: turn raw input into extractor-ready text.
  *
- * This is a dependency-free implementation. It is a DOCUMENTED DEVIATION from a
- * cheerio-based HTML stripper — Slice 1 deliberately avoids a runtime dependency
- * so the package ships with an empty `dependencies` list. If a consumer's real
- * noise-removal turns out to need DOM-accurate stripping, a later slice may
- * revisit this module (flagged as a stop-short risk in the plan).
+ * Default HTML preparation is structure-preserving Markdown conversion using the
+ * declared `linkedom` and `turndown` runtime dependencies. Those content-handling
+ * dependencies do not bundle an AI-provider SDK; provider adapters load their
+ * optional peer SDKs behind provider-specific subpaths. The legacy regex text
+ * fallback and transcript cleanup are local implementations that add no further
+ * dependency.
  *
  * `prepareContent` never throws: unsupported/deferred paths return a typed
  * `{ error }` instead.
@@ -107,7 +108,8 @@ const ENTITY_RE = new RegExp(
 );
 
 /**
- * Strip HTML to meaningful text without any runtime dependency.
+ * Strip HTML to meaningful text without adding a dependency beyond this module's
+ * declared content-preparation dependencies.
  * Removes script/style/noscript/nav/header/footer subtrees, strips remaining
  * tags, decodes common entities, collapses whitespace, and truncates.
  */
@@ -167,9 +169,9 @@ export function htmlToText(html: string, maxChars: number = DEFAULT_MAX_CHARS): 
  *    lines (the rolling window) turns that scroll into a single clean line each.
  *
  * The result is truncated to `maxChars` (same discipline as every other prep
- * path). It takes NO new dependency, matching this module's zero-runtime-
- * dependency posture. Choosing WHICH track to feed it (the `en` vs `en-orig`
- * pick-one rule) is the acquisition layer's job — see src/fetch/youtube.ts.
+ * path). It adds no dependency beyond this module's declared content-preparation
+ * dependencies. Choosing WHICH track to feed it (the `en` vs `en-orig` pick-one
+ * rule) is the acquisition layer's job — see src/fetch/youtube.ts.
  */
 export function vttToText(vtt: string, maxChars: number = DEFAULT_MAX_CHARS): string {
   const out: string[] = [];

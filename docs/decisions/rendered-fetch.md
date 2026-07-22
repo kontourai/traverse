@@ -175,6 +175,12 @@ forwarding, unchanged. `discoverSameHostLinks` composes unchanged too — it
 operates on `Snapshot.body` gated on `contentType === "html"`, both of which
 a rendered snapshot satisfies exactly like a wire-fetched one.
 
+This rendered-fetch slice did not add crawl/extract composition. Separately,
+an exported `crawlAndExtract` has since shipped in `src/fetch/crawl-extract.ts`;
+it composes `@kontourai/forage`'s crawl with `extract()`. That does not change
+the caller-injected renderer boundary here: Traverse still bundles no browser
+or renderer lifecycle and `crawlSource` remains a fetch-layer driver.
+
 ### 10. Shell classification, winner, fallback, and audit
 
 `on-shell-warning` classifies a successful, fresh, unrendered HTML snapshot
@@ -225,8 +231,10 @@ only when they adopt the minor release containing this seam.
 - Shipping any Playwright/browser dependency in traverse core.
 - Screenshot/visual capture.
 - Auth/session flows.
-- A `crawlAndExtract`-style new composition — crawl stays fetch-layer-only,
-  unchanged from `docs/decisions/crawl-frontier.md`.
+- Adding crawl/extract composition to this rendered-fetch slice. A separate,
+  exported `crawlAndExtract` in `src/fetch/crawl-extract.ts` has since shipped
+  to compose `@kontourai/forage`'s crawl with `extract()`; that does not add a
+  bundled browser or renderer lifecycle.
 - Enforcing `timeoutMs` around `renderImpl` itself (see decision 2 — passed
   as a hint only).
 - Re-checking robots against a renderer's own client-side navigation (see

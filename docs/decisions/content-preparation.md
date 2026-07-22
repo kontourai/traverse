@@ -31,21 +31,16 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
   the pre-existing typed not-implemented error (`PDF_PREP_ERROR`, unchanged
   since `0.1.0`) — every existing caller's behavior is unaffected by this
   option's mere existence.
-- **No default implementation, no new dependency.** Traverse takes on no PDF
-  parsing library (`pdfjs-dist`, `pdf-parse`, `unpdf`, or any other) as a
-  hard or optional peer dependency for this slice. Rationale: the whole point
-  of a shared extraction package is to absorb genuinely DUPLICATED logic
-  across real consumers — that duplication existed for HTML prep (multiple
-  consumers had hand-rolled stripping) and Traverse absorbed it. For PDF, no
-  such duplication exists to absorb: there is exactly one current consumer
-  with PDF needs, and it already has a working, parity-eligible parser.
-  Bundling a second PDF parser inside Traverse would not reduce duplication;
-  it would create it — two parsers to keep behaviorally aligned, one of
-  which would be entirely unproven against real regulated documents. This
-  also keeps every non-PDF consumer's install unaffected (an empty
-  `dependencies` list stays empty), matching this package's existing
-  minimal-deps posture (documented in `src/content-prep.ts`'s own module
-  docstring for the dependency-free HTML stripper).
+- **No default PDF implementation, no additional PDF dependency.** Traverse
+  takes on no PDF parsing library (`pdfjs-dist`, `pdf-parse`, `unpdf`, or any
+  other) as a hard or optional peer dependency for this slice. That is separate
+  from the package's declared content-preparation runtime dependencies:
+  `linkedom` and `turndown` implement the default HTML-to-Markdown path. The
+  core bundles no AI-provider SDK; provider adapters use optional peer SDKs
+  behind provider-specific subpaths. PDF, OCR, and browser/render
+  implementations remain caller-injected seams and are not bundled. A caller
+  that needs PDF parsing supplies the parser it already owns, so this slice
+  adds neither a parser implementation nor a PDF dependency.
 - **Composition, not new chunking logic.** With an extractor supplied,
   `extract()` runs it via `preparePdfText()` (`src/content-prep.ts`) and
   hands the resulting text into the EXISTING, unmodified character-window

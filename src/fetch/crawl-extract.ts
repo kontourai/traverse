@@ -58,9 +58,9 @@ export interface CrawlAndExtractOptions {
   chunkOverlap?: number;
   /** cap on number of chunks forwarded to `extract()`. */
   maxChunks?: number;
-  /** ceiling on provider.extract() calls across the WHOLE crawl (see below). */
+  /** per-page ceiling on provider.extract() calls, forwarded to `extract()` (see below). */
   maxProviderCalls?: number;
-  /** ceiling on accumulated raw.tokensUsed across the WHOLE crawl (see below). */
+  /** per-page ceiling on accumulated raw.tokensUsed, forwarded to `extract()` (see below). */
   maxTotalTokens?: number;
   /** injected PDF text extractor, forwarded to `extract()`. */
   pdfTextExtractor?: PdfTextExtractor;

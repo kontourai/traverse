@@ -24,11 +24,13 @@
  * `store`), reusing the exact error kind `fetchAndExtract`'s `acquire()`
  * already uses for the identical condition (`compose.ts`).
  *
- * FETCH-LAYER ONLY: the manifest never calls `extract()` — a per-page
- * `sourceRef` (built via the existing `buildSnapshotSourceRef`) gives a caller
- * who composes extraction later the same provenance continuity
- * `fetchAndExtract` provides for a single page. `crawlAndExtract` is
- * explicitly out of scope for this slice.
+ * FETCH-LAYER ONLY: `crawlSource` itself never calls `extract()` — a per-page
+ * `sourceRef` (built via the existing `buildSnapshotSourceRef`) gives its
+ * manifest the same provenance continuity `fetchAndExtract` provides for a
+ * single page. That boundary is specific to this legacy crawl driver, not a
+ * package-level absence: the separately delivered, exported
+ * `crawlAndExtract` in `crawl-extract.ts` composes `@kontourai/forage`'s crawl
+ * with `extract()`.
  */
 
 import { parseHTML } from "linkedom";

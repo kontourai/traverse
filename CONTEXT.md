@@ -26,17 +26,22 @@ test).
   source (only the excerpt is offset-groundable, never the value). Additive
   and 100% optional; see `docs/decisions/extraction-proposals.md`.
 - **Content Preparation**: the step that turns raw input into extractor-ready
-  text. `html` is stripped to text dependency-free; `text` passes through;
-  `pdf` is an **opt-in injected seam** — a caller supplies a small
+  text. `html` defaults to structure-preserving Markdown preparation using the
+  declared `linkedom` and `turndown` runtime dependencies; `text` passes
+  through. The core bundles no AI-provider SDK (provider SDKs are optional peer
+  dependencies behind provider-specific subpaths). `pdf` is an **opt-in injected
+  seam** — a caller supplies a small
   `PdfTextExtractor` (`ExtractInput.pdfTextExtractor`) wrapping a parser it
   already owns, and `extract()` runs it and hands the resulting text into the
   existing character-window chunker, unchanged. Traverse ships no default PDF
-  parser and takes no new dependency for this. With no extractor supplied,
-  `pdf` still returns the original typed not-implemented error, unchanged
-  since `0.1.0`. `png`/`jpeg` follow the same opt-in seam pattern through
+  parser or additional PDF dependency. With no extractor supplied, `pdf` still
+  returns the original typed not-implemented error, unchanged since `0.1.0`.
+  `png`/`jpeg` follow the same opt-in seam pattern through
   `ImageTextExtractor` (`ExtractInput.imageTextExtractor`): Traverse ships no
-  OCR dependency, requires caller-supplied bytes, and uses returned OCR text as
-  prepared text. See `docs/decisions/content-preparation.md` and
+  OCR implementation, requires caller-supplied bytes, and uses returned OCR
+  text as prepared text. PDF/OCR and browser/render implementations remain
+  caller-injected seams; none is bundled. See
+  `docs/decisions/content-preparation.md` and
   `docs/decisions/image-content-preparation.md`.
 - **Extraction Provider** (`ExtractionProvider`): a pluggable backend that
   receives prepared content plus the target schema and returns
