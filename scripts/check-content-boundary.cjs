@@ -30,8 +30,12 @@ const ignoredPathPatterns = [
   /^\.omx\//,
 ];
 
-function trackedFiles() {
-  const output = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" });
+function candidateFiles() {
+  const output = execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    { encoding: "utf8" },
+  );
   return output.split("\0").filter(Boolean);
 }
 
@@ -45,7 +49,7 @@ function lineNumberFor(content, index) {
 
 const findings = [];
 
-for (const filePath of trackedFiles()) {
+for (const filePath of candidateFiles()) {
   if (filePath.startsWith(".flow-agents/")) {
     findings.push({
       filePath,
