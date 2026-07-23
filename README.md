@@ -1075,8 +1075,11 @@ Any malformed member drops the entire layout with a warning.
 The validated sidecar is available as `ExtractionResult.pdfLayout` and survives
 the portable extraction-result envelope. A review surface can intersect a
 proposal's `chars:<start>-<end>` span with element/cell ranges for two-way
-highlighting. Traverse never infers geometry from flattened text, and tables
-remain cells rather than plausible-looking prose.
+highlighting. `resolvePdfLayoutSpan(pdfLayout, locator)` provides the canonical
+exclusive-end intersection behavior and returns typed `invalid-locator`,
+`not-found`, or `matched` results. Matched table cells retain their page,
+table index, row, column, and spans. Traverse never infers geometry from
+flattened text, and tables remain cells rather than plausible-looking prose.
 
 Page geometry declares its coordinate unit (`points`, `pixels`, or
 `normalized`), dimensions, and optional rotation. `providerType` can retain a

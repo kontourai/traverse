@@ -82,6 +82,11 @@ export {
   type PrepMode,
 } from "./content-prep.js";
 export {
+  resolvePdfLayoutSpan,
+  type PdfLayoutSpanResolution,
+  type ResolvedPdfTableCell,
+} from "./pdf-layout.js";
+export {
   prepareAndChunk,
   DEFAULT_CHUNK_SIZE,
   DEFAULT_CHUNK_OVERLAP,

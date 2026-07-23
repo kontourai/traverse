@@ -77,8 +77,10 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
   member drops the whole sidecar with a warning. The validated value is exposed
   as `ExtractionResult.pdfLayout` and in the portable result envelope. Review
   UIs intersect a proposal's `chars:<start>-<end>` range with these ranges for
-  two-way field/source highlighting. Traverse does not infer a box from text or
-  trust a provider-supplied proposal locator.
+  two-way field/source highlighting. `resolvePdfLayoutSpan()` owns the
+  exclusive-end overlap and typed invalid-locator behavior so consumers do not
+  reimplement it. Traverse does not infer a box from text or trust a
+  provider-supplied proposal locator.
 - **Coordinate systems are explicit.** Each page declares points, pixels, or
   normalized coordinates plus its dimensions and optional rotation. Bounds
   must fit that page. Parser-native element labels can survive as
