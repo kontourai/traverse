@@ -84,6 +84,7 @@ import type {
   ExtractionProviderFailure,
   ExtractionResult,
   ExtractionPartial,
+  PdfLayout,
   ProviderExtractionInput,
   ProviderExtractionOutput,
   RawProviderResponse,
@@ -332,6 +333,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // path.
     let prepared: PreparedChunks;
     let pdfPageOffsets: number[] | undefined;
+    let pdfLayout: PdfLayout | undefined;
     let ocrDerived = false;
     if (input.contentType === "pdf" && input.pdfTextExtractor) {
       if (!(input.content instanceof Uint8Array)) {
@@ -356,6 +358,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         };
       }
       pdfPageOffsets = pdfPrep.pageOffsets;
+      pdfLayout = pdfPrep.layout;
       prepared = prepareAndChunk(pdfPrep.text, "text", {
         chunkSize: input.chunkSize,
         chunkOverlap: input.chunkOverlap,
@@ -479,6 +482,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
       if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
+      if (pdfLayout) failed.pdfLayout = pdfLayout;
       if (ocrDerived) failed.ocrDerived = true;
       failed.preparedArtifact = preparedArtifact;
       return failed;
@@ -514,6 +518,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // Attach the whole-page embedded-state sidecar once (never per chunk).
     if (prepared.embedded) result.embedded = prepared.embedded;
     if (pdfPageOffsets) result.pdfPageOffsets = pdfPageOffsets;
+    if (pdfLayout) result.pdfLayout = pdfLayout;
     if (ocrDerived) result.ocrDerived = true;
     result.preparedArtifact = preparedArtifact;
     return result;

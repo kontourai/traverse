@@ -11,6 +11,10 @@ evidence:
     ref: docs/parity-methodology.md
   - kind: doc
     ref: .kontourai/flow-agents/pdf-content-prep/pdf-content-prep--deliver-plan.md
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/25
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/33
 ---
 
 # Content preparation
@@ -26,7 +30,7 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
 
 - `ExtractInput.pdfTextExtractor?: PdfTextExtractor` is the seam. A
   `PdfTextExtractor` is a caller-supplied `{ extract(bytes) => { text,
-  pageOffsets?, warnings? } }` implementation (sync or async, per
+  pageOffsets?, layout?, warnings? } }` implementation (sync or async, per
   `src/types.ts`). With this **unset**, `contentType: "pdf"` keeps returning
   the pre-existing typed not-implemented error (`PDF_PREP_ERROR`, unchanged
   since `0.1.0`) — every existing caller's behavior is unaffected by this
@@ -64,6 +68,23 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
   extractor can still get structurally-valid but semantically-wrong page
   numbers; this mirrors the pre-existing `embedded` sidecar's
   un-verified-content precedent.
+- **Optional PDF layout remains a sidecar, not a new proposal locator.**
+  `PdfExtractedText.layout` can carry page geometry, typed text elements, and
+  structured tables. Every element and table cell includes an exact UTF-16
+  range into the extractor's `text`; `preparePdfText()` validates those ranges,
+  page references, boxes, spans, and cell identities, normalizes arrays into
+  deterministic source order, and defensively copies the result. One malformed
+  member drops the whole sidecar with a warning. The validated value is exposed
+  as `ExtractionResult.pdfLayout` and in the portable result envelope. Review
+  UIs intersect a proposal's `chars:<start>-<end>` range with these ranges for
+  two-way field/source highlighting. Traverse does not infer a box from text or
+  trust a provider-supplied proposal locator.
+- **Coordinate systems are explicit.** Each page declares points, pixels, or
+  normalized coordinates plus its dimensions and optional rotation. Bounds
+  must fit that page. Parser-native element labels can survive as
+  `providerType`, while the small portable `kind` vocabulary describes only
+  layout role. Tables stay as row/column cells with ranges and optional spans;
+  they are never flattened into plausible prose.
 - **Never-throw preserved.** `preparePdfText()` wraps the extractor call in
   try/catch (mirroring `htmlToMarkdown`'s degrade-via-try/catch discipline);
   a synchronous throw or a rejected Promise from `PdfTextExtractor.extract()`
@@ -83,9 +104,9 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
 
 ## Out of scope
 
-- **Page/region locators.** A distinct locator scheme beyond
-  `chars:<start>-<end>` (e.g. one that names a page/region directly) is the
-  issue's own later-slice goal, not attempted here.
+- **A page/region proposal locator.** Geometry enriches an exact prepared-text
+  locator through `pdfLayout`; it does not replace it with a second locator
+  scheme or claim raw-PDF byte offsets.
 - **Page-boundary-preferred chunk splitting.** PDF-aware chunking that never
   lets a chunk boundary fall mid-page (mirroring how structural HTML
   chunking never splits a card) is a real potential future improvement,

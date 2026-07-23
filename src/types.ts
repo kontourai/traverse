@@ -141,7 +141,11 @@ export interface ExtractionProposal {
    */
   fieldPath: string;
   candidateValue: unknown;
-  /** 0..1 — clamped by extract() if a provider returns an out-of-range value. */
+  /**
+   * Provider-local 0..1 signal, clamped by extract() if out of range. Scores
+   * from different extractors are not assumed to be calibrated or comparable;
+   * `extractor` preserves the identity needed for review-outcome calibration.
+   */
   confidence: number;
   /** REQUIRED — both excerpt and locator must be present. */
   provenance: ExtractionProvenance;
@@ -322,6 +326,14 @@ export interface ExtractionResult {
    */
   pdfPageOffsets?: number[];
   /**
+   * Optional layout sidecar supplied by the caller's PDF parser and validated
+   * against the exact prepared text. Text ranges use the same UTF-16 offset
+   * space as proposal `chars:` locators, so review surfaces can resolve
+   * proposals to page geometry and structured table cells without replacing
+   * the portable locator.
+   */
+  pdfLayout?: PdfLayout;
+  /**
    * Present ONLY when contentType was an image type and
    * ExtractInput.imageTextExtractor successfully produced the prepared OCR text
    * used for extraction. PRESENCE (never explicit `false`) is the marker,
@@ -449,8 +461,82 @@ export interface PdfExtractedText {
    * page-resolution on top (see docs/decisions/content-preparation.md).
    */
   pageOffsets?: number[];
+  /**
+   * Optional parser-owned layout mapped into the extracted `text` by exact
+   * UTF-16 ranges. Traverse validates and defensively copies this sidecar; it
+   * never attempts to infer geometry from flattened text.
+   */
+  layout?: PdfLayout;
   /** non-fatal notes from extraction (e.g. an unreadable page skipped). */
   warnings?: string[];
+}
+
+export type PdfCoordinateUnit = "points" | "pixels" | "normalized";
+
+export interface PdfBoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfTextRange {
+  /** Inclusive UTF-16 offset into PdfExtractedText.text. */
+  start: number;
+  /** Exclusive UTF-16 offset into PdfExtractedText.text. */
+  end: number;
+}
+
+export interface PdfPageGeometry {
+  /** One-based source page number. */
+  pageNumber: number;
+  width: number;
+  height: number;
+  unit: PdfCoordinateUnit;
+  rotation?: 0 | 90 | 180 | 270;
+}
+
+export type PdfElementKind =
+  | "heading"
+  | "paragraph"
+  | "list"
+  | "table"
+  | "table-cell"
+  | "figure"
+  | "other";
+
+export interface PdfTextElement {
+  kind: PdfElementKind;
+  /** Parser-native label retained without making it portable vocabulary. */
+  providerType?: string;
+  pageNumber: number;
+  range: PdfTextRange;
+  bounds?: PdfBoundingBox;
+}
+
+export interface PdfTableCell {
+  rowIndex: number;
+  columnIndex: number;
+  rowSpan?: number;
+  columnSpan?: number;
+  range: PdfTextRange;
+  bounds?: PdfBoundingBox;
+}
+
+export interface PdfTable {
+  pageNumber: number;
+  bounds?: PdfBoundingBox;
+  cells: PdfTableCell[];
+}
+
+/**
+ * Parser-neutral PDF layout sidecar. Arrays are normalized into deterministic
+ * source order by preparePdfText().
+ */
+export interface PdfLayout {
+  pages?: PdfPageGeometry[];
+  elements: PdfTextElement[];
+  tables?: PdfTable[];
 }
 
 /**

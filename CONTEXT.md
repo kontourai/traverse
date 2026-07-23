@@ -65,6 +65,10 @@ test).
   Every result also carries a stable top-level provider identity, source
   reference, and opaque per-run identity, including zero-proposal successes and
   early failures.
+  For parser-supplied PDF content, optional `pdfLayout` carries validated page
+  geometry, typed text elements, and structured table cells. Every region maps
+  back to the exact prepared text through UTF-16 ranges, so it enriches rather
+  than replaces proposal `chars:` locators.
   `ocrDerived?: true` is an additive presence marker used only when image OCR
   text was the prepared content, so trust surfaces can distinguish OCR-derived
   excerpts from directly parsed text.

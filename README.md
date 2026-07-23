@@ -300,6 +300,12 @@ normalizes proposals. A proposal survives only if ALL of the following hold:
 malformed-tool-item or maxTokens-truncation notes) — nothing either stage
 notices is silent.
 
+`confidence` is a provider-local signal, not cross-provider provenance.
+Traverse preserves it beside the stable `extractor` identity and does not
+pretend that `0.8` from two different models means the same thing. Consumers
+calibrate or route those scores from reviewed outcomes in their review layer;
+Traverse never converts confidence into truth or acceptance.
+
 ### Indexed field paths against array schemas
 
 Some providers echo back an **indexed** path for an array field — e.g.
@@ -999,10 +1005,10 @@ const myExtractor: PdfTextExtractor = {
   // May be sync or return a Promise; extract() awaits either.
   async extract(bytes: Uint8Array): Promise<PdfExtractedText> {
     // Wrap your own parser here (e.g. one built on pdfjs-dist). Return the
-    // WHOLE document's text plus, optionally, each page's 0-based start
-    // offset into that text.
-    const { text, pageOffsets } = await myOwnPdfParser(bytes);
-    return { text, pageOffsets };
+    // WHOLE document's text plus optional page starts and layout. Every
+    // layout element/table cell range uses offsets into this exact text.
+    const { text, pageOffsets, layout } = await myOwnPdfParser(bytes);
+    return { text, pageOffsets, layout };
   },
 };
 
@@ -1051,10 +1057,32 @@ This is **not** a new locator scheme — `chars:<start>-<end>` still means
 "offsets into the prepared text," exactly as it does for HTML/text
 ([ADR 0001 §4](docs/adr/0001-proposals-only.md)). `pdfPageOffsets` is an
 additive sidecar on top of it. Full page/region locators (a distinct locator
-scheme) remain deferred to a later slice. Note also that `pageOffsets` is
+scheme) are intentionally not added. Note also that `pageOffsets` is
 **trust-not-verify**: unlike `excerpt`, Traverse cannot independently confirm
 page numbers against real PDF structure — it only checks the array is
 well-formed (ascending, in-range) and drops it, with a warning, if not.
+
+### `pdfLayout`: geometry, elements, and structured tables
+
+An extractor may additionally return `layout` with optional page geometry,
+typed text elements, and tables whose cells retain row/column structure. Each
+element and cell carries an exact `{ start, end }` UTF-16 range into the same
+`text` used by proposal locators. `preparePdfText()` validates those mappings,
+page references, coordinate bounds, spans, and cell identities; sorts them
+into deterministic source order; and defensively copies the whole sidecar.
+Any malformed member drops the entire layout with a warning.
+
+The validated sidecar is available as `ExtractionResult.pdfLayout` and survives
+the portable extraction-result envelope. A review surface can intersect a
+proposal's `chars:<start>-<end>` span with element/cell ranges for two-way
+highlighting. Traverse never infers geometry from flattened text, and tables
+remain cells rather than plausible-looking prose.
+
+Page geometry declares its coordinate unit (`points`, `pixels`, or
+`normalized`), dimensions, and optional rotation. `providerType` can retain a
+parser-native label while the portable `kind` describes the broad layout role.
+This metadata enriches the exact prepared-text locator; it does not claim raw
+PDF byte offsets or introduce a second proposal locator.
 
 ### Known asymmetry
 
