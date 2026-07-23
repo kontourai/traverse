@@ -89,10 +89,19 @@ live request. The selected Relay runtime uses an authenticated subscription,
 so incremental API spend is expected to remain zero; the rate-equivalent
 calculation remains recorded for comparison and as a second safety rail.
 
-Run `npm run eval:multipass-context:live` only with explicit spend
-authorization. Its first JSONL record contains the configuration and corpus
-digests before any provider call. The resulting decision and immutable evidence
-are added here only after the live run completes.
+Run `npm run eval:multipass-context:live -- --ledger /absolute/path/to/authorization.jsonl`
+only with explicit spend authorization. The required append-only ledger is
+keyed by the frozen configuration digest. It atomically reserves a provider
+call plus worst-case configured tokens and rate-equivalent spend before each
+invocation, so a retry, process exit, or concurrent process cannot reset the
+authorization-wide ceilings. Completed calls reconcile to observed usage;
+failed or aborted calls retain their conservative reservation, while locally
+rejected attempts remain recorded without consuming provider budget. Ledger
+records contain bounded identifiers and numeric accounting only—never prompts,
+credentials, or provider payloads. The first JSONL result record contains the
+configuration and corpus digests before any provider call. The resulting
+decision and immutable evidence are added here only after the live run
+completes.
 
 ## Live result: REJECT multipass promotion
 
