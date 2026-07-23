@@ -77,3 +77,45 @@ provider credentials or paid calls. A future explicitly authorized non-hermetic
 comparison must retain the existing benchmark's provider/model, corpus/task
 revision, per-attempt calls, tokens, latency, and failures before revisiting
 this decision.
+
+## Authorized live comparison
+
+Issue #89 authorizes at most USD 10 for the live comparison. The committed
+configuration in
+`evals/grounded-extraction/live-multipass-context.v1.json` freezes the
+provider/model, corpus size, six-call ceiling, token and latency limits,
+rate-equivalent pricing, and promote/narrow/reject thresholds before the first
+live request. The selected Relay runtime uses an authenticated subscription,
+so incremental API spend is expected to remain zero; the rate-equivalent
+calculation remains recorded for comparison and as a second safety rail.
+
+Run `npm run eval:multipass-context:live` only with explicit spend
+authorization. Its first JSONL record contains the configuration and corpus
+digests before any provider call. The resulting decision and immutable evidence
+are added here only after the live run completes.
+
+## Live result: REJECT multipass promotion
+
+The authorized run used Relay 0.4.1 with Claude Code and exact model
+`claude-sonnet-4-6`. The completed comparison made six calls across three
+frozen cases. First-pass exact-span recall was `0`; the second pass returned no
+additional proposals in every case, so merged exact-span recall remained `0`
+and recall gain was `0`, below the predeclared `0.15` threshold. Every retained
+proposal was grounded, so false-grounding remained `0`, but its excerpt
+boundaries differed from the frozen gold spans. The decision is **REJECT**:
+Traverse remains single-pass and gains no multipass runtime API.
+
+Incremental billed API spend was USD `0` under the authenticated subscription.
+The completed run reported 18 input and 2,485 output tokens, 77.551 seconds
+aggregate model latency, and USD `0.037329` rate-equivalent spend. An earlier
+aborted harness run made three first-pass calls before its second-pass requests
+failed locally. Authorization-wide totals were nine calls and USD `0.051141`
+rate-equivalent, still below the USD 10 financial ceiling.
+
+Safety evidence is not all green. One completed call reported 619 output tokens
+despite a requested 512-token limit, showing that Claude Code does not enforce
+Relay's requested output limit as a hard process-runtime cap. The retry also
+reset the process-local six-call counter, producing nine authorization-wide
+calls. Both are recorded as failures, not normalized away. The complete
+per-attempt evidence and limitations are in
+`evals/grounded-extraction/results/live-multipass-context-2026-07-22.json`.
