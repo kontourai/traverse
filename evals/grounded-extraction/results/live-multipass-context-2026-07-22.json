@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "1.0",
+  "status": "complete",
+  "decision": "reject",
+  "configurationDigest": "a2cb6cd8c62d6e46a2889e10a44d9ff7d601e225c433b691c57e2338880c8b7c",
+  "corpusRevision": "78cbe1a4921af3e26c8e47e7b47396ee592a48458fb043919e48100510cd1b38",
+  "preCallConfigurationCommit": "1d9268b289123cf379702380eb0189857fc4720b",
+  "completedHarnessCommit": "9a2f8f8",
+  "provider": "claude-code",
+  "model": "claude-sonnet-4-6",
+  "authorization": {
+    "maximumSpendUsd": 10,
+    "billingMode": "subscription-no-incremental-api-charge",
+    "incrementalBilledSpendUsd": 0
+  },
+  "abortedRun": {
+    "reason": "invalid second-pass taskSpec failed locally before its provider calls",
+    "providerCalls": 3,
+    "inputTokensReported": 9,
+    "outputTokensReported": 919,
+    "rateEquivalentSpendUsd": 0.013812,
+    "resultUsedForDecision": false
+  },
+  "completedRun": {
+    "providerCalls": 6,
+    "inputTokensReported": 18,
+    "outputTokensReported": 2485,
+    "latencyMs": 77550.80816700001,
+    "rateEquivalentSpendUsd": 0.037329,
+    "aggregate": {
+      "firstPassExactSpanRecall": 0,
+      "mergedExactSpanPrecision": 0,
+      "mergedExactSpanRecall": 0,
+      "mergedFalseGroundingRate": 0,
+      "mergedRecallGainOverFirstPass": 0
+    },
+    "attempts": [
+      {
+        "caseId": "repeated-identical-value-distinct-locators",
+        "pass": "first-pass",
+        "runId": "traverse-extraction-run:db815be5-203b-4efa-92f0-138c056aff9e",
+        "inputTokensReported": 3,
+        "outputTokensReported": 394,
+        "latencyMs": 13327.922832999999,
+        "proposals": [
+          { "fieldPath": "routeName", "candidateValue": "Trail North", "excerpt": "Trail North is open.", "locator": "chars:0-20" },
+          { "fieldPath": "routeName", "candidateValue": "Trail South", "excerpt": "Trail South is open.", "locator": "chars:21-41" }
+        ]
+      },
+      {
+        "caseId": "repeated-identical-value-distinct-locators",
+        "pass": "later-pass",
+        "runId": "traverse-extraction-run:210ee598-cf43-4571-8260-46acf05f11dc",
+        "inputTokensReported": 3,
+        "outputTokensReported": 619,
+        "latencyMs": 17154.187916,
+        "proposals": []
+      },
+      {
+        "caseId": "shared-span-multiple-fields",
+        "pass": "first-pass",
+        "runId": "traverse-extraction-run:2abee32c-0408-4d6b-b850-1c2b487d16df",
+        "inputTokensReported": 3,
+        "outputTokensReported": 265,
+        "latencyMs": 11823.057249999998,
+        "proposals": [
+          { "fieldPath": "opensAt", "candidateValue": "09:00", "excerpt": "09:00-17:00", "locator": "chars:15-26" },
+          { "fieldPath": "closesAt", "candidateValue": "17:00", "excerpt": "09:00-17:00", "locator": "chars:15-26" }
+        ]
+      },
+      {
+        "caseId": "shared-span-multiple-fields",
+        "pass": "later-pass",
+        "runId": "traverse-extraction-run:97993e52-9c35-4c44-95e1-e510baacf718",
+        "inputTokensReported": 3,
+        "outputTokensReported": 500,
+        "latencyMs": 12164.885667000002,
+        "proposals": []
+      },
+      {
+        "caseId": "explicit-and-inferred-values",
+        "pass": "first-pass",
+        "runId": "traverse-extraction-run:6fbc6b57-3d53-4651-ab9b-7c79e660a8b9",
+        "inputTokensReported": 3,
+        "outputTokensReported": 227,
+        "latencyMs": 8559.681791999996,
+        "proposals": [
+          { "fieldPath": "elevationGain", "candidateValue": 450, "excerpt": "climbs 450 meters", "locator": "chars:10-27" }
+        ]
+      },
+      {
+        "caseId": "explicit-and-inferred-values",
+        "pass": "later-pass",
+        "runId": "traverse-extraction-run:4c4b3893-ef52-4500-9718-c6baf22993be",
+        "inputTokensReported": 3,
+        "outputTokensReported": 480,
+        "latencyMs": 14521.072709000007,
+        "proposals": []
+      }
+    ]
+  },
+  "authorizationTotals": {
+    "providerCalls": 9,
+    "inputTokensReported": 27,
+    "outputTokensReported": 3404,
+    "rateEquivalentSpendUsd": 0.051141,
+    "incrementalBilledSpendUsd": 0
+  },
+  "thresholdVerdicts": {
+    "quality": "fail",
+    "falseGrounding": "pass",
+    "latency": "pass",
+    "spend": "pass",
+    "completedRunCallCount": "pass",
+    "requestedOutputTokenLimit": "fail",
+    "authorizationWideCallCount": "fail"
+  },
+  "limitations": [
+    "Exact-span scoring intentionally rejects grounded excerpts whose boundaries differ from the frozen gold span.",
+    "Relay 0.4.1 omits Claude Code cache-token and provider-reported cost fields, so rate-equivalent spend uses only reported input/output tokens.",
+    "Claude Code did not enforce the requested 512 maxOutputTokens as a hard process-runtime limit.",
+    "The retry reset the per-process call counter; the authorization-wide total was nine calls rather than six."
+  ]
+}

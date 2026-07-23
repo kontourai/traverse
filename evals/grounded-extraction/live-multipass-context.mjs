@@ -93,6 +93,7 @@ let providerCalls = 0;
 let totalInputTokens = 0;
 let totalOutputTokens = 0;
 let totalLatencyMs = 0;
+const safetyViolations = [];
 const cases = [];
 
 for (const entry of selected) {
@@ -156,8 +157,15 @@ for (const entry of selected) {
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
     totalLatencyMs += latencyMs;
-    if (inputTokens > config.limits.maxEstimatedInputTokensPerCall) throw new Error("input token estimate exceeded");
-    if (latencyMs > config.limits.maxLatencyMsPerCall) throw new Error("latency ceiling exceeded");
+    if (inputTokens > config.limits.maxEstimatedInputTokensPerCall) {
+      safetyViolations.push(`${entry.id}/${pass}:input-token-estimate`);
+    }
+    if (outputTokens > config.limits.maxOutputTokensPerCall) {
+      safetyViolations.push(`${entry.id}/${pass}:output-token-limit`);
+    }
+    if (latencyMs > config.limits.maxLatencyMsPerCall) {
+      safetyViolations.push(`${entry.id}/${pass}:latency-limit`);
+    }
     results.push(result);
     attempts.push({
       pass,
@@ -204,6 +212,7 @@ const rateEquivalentSpendUsd =
     + totalOutputTokens * config.rateEquivalent.outputUsdPerMillionTokens) / 1_000_000;
 const safetyPass =
   providerCalls <= config.limits.maxProviderCalls
+  && safetyViolations.length === 0
   && rateEquivalentSpendUsd <= config.thresholds.maximumRateEquivalentSpendUsd
   && rateEquivalentSpendUsd <= config.thresholds.maximumAuthorizedSpendUsd;
 const qualityPass =
@@ -225,6 +234,12 @@ emit({
   totalLatencyMs,
   incrementalBilledSpendUsd: 0,
   rateEquivalentSpendUsd,
+  safetyViolations,
+  usageLimitations: [
+    "Claude Code reports subscription usage; incremental billed API spend is zero.",
+    "Relay 0.4.1 records input/output tokens but omits cache-token and provider-reported cost fields.",
+    "Claude Code does not enforce Relay's requested maxOutputTokens as a hard process-runtime limit.",
+  ],
   aggregate,
   cases,
   decision,

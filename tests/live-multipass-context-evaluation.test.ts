@@ -20,4 +20,16 @@ describe("live multipass context evaluation configuration", () => {
     ) / 1_000_000;
     assert.equal(calculated, config.thresholds.maximumRateEquivalentSpendUsd);
   });
+
+  it("makes output, latency, call, and spend limits decision-bearing", () => {
+    const script = fs.readFileSync(
+      new URL("evals/grounded-extraction/live-multipass-context.mjs", `file://${process.cwd()}/`),
+      "utf8",
+    );
+    assert.match(script, /outputTokens > config\.limits\.maxOutputTokensPerCall/);
+    assert.match(script, /latencyMs > config\.limits\.maxLatencyMsPerCall/);
+    assert.match(script, /providerCalls <= config\.limits\.maxProviderCalls/);
+    assert.match(script, /rateEquivalentSpendUsd <= config\.thresholds\.maximumAuthorizedSpendUsd/);
+    assert.match(script, /safetyViolations\.length === 0/);
+  });
 });
