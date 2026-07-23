@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/kontourai/traverse/compare/v0.21.0...v0.22.0) (2026-07-23)
+
+
+### Features
+
+* resolve proposal spans against PDF layout ([#102](https://github.com/kontourai/traverse/issues/102)) ([30348e7](https://github.com/kontourai/traverse/commit/30348e714d838c9e43363eb089cd63597bfe3904))
+
 ## [0.21.0](https://github.com/kontourai/traverse/compare/v0.20.1...v0.21.0) (2026-07-23)
 
 
