@@ -117,9 +117,10 @@ for (const entry of selected) {
       },
     };
     const previous = results.flatMap((result) => result.proposals);
-    const taskSpec = pass === "later-pass"
-      ? {
-          guidance: [
+    const fieldHints = pass === "later-pass"
+      ? Object.fromEntries(entry.schema.map((field) => [
+          field.path,
+          [
             "This is a second, neighboring-context pass.",
             "The prior pass returned the proposals below.",
             "Re-read the source and return only additional grounded proposals that the prior pass missed.",
@@ -131,7 +132,7 @@ for (const entry of selected) {
               locator: proposal.provenance.locator,
             }))),
           ].join("\n"),
-        }
+        ]))
       : undefined;
     const startedAt = Date.now();
     const result = await extract({
@@ -144,7 +145,7 @@ for (const entry of selected) {
         maxTokens: config.limits.maxOutputTokensPerCall,
       }),
       maxProviderCalls: 1,
-      ...(taskSpec ? { taskSpec } : {}),
+      ...(fieldHints ? { fieldHints } : {}),
     });
     const elapsedMs = Date.now() - startedAt;
     providerCalls += result.providerCalls;

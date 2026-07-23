@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { describe, it } from "node:test";
 
 const config = JSON.parse(fs.readFileSync(
-  new URL("../evals/grounded-extraction/live-multipass-context.v1.json", import.meta.url),
+  new URL("evals/grounded-extraction/live-multipass-context.v1.json", `file://${process.cwd()}/`),
   "utf8",
 ));
 
