@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/kontourai/traverse/compare/v0.20.1...v0.21.0) (2026-07-23)
+
+
+### Features
+
+* preserve replayable PDF layout provenance ([#99](https://github.com/kontourai/traverse/issues/99)) ([dc41cb1](https://github.com/kontourai/traverse/commit/dc41cb14c3b17e49cf9275631cfcb336192d2f43))
+
 ## [0.20.1](https://github.com/kontourai/traverse/compare/v0.20.0...v0.20.1) (2026-07-22)
 
 
