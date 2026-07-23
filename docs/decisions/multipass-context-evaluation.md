@@ -77,3 +77,19 @@ provider credentials or paid calls. A future explicitly authorized non-hermetic
 comparison must retain the existing benchmark's provider/model, corpus/task
 revision, per-attempt calls, tokens, latency, and failures before revisiting
 this decision.
+
+## Authorized live comparison
+
+Issue #89 authorizes at most USD 10 for the live comparison. The committed
+configuration in
+`evals/grounded-extraction/live-multipass-context.v1.json` freezes the
+provider/model, corpus size, six-call ceiling, token and latency limits,
+rate-equivalent pricing, and promote/narrow/reject thresholds before the first
+live request. The selected Relay runtime uses an authenticated subscription,
+so incremental API spend is expected to remain zero; the rate-equivalent
+calculation remains recorded for comparison and as a second safety rail.
+
+Run `npm run eval:multipass-context:live` only with explicit spend
+authorization. Its first JSONL record contains the configuration and corpus
+digests before any provider call. The resulting decision and immutable evidence
+are added here only after the live run completes.

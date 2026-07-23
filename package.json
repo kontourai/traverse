@@ -51,6 +51,7 @@
     "test": "npm run build && node --test dist/tests/*.test.js",
     "eval:grounded": "npm run build --silent && node evals/grounded-extraction/run.mjs",
     "eval:multipass-context": "npm run build --silent && node evals/grounded-extraction/multipass-context.mjs",
+    "eval:multipass-context:live": "npm run build --silent && node evals/grounded-extraction/live-multipass-context.mjs",
     "verify": "npm run check:content-boundary && npm run check:decisions && npm run typecheck && npm test && npm run check:pack",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
@@ -89,7 +90,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.54.0",
-    "@kontourai/relay": "^0.1.0",
+    "@kontourai/relay": "^0.4.1",
     "@kontourai/survey": "^1.2.1",
     "@types/node": "^25.6.0",
     "@types/turndown": "^5.0.6",

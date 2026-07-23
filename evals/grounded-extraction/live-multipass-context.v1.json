@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "provider": "claude-code",
+  "model": "claude-sonnet-4-6",
+  "runtimePackage": "@kontourai/relay",
+  "runtimePackageVersion": "0.4.1",
+  "billingMode": "subscription-no-incremental-api-charge",
+  "authorizedSpendUsd": 10,
+  "pricingReference": "https://www.anthropic.com/pricing",
+  "rateEquivalent": {
+    "inputUsdPerMillionTokens": 3,
+    "outputUsdPerMillionTokens": 15
+  },
+  "limits": {
+    "cases": 3,
+    "maxProviderCalls": 6,
+    "maxOutputTokensPerCall": 512,
+    "maxEstimatedInputTokensPerCall": 4096,
+    "maxLatencyMsPerCall": 120000
+  },
+  "thresholds": {
+    "mergedExactSpanPrecision": 1,
+    "mergedFalseGroundingRate": 0,
+    "minimumMergedRecallGainOverFirstPass": 0.15,
+    "maximumRateEquivalentSpendUsd": 0.119808,
+    "maximumAuthorizedSpendUsd": 10
+  },
+  "decisionRule": {
+    "promote": "all quality, grounding, call, latency, and spend thresholds pass",
+    "narrow": "quality gain passes only for a stable subset with all safety thresholds passing",
+    "reject": "quality gain misses, false grounding occurs, or any safety threshold fails"
+  }
+}
