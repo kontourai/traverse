@@ -128,3 +128,19 @@ reset the process-local six-call counter, producing nine authorization-wide
 calls. Both are recorded as failures, not normalized away. The complete
 per-attempt evidence and limitations are in
 `evals/grounded-extraction/results/live-multipass-context-2026-07-22.json`.
+
+## Durable-ledger live canary
+
+A separate one-call, USD 0.10 authorization verified the shipped correction
+without reopening the rejected multipass experiment. Published Relay 0.5.0
+completed one live extraction and preserved the host's cache-write token and
+provider-reported cost fields. Traverse wrote `started` before launch and
+`completed` after reconciling the receipt. A new process then attempted the
+same authorization and was refused before provider launch.
+
+The two-record ledger was mode `0600`; a content scan found no prompt,
+credential, or proposal contents. Provider-reported cost was USD `0.056376`
+under the USD `0.10` authorization. That field is retained as a runtime fact,
+not presented as an independently verified incremental subscription charge.
+Sanitized evidence is in
+`evals/grounded-extraction/results/relay-0.5-ledger-canary-2026-07-22.json`.

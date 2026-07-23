@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "status": "complete",
+  "authorizationDigest": "d922b95359b1282b2a44d2e42b8d0b4e3e1c870d0066fdd560cd35ebf4968b50",
+  "authorization": {
+    "maximumProviderCalls": 1,
+    "maximumTotalTokens": 1536,
+    "maximumProviderReportedSpendUsd": 0.1
+  },
+  "runtime": {
+    "package": "@kontourai/relay",
+    "version": "0.5.0",
+    "profile": "claude-code",
+    "model": "claude-sonnet-4-6",
+    "outputTokenLimitFidelity": "unavailable"
+  },
+  "firstProcess": {
+    "providerLaunches": 1,
+    "providerCalls": 1,
+    "proposalCount": 1,
+    "errorCode": null,
+    "receipt": {
+      "inputTokens": 3,
+      "outputTokens": 179,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 8947,
+      "providerReportedCostUsd": 0.056376,
+      "runtimeWarnings": []
+    }
+  },
+  "authorizationTotals": {
+    "providerCalls": 1,
+    "totalTokens": 182,
+    "inputTokens": 3,
+    "outputTokens": 179,
+    "spendUsd": 0.056376,
+    "started": 0,
+    "completed": 1,
+    "failed": 0,
+    "aborted": 0,
+    "locallyRejected": 0
+  },
+  "restartedProcess": {
+    "reservationRefused": true,
+    "providerLaunches": 0,
+    "reason": "authorization-wide provider calls, tokens, spend ceiling reached"
+  },
+  "ledgerAudit": {
+    "mode": "0600",
+    "records": [
+      "started",
+      "completed"
+    ],
+    "recordCount": 2,
+    "sanitizationScan": "pass",
+    "containsPrompt": false,
+    "containsCredentials": false,
+    "containsProposalContents": false
+  },
+  "costInterpretation": "The value is the runtime's provider-reported cost field. This canary does not independently claim it was an incremental subscription charge.",
+  "verification": {
+    "registryInstalledVersion": "0.5.0",
+    "registryIntegrity": "sha512-74URjdHNfkaZ7ciIlrdiw4HInwCpvv8wsAtDrc+Pzm3vi2C2M5NGXpSLziVcWsPOO7ORN8V3IX4v5bwmj4MA9Q==",
+    "liveProviderCalls": 1,
+    "retryProviderCalls": 0
+  }
+}
