@@ -53,14 +53,14 @@
     "eval:multipass-context": "npm run build --silent && node evals/grounded-extraction/multipass-context.mjs",
     "eval:multipass-context:live": "npm run build --silent && node evals/grounded-extraction/live-multipass-context.mjs",
     "verify": "npm run check:content-boundary && npm run check:decisions && npm run typecheck && npm test && npm run check:pack",
-    "check:content-boundary": "node scripts/check-content-boundary.cjs",
+    "check:content-boundary": "node --test tests/content-boundary-script.test.cjs && node scripts/check-content-boundary.cjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "check:pack": "node scripts/check-package-contents.mjs"
   },
   "dependencies": {
-    "@kontourai/forage": "^0.2.0",
+    "@kontourai/forage": "^0.4.1",
     "linkedom": "^0.18.12",
     "turndown": "^7.2.4"
   },
