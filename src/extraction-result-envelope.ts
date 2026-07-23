@@ -23,8 +23,10 @@ import type {
   ExtractionProposal,
   ExtractionProviderFailure,
   ExtractionResult,
+  PdfLayout,
   TargetFieldSchema,
 } from "./types.js";
+import { validatePdfLayout } from "./content-prep.js";
 
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT = "traverse-extraction-result";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION = 1;
@@ -92,6 +94,7 @@ export interface PortableExtractionResult {
   taskDigest?: string;
   exampleDigests?: string[];
   pdfPageOffsets?: number[];
+  pdfLayout?: PdfLayout;
   ocrDerived?: true;
   preparedArtifact?: PreparedArtifact;
   preparedArtifactState?: PortablePreparedArtifactState;
@@ -223,6 +226,7 @@ function envelopeFromResult(result: ExtractionResult, options: PortableExtractio
     ...(result.taskDigest !== undefined ? { taskDigest: result.taskDigest } : {}),
     ...(result.exampleDigests !== undefined ? { exampleDigests: result.exampleDigests } : {}),
     ...(result.pdfPageOffsets !== undefined ? { pdfPageOffsets: result.pdfPageOffsets } : {}),
+    ...(result.pdfLayout !== undefined ? { pdfLayout: result.pdfLayout } : {}),
     ...(result.ocrDerived !== undefined ? { ocrDerived: true as const } : {}),
     ...(result.preparedArtifact !== undefined ? { preparedArtifact: result.preparedArtifact } : {}),
     ...(options.preparedArtifactResolution !== undefined
@@ -275,7 +279,7 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^clamped |normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/chunked into|beyond maxChunks/.test(warning)) return { category: "content", code: "content-chunking" };
-  if (/js-shell|embedded-state|markdown preparation|extractor-reported|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
+  if (/js-shell|embedded-state|markdown preparation|extractor-reported|pdfLayout|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
   return { category: "other", code: "unclassified-warning" };
 }
 
@@ -345,7 +349,7 @@ function validateResult(input: unknown): PortableExtractionResult {
   const value = record(input, "result");
   exactKeys(value, ["proposals", "provider", "runId", "raw", "outcome", "extractedAt", "providerCalls", "totalTokensUsed"], [
     "model", "warningClassifications", "partial", "providerFailures", "taskDigest", "exampleDigests",
-    "pdfPageOffsets", "ocrDerived", "preparedArtifact", "preparedArtifactState",
+    "pdfPageOffsets", "pdfLayout", "ocrDerived", "preparedArtifact", "preparedArtifactState",
   ], "result");
   const preparedArtifact = value.preparedArtifact === undefined ? undefined : validArtifact(value.preparedArtifact, "result.preparedArtifact");
   const preparedArtifactState = value.preparedArtifactState === undefined
@@ -356,6 +360,19 @@ function validateResult(input: unknown): PortableExtractionResult {
   }
   if (preparedArtifactState !== undefined && preparedArtifactState.canonicalRef !== preparedArtifact?.ref) {
     fail("result.preparedArtifactState.canonicalRef does not match result.preparedArtifact.ref");
+  }
+  const layoutWarnings: string[] = [];
+  const pdfLayout = value.pdfLayout === undefined
+    ? undefined
+    : preparedArtifact === undefined
+      ? fail("result.pdfLayout requires result.preparedArtifact")
+      : validatePdfLayout(
+        value.pdfLayout,
+        preparedArtifact.contentLength,
+        layoutWarnings,
+      );
+  if (value.pdfLayout !== undefined && pdfLayout === undefined) {
+    fail("result.pdfLayout is malformed or out of range");
   }
   const result: PortableExtractionResult = {
     proposals: array(value.proposals, "result.proposals").map((item, index) => validateProposal(item, `result.proposals[${index}]`, preparedArtifact)),
@@ -373,6 +390,7 @@ function validateResult(input: unknown): PortableExtractionResult {
     ...(value.taskDigest === undefined ? {} : { taskDigest: digest(value.taskDigest, "result.taskDigest") }),
     ...(value.exampleDigests === undefined ? {} : { exampleDigests: strings(value.exampleDigests, "result.exampleDigests").map((item, index) => digest(item, `result.exampleDigests[${index}]`)) }),
     ...(value.pdfPageOffsets === undefined ? {} : { pdfPageOffsets: validatePageOffsets(value.pdfPageOffsets) }),
+    ...(pdfLayout === undefined ? {} : { pdfLayout }),
     ...(value.ocrDerived === undefined ? {} : { ocrDerived: literalTrue(value.ocrDerived, "result.ocrDerived") }),
     ...(preparedArtifact === undefined ? {} : { preparedArtifact }),
     ...(preparedArtifactState === undefined ? {} : { preparedArtifactState }),

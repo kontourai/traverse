@@ -23,7 +23,19 @@
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
 import { inspectHtml } from "./embedded.js";
-import type { ContentType, EmbeddedState, ImageTextExtractor, PdfTextExtractor } from "./types.js";
+import type {
+  ContentType,
+  EmbeddedState,
+  ImageTextExtractor,
+  PdfBoundingBox,
+  PdfLayout,
+  PdfPageGeometry,
+  PdfTable,
+  PdfTableCell,
+  PdfTextElement,
+  PdfTextExtractor,
+  PdfTextRange,
+} from "./types.js";
 
 /** Prep mode: "text" (regex strip) or "markdown" (structure-preserving). */
 export type PrepMode = "text" | "markdown";
@@ -402,6 +414,237 @@ function validateWarnings(rawWarnings: unknown): string[] {
   return ["dropped extractor-reported warnings: not an array of strings"];
 }
 
+const PDF_ELEMENT_KINDS = new Set([
+  "heading",
+  "paragraph",
+  "list",
+  "table",
+  "table-cell",
+  "figure",
+  "other",
+]);
+const PDF_COORDINATE_UNITS = new Set(["points", "pixels", "normalized"]);
+const PDF_ROTATIONS = new Set([0, 90, 180, 270]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function validatePdfRange(value: unknown, textLength: number): PdfTextRange | undefined {
+  if (!isRecord(value)) return undefined;
+  const { start, end } = value;
+  if (
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isInteger(start) ||
+    !Number.isInteger(end) ||
+    start < 0 ||
+    end <= start ||
+    end > textLength
+  ) return undefined;
+  return { start, end };
+}
+
+function validatePdfBounds(
+  value: unknown,
+  page?: PdfPageGeometry,
+): PdfBoundingBox | undefined {
+  if (!isRecord(value)) return undefined;
+  const values = [value.x, value.y, value.width, value.height];
+  if (
+    !values.every((entry) => typeof entry === "number" && Number.isFinite(entry)) ||
+    (value.x as number) < 0 ||
+    (value.y as number) < 0 ||
+    (value.width as number) <= 0 ||
+    (value.height as number) <= 0
+  ) return undefined;
+  const bounds = {
+    x: value.x as number,
+    y: value.y as number,
+    width: value.width as number,
+    height: value.height as number,
+  };
+  if (
+    page &&
+    (bounds.x + bounds.width > page.width ||
+      bounds.y + bounds.height > page.height)
+  ) return undefined;
+  return bounds;
+}
+
+/**
+ * Validate and defensively copy parser-owned PDF layout. Any malformed range,
+ * page reference, geometry, or table cell drops the whole sidecar so callers
+ * never receive a plausible-looking partial mapping.
+ */
+export function validatePdfLayout(
+  value: unknown,
+  textLength: number,
+  warnings: string[],
+): PdfLayout | undefined {
+  if (value === undefined) return undefined;
+  const drop = (): undefined => {
+    warnings.push("dropped pdfLayout: malformed or out-of-range layout mapping");
+    return undefined;
+  };
+  if (!isRecord(value) || !Array.isArray(value.elements)) return drop();
+
+  let pages: PdfPageGeometry[] | undefined;
+  const pageByNumber = new Map<number, PdfPageGeometry>();
+  if (value.pages !== undefined) {
+    if (!Array.isArray(value.pages)) return drop();
+    pages = [];
+    for (const rawPage of value.pages) {
+      if (
+        !isRecord(rawPage) ||
+        !validPositiveInteger(rawPage.pageNumber) ||
+        typeof rawPage.width !== "number" ||
+        !Number.isFinite(rawPage.width) ||
+        rawPage.width <= 0 ||
+        typeof rawPage.height !== "number" ||
+        !Number.isFinite(rawPage.height) ||
+        rawPage.height <= 0 ||
+        typeof rawPage.unit !== "string" ||
+        !PDF_COORDINATE_UNITS.has(rawPage.unit) ||
+        (rawPage.rotation !== undefined &&
+          (typeof rawPage.rotation !== "number" ||
+            !PDF_ROTATIONS.has(rawPage.rotation))) ||
+        pageByNumber.has(rawPage.pageNumber)
+      ) return drop();
+      const page: PdfPageGeometry = {
+        pageNumber: rawPage.pageNumber,
+        width: rawPage.width,
+        height: rawPage.height,
+        unit: rawPage.unit as PdfPageGeometry["unit"],
+        ...(rawPage.rotation !== undefined
+          ? { rotation: rawPage.rotation as PdfPageGeometry["rotation"] }
+          : {}),
+      };
+      pages.push(page);
+      pageByNumber.set(page.pageNumber, page);
+    }
+    pages.sort((a, b) => a.pageNumber - b.pageNumber);
+  }
+
+  const pageFor = (pageNumber: number): PdfPageGeometry | undefined =>
+    pageByNumber.get(pageNumber);
+  const pageExists = (pageNumber: number): boolean =>
+    pageByNumber.size === 0 || pageByNumber.has(pageNumber);
+
+  const elements: PdfTextElement[] = [];
+  for (const rawElement of value.elements) {
+    if (
+      !isRecord(rawElement) ||
+      typeof rawElement.kind !== "string" ||
+      !PDF_ELEMENT_KINDS.has(rawElement.kind) ||
+      !validPositiveInteger(rawElement.pageNumber) ||
+      !pageExists(rawElement.pageNumber) ||
+      (rawElement.providerType !== undefined &&
+        typeof rawElement.providerType !== "string")
+    ) return drop();
+    const range = validatePdfRange(rawElement.range, textLength);
+    const bounds = rawElement.bounds === undefined
+      ? undefined
+      : validatePdfBounds(rawElement.bounds, pageFor(rawElement.pageNumber));
+    if (!range || (rawElement.bounds !== undefined && !bounds)) return drop();
+    elements.push({
+      kind: rawElement.kind as PdfTextElement["kind"],
+      ...(rawElement.providerType !== undefined
+        ? { providerType: rawElement.providerType }
+        : {}),
+      pageNumber: rawElement.pageNumber,
+      range,
+      ...(bounds ? { bounds } : {}),
+    });
+  }
+  elements.sort(
+    (a, b) =>
+      a.range.start - b.range.start ||
+      a.range.end - b.range.end ||
+      a.pageNumber - b.pageNumber ||
+      a.kind.localeCompare(b.kind),
+  );
+
+  let tables: PdfTable[] | undefined;
+  if (value.tables !== undefined) {
+    if (!Array.isArray(value.tables)) return drop();
+    tables = [];
+    for (const rawTable of value.tables) {
+      if (
+        !isRecord(rawTable) ||
+        !validPositiveInteger(rawTable.pageNumber) ||
+        !pageExists(rawTable.pageNumber) ||
+        !Array.isArray(rawTable.cells)
+      ) return drop();
+      const tableBounds = rawTable.bounds === undefined
+        ? undefined
+        : validatePdfBounds(rawTable.bounds, pageFor(rawTable.pageNumber));
+      if (rawTable.bounds !== undefined && !tableBounds) return drop();
+      const occupied = new Set<string>();
+      const cells: PdfTableCell[] = [];
+      for (const rawCell of rawTable.cells) {
+        if (
+          !isRecord(rawCell) ||
+          typeof rawCell.rowIndex !== "number" ||
+          !Number.isInteger(rawCell.rowIndex) ||
+          rawCell.rowIndex < 0 ||
+          typeof rawCell.columnIndex !== "number" ||
+          !Number.isInteger(rawCell.columnIndex) ||
+          rawCell.columnIndex < 0 ||
+          (rawCell.rowSpan !== undefined &&
+            !validPositiveInteger(rawCell.rowSpan)) ||
+          (rawCell.columnSpan !== undefined &&
+            !validPositiveInteger(rawCell.columnSpan))
+        ) return drop();
+        const cellKey = `${rawCell.rowIndex}:${rawCell.columnIndex}`;
+        if (occupied.has(cellKey)) return drop();
+        occupied.add(cellKey);
+        const range = validatePdfRange(rawCell.range, textLength);
+        const bounds = rawCell.bounds === undefined
+          ? undefined
+          : validatePdfBounds(rawCell.bounds, pageFor(rawTable.pageNumber));
+        if (!range || (rawCell.bounds !== undefined && !bounds)) return drop();
+        cells.push({
+          rowIndex: rawCell.rowIndex,
+          columnIndex: rawCell.columnIndex,
+          ...(rawCell.rowSpan !== undefined ? { rowSpan: rawCell.rowSpan } : {}),
+          ...(rawCell.columnSpan !== undefined
+            ? { columnSpan: rawCell.columnSpan }
+            : {}),
+          range,
+          ...(bounds ? { bounds } : {}),
+        });
+      }
+      cells.sort(
+        (a, b) =>
+          a.rowIndex - b.rowIndex ||
+          a.columnIndex - b.columnIndex ||
+          a.range.start - b.range.start,
+      );
+      tables.push({
+        pageNumber: rawTable.pageNumber,
+        ...(tableBounds ? { bounds: tableBounds } : {}),
+        cells,
+      });
+    }
+    tables.sort(
+      (a, b) =>
+        a.pageNumber - b.pageNumber ||
+        (a.cells[0]?.range.start ?? 0) - (b.cells[0]?.range.start ?? 0),
+    );
+  }
+
+  return {
+    ...(pages ? { pages } : {}),
+    elements,
+    ...(tables ? { tables } : {}),
+  };
+}
+
 /**
  * Run a caller-supplied {@link PdfTextExtractor} against PDF bytes and
  * produce prepared text, mirroring {@link htmlToMarkdown}'s degrade-via-
@@ -424,7 +667,13 @@ export async function preparePdfText(
   bytes: Uint8Array,
   extractor: PdfTextExtractor,
   maxChars: number = DEFAULT_MAX_CHARS,
-): Promise<{ text: string; pageOffsets?: number[]; warnings: string[]; error?: string }> {
+): Promise<{
+  text: string;
+  pageOffsets?: number[];
+  layout?: PdfLayout;
+  warnings: string[];
+  error?: string;
+}> {
   try {
     const raw = await extractor.extract(bytes);
     if (typeof raw?.text !== "string") {
@@ -433,7 +682,13 @@ export async function preparePdfText(
     const text = raw.text.slice(0, maxChars);
     const warnings = validateWarnings(raw.warnings);
     const pageOffsets = validatePageOffsets(raw.pageOffsets, text.length, warnings);
-    return { text, ...(pageOffsets ? { pageOffsets } : {}), warnings };
+    const layout = validatePdfLayout(raw.layout, text.length, warnings);
+    return {
+      text,
+      ...(pageOffsets ? { pageOffsets } : {}),
+      ...(layout ? { layout } : {}),
+      warnings,
+    };
   } catch (err) {
     return {
       text: "",
