@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { createHash } from "node:crypto";
+import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { createClaudeCodeRuntime } from "@kontourai/relay/claude-code";
 import { extract, prepareContent } from "../../dist/src/index.js";
 import { createRelayExtractionProvider } from "../../dist/src/relay.js";
+import { AuthorizationBudgetLedger } from "./authorization-budget-ledger.mjs";
 
 const configUrl = new URL("./live-multipass-context.v1.json", import.meta.url);
 const corpusUrl = new URL("./corpus.v1.json", import.meta.url);
@@ -11,6 +13,11 @@ const configBytes = fs.readFileSync(configUrl);
 const corpusBytes = fs.readFileSync(corpusUrl);
 const config = JSON.parse(configBytes);
 const corpus = JSON.parse(corpusBytes);
+const ledgerArgumentIndex = process.argv.indexOf("--ledger");
+const ledgerPath = ledgerArgumentIndex >= 0 ? process.argv[ledgerArgumentIndex + 1] : undefined;
+if (!ledgerPath || !path.isAbsolute(ledgerPath)) {
+  throw new Error("live evaluation requires --ledger with an absolute append-only ledger path");
+}
 
 const canonical = (value) => {
   if (Array.isArray(value)) return value.map(canonical);
@@ -81,11 +88,34 @@ if (selected.length !== config.limits.cases) throw new Error("frozen corpus does
 
 const configurationDigest = digest(configBytes);
 const corpusRevision = digest(corpusBytes);
+const runId = `live-${randomUUID()}`;
+const maximumReservationSpendUsd =
+  (config.limits.maxEstimatedInputTokensPerCall * config.rateEquivalent.inputUsdPerMillionTokens
+    + config.limits.maxOutputTokensPerCall * config.rateEquivalent.outputUsdPerMillionTokens) / 1_000_000;
+const ledger = new AuthorizationBudgetLedger({
+  filePath: ledgerPath,
+  authorizationDigest: configurationDigest,
+  limits: {
+    maxProviderCalls: config.limits.maxProviderCalls,
+    maxTotalTokens: config.limits.maxProviderCalls
+      * (config.limits.maxEstimatedInputTokensPerCall + config.limits.maxOutputTokensPerCall),
+    maxSpendUsd: Math.min(
+      config.thresholds.maximumRateEquivalentSpendUsd,
+      config.thresholds.maximumAuthorizedSpendUsd,
+    ),
+  },
+  reservation: {
+    inputTokens: config.limits.maxEstimatedInputTokensPerCall,
+    outputTokens: config.limits.maxOutputTokensPerCall,
+    spendUsd: maximumReservationSpendUsd,
+  },
+});
 emit({
   schemaVersion: "1.0",
   kind: "grounded-extraction-live-multipass-thresholds",
   configurationDigest,
   corpusRevision,
+  runId,
   config,
 });
 
@@ -102,8 +132,8 @@ for (const entry of selected) {
   const results = [];
   const attempts = [];
   for (const pass of ["first-pass", "later-pass"]) {
-    if (providerCalls >= config.limits.maxProviderCalls) throw new Error("provider call ceiling reached");
     const observations = [];
+    let invocationStarted = false;
     const baseRuntime = createClaudeCodeRuntime({
       model: config.model,
       cwd: process.cwd(),
@@ -112,6 +142,7 @@ for (const entry of selected) {
       id: baseRuntime.id,
       capabilities: () => baseRuntime.capabilities(),
       async invoke(request, options) {
+        invocationStarted = true;
         const result = await baseRuntime.invoke(request, options);
         observations.push(result);
         return result;
@@ -136,24 +167,45 @@ for (const entry of selected) {
         ]))
       : undefined;
     const startedAt = Date.now();
-    const result = await extract({
-      content: entry.content,
-      contentType: entry.contentType,
-      sourceRef: `fixture://${corpus.fixtureRevision}/${entry.id}/${pass}`,
-      targetSchema: entry.schema,
-      provider: createRelayExtractionProvider({
-        runtime,
-        maxTokens: config.limits.maxOutputTokensPerCall,
-      }),
-      maxProviderCalls: 1,
-      ...(fieldHints ? { fieldHints } : {}),
-    });
+    const attemptId = `${entry.id}/${pass}`;
+    const reservation = await ledger.reserve({ runId, attemptId });
+    let result;
+    try {
+      result = await extract({
+        content: entry.content,
+        contentType: entry.contentType,
+        sourceRef: `fixture://${corpus.fixtureRevision}/${entry.id}/${pass}`,
+        targetSchema: entry.schema,
+        provider: createRelayExtractionProvider({
+          runtime,
+          maxTokens: config.limits.maxOutputTokensPerCall,
+        }),
+        maxProviderCalls: 1,
+        ...(fieldHints ? { fieldHints } : {}),
+      });
+    } catch (error) {
+      await ledger.settle(reservation.reservationId, {
+        status: invocationStarted ? "failed" : "locally-rejected",
+      });
+      throw error;
+    }
     const elapsedMs = Date.now() - startedAt;
     providerCalls += result.providerCalls;
     const observation = observations[0];
     const inputTokens = observation?.usage.inputTokens ?? 0;
     const outputTokens = observation?.usage.outputTokens ?? 0;
     const latencyMs = observation?.latencyMs ?? elapsedMs;
+    const rateEquivalentAttemptSpendUsd =
+      (inputTokens * config.rateEquivalent.inputUsdPerMillionTokens
+        + outputTokens * config.rateEquivalent.outputUsdPerMillionTokens) / 1_000_000;
+    await ledger.settle(reservation.reservationId, {
+      status: result.providerCalls === 0
+        ? "locally-rejected"
+        : result.error ? "failed" : "completed",
+      inputTokens,
+      outputTokens,
+      spendUsd: observation?.usage.costUsd ?? rateEquivalentAttemptSpendUsd,
+    });
     totalInputTokens += inputTokens;
     totalOutputTokens += outputTokens;
     totalLatencyMs += latencyMs;
@@ -220,6 +272,7 @@ const qualityPass =
   && aggregate.mergedFalseGroundingRate <= config.thresholds.mergedFalseGroundingRate
   && aggregate.mergedRecallGainOverFirstPass >= config.thresholds.minimumMergedRecallGainOverFirstPass;
 const decision = safetyPass && qualityPass ? "promote" : "reject";
+const authorizationTotals = await ledger.totals();
 
 emit({
   schemaVersion: "1.0",
@@ -234,6 +287,7 @@ emit({
   totalLatencyMs,
   incrementalBilledSpendUsd: 0,
   rateEquivalentSpendUsd,
+  authorizationTotals,
   safetyViolations,
   usageLimitations: [
     "Claude Code reports subscription usage; incremental billed API spend is zero.",

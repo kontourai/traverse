@@ -48,7 +48,7 @@
     "build": "rm -rf dist && tsc",
     "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "npm run build && node --test dist/tests/*.test.js tests/*.test.mjs",
     "eval:grounded": "npm run build --silent && node evals/grounded-extraction/run.mjs",
     "eval:multipass-context": "npm run build --silent && node evals/grounded-extraction/multipass-context.mjs",
     "eval:multipass-context:live": "npm run build --silent && node evals/grounded-extraction/live-multipass-context.mjs",
