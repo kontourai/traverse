@@ -29,6 +29,13 @@ invalid-request, unavailable, or unknown failures with an explicit retryable
 flag. The original exception is retained unchanged as `native`; normalization
 adds control-flow semantics and never replaces diagnostic evidence.
 
+Physical batching is optional and capability-gated. `extractBatch()` means one
+provider- or runtime-native physical operation, never a `Promise.all` wrapper.
+It returns one positional fulfilled/rejected outcome per input so item-local
+failures remain typed and successful siblings survive. The Relay adapter
+projects this seam only when its runtime truthfully declares a positive batch
+bound and implements `invokeBatch()`; other runtimes omit it.
+
 ## Verification
 
 The deterministic conformance suite runs the same schema, versioned task,
@@ -36,6 +43,9 @@ fixture, expected proposal, locator, and token accounting across every bundled
 adapter through injected clients. The benchmark's existing optional provider
 module lane supplies live quality/cost comparison under the same corpus and
 task revisions without making credentials part of the hermetic gate.
+Physical-batch conformance separately proves one physical call, bounded batch
+size, input/output order, shared cancellation, partial item failure, and
+portable diagnostic redaction through Relay's injected fake runtime.
 
 ## Dependency boundary
 

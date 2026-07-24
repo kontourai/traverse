@@ -226,13 +226,18 @@ async function dispatchBoundedWaves(
         ...(input.signal ? { signal: input.signal } : {}),
       }));
       try {
-        const outputs = group.length > 1 && input.provider.extractBatch
+        const batchOutcomes = group.length > 1 && input.provider.extractBatch
           ? await input.provider.extractBatch(requests)
-          : [await input.provider.extract(requests[0])];
-        if (!Array.isArray(outputs) || outputs.length !== group.length) {
-          throw new Error(`provider batch returned ${Array.isArray(outputs) ? outputs.length : "non-array"} output(s) for ${group.length} input(s)`);
+          : [{ status: "fulfilled" as const, value: await input.provider.extract(requests[0]) }];
+        if (!Array.isArray(batchOutcomes) || batchOutcomes.length !== group.length) {
+          throw new Error(`provider batch returned ${Array.isArray(batchOutcomes) ? batchOutcomes.length : "non-array"} outcome(s) for ${group.length} input(s)`);
         }
-        return group.map((dispatch, index) => ({ ...dispatch, output: outputs[index] }));
+        return group.map((dispatch, index) => {
+          const outcome = batchOutcomes[index];
+          return outcome.status === "fulfilled"
+            ? { ...dispatch, output: outcome.value }
+            : { ...dispatch, error: outcome.reason };
+        });
       } catch (error) {
         return group.map((dispatch) => ({ ...dispatch, error }));
       }

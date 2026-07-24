@@ -366,7 +366,10 @@ Chunks dispatch in bounded waves. `concurrency` and `batchSize` both default to
 `1`, so existing callers and providers keep the historical sequential behavior.
 When a provider implements optional `extractBatch()`, Traverse can put up to
 `batchSize` chunks into one physical provider call; declared provider limits
-(`maxConcurrency`, `maxBatchSize`) always cap caller settings.
+(`maxConcurrency`, `maxBatchSize`) always cap caller settings. The batch
+returns one positional fulfilled/rejected outcome per chunk, so an item-local
+failure remains typed without discarding successful siblings. Concurrent
+single-item calls must not be presented as physical batching.
 
 **Offset-correct provenance across chunks.** Each chunk is an exact contiguous
 substring of one `fullText`. A proposal's `excerpt` is verified against the
@@ -627,6 +630,10 @@ const provider = createRelayExtractionProvider({ runtime });
 Relay supplies invocation portability only. Applications that need routing,
 budgets, fallbacks, or execution receipts can provide a runtime implementing
 those policies without coupling Traverse to an orchestration product.
+The adapter exposes `extractBatch()` only when the runtime declares Relay's
+bounded physical-batch capability and implements its native batch operation.
+Current single-invocation SDK and local harness runtimes therefore remain
+single-call providers; no batching claim is synthesized for them.
 
 Traverse does not choose a default provider. See the
 [provider conformance decision](docs/decisions/provider-conformance.md).

@@ -118,6 +118,7 @@ export type {
   ExtractionResult,
   ExtractionPartial,
   ExtractionPartialReason,
+  ProviderExtractionBatchOutcome,
   ProviderExtractionOutput,
   ProviderExtractionInput,
   ExtractionProvider,

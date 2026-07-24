@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FakeModelRuntime, ModelInvocationError, type ModelRuntime } from "@kontourai/relay";
+import {
+  FakeModelRuntime,
+  ModelInvocationError,
+  RecordingModelRuntime,
+  type ModelRuntime,
+} from "@kontourai/relay";
 import { buildRelayExtractionSchema, createRelayExtractionProvider } from "../src/relay.js";
 import { normalizeProviderFailure } from "../src/provider-conformance.js";
 
@@ -62,5 +67,64 @@ describe("Relay extraction provider", () => {
     const normalized = normalizeProviderFailure(provider, new ModelInvocationError("RATE_LIMITED", "limited", true));
     assert.equal(normalized.kind, "rate-limit");
     assert.equal(normalized.retryable, true);
+  });
+
+  it("exposes one physical batch only when the Relay runtime truthfully supports it", async () => {
+    const result = (value: string) => ({
+      provider: "fixture",
+      model: "fixture-model",
+      outputText: "",
+      latencyMs: 1,
+      toolCalls: [{
+        id: value,
+        name: "submit_extraction_proposals",
+        input: {
+          proposals: [{
+            fieldPath: "person.name",
+            value,
+            confidence: 0.9,
+            excerpt: value,
+            locator: null,
+            occurrenceHint: null,
+          }],
+        },
+      }],
+      usage: { totalTokens: 7 },
+      stopReason: "tool_use",
+    });
+    const runtime = new FakeModelRuntime([
+      result("Ada"),
+      { code: "RATE_LIMITED", message: "limited item", retryable: true },
+      result("Grace"),
+    ]);
+    const provider = createRelayExtractionProvider({ runtime });
+    assert.equal(provider.capabilities?.maxBatchSize, 100);
+    const outcomes = await provider.extractBatch!([
+      { ...input, content: "Ada" },
+      { ...input, content: "limited" },
+      { ...input, content: "Grace" },
+    ]);
+    assert.equal(runtime.physicalInvocationCount, 1);
+    assert.deepEqual(outcomes.map((outcome) =>
+      outcome.status === "fulfilled"
+        ? outcome.value.proposals[0]?.candidateValue
+        : normalizeProviderFailure(provider, outcome.reason).kind),
+    ["Ada", "rate-limit", "Grace"]);
+    const firstSignal = new AbortController();
+    const secondSignal = new AbortController();
+    await assert.rejects(
+      () => provider.extractBatch!([
+        { ...input, signal: firstSignal.signal },
+        { ...input, signal: secondSignal.signal },
+      ]),
+      (error: unknown) =>
+        error instanceof ModelInvocationError && error.code === "INVALID_REQUEST",
+    );
+    assert.equal(runtime.physicalInvocationCount, 1);
+
+    const recording = new RecordingModelRuntime(new FakeModelRuntime([result("unused")]));
+    const singleOnly = createRelayExtractionProvider({ runtime: recording });
+    assert.equal(singleOnly.extractBatch, undefined);
+    assert.equal(singleOnly.capabilities?.maxBatchSize, undefined);
   });
 });

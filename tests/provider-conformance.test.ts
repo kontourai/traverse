@@ -35,7 +35,14 @@ function adapters(): Array<[string, ExtractionProvider]> {
 describe("bundled provider conformance", () => {
   for (const [label, provider] of adapters()) {
     it(`${label} declares the full contract and produces identical grounded semantics`, async () => {
-      assert.deepEqual(provider.capabilities, EXTRACTION_CONFORMANCE_CAPABILITIES);
+      assert.deepEqual(
+        provider.capabilities?.supported,
+        EXTRACTION_CONFORMANCE_CAPABILITIES.supported,
+      );
+      assert.equal(
+        provider.capabilities?.maxBatchSize,
+        label === "relay" ? 100 : undefined,
+      );
       const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, taskSpec, provider });
       assert.equal(result.error, undefined);
       assert.equal(result.providerCalls, 1);
