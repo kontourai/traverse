@@ -111,6 +111,10 @@ does `extract()` surface a `result.error` - preserving the single-shot contract
 for the common 1-chunk case (a lone page whose only call throws is still an
 error, not an empty success).
 
+A physical batch returns positional fulfilled/rejected outcomes. This preserves
+the same partial-result rule inside one provider-native operation; rejecting the
+batch promise itself means the complete physical operation failed.
+
 ### D6 - `maxContentChars` is the per-chunk provider budget; new options
 
 `maxContentChars` (default 32_000) is redefined as the PER-CHUNK provider

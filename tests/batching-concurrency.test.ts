@@ -53,7 +53,10 @@ function batchProvider(opts: { maxConcurrency?: number; maxBatchSize?: number; t
       return enter(async () => {
         batchSizes.push(inputs.length);
         await wait(5);
-        return inputs.map((input) => output(input, opts.tokensUsed));
+        return inputs.map((input) => ({
+          status: "fulfilled" as const,
+          value: output(input, opts.tokensUsed),
+        }));
       });
     },
   };
@@ -99,6 +102,34 @@ describe("extract() bounded batching and concurrency", () => {
     assert.equal(observed.peak, 2);
     assert.ok(observed.batchSizes.every((size) => size <= 2));
     assert.equal(result.providerCalls, 3, "six chunks grouped into three physical calls");
+  });
+
+  it("retains successful siblings and classifies one physical-batch item failure", async () => {
+    const provider: ExtractionProvider = {
+      name: "partial-batch",
+      capabilities: {
+        supported: ["structured-output", "exact-excerpts"],
+        maxBatchSize: 2,
+      },
+      async extract(input) { return output(input); },
+      async extractBatch(inputs) {
+        return inputs.map((input, index) => index === 0
+          ? { status: "fulfilled" as const, value: output(input) }
+          : {
+            status: "rejected" as const,
+            reason: Object.assign(new Error("one item was rate limited"), {
+              code: "RATE_LIMITED",
+              retryable: true,
+            }),
+          });
+      },
+    };
+    const result = await run(provider, { batchSize: 2 });
+    assert.equal(result.providerCalls, 3);
+    assert.equal(result.proposals.length, 3);
+    assert.equal(result.providerFailures?.length, 3);
+    assert.ok(result.providerFailures?.every((failure) =>
+      failure.kind === "rate-limit" && failure.retryable));
   });
 
   it("folds proposals and locators in original chunk order across worker and batch counts", async () => {

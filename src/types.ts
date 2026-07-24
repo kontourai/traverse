@@ -392,6 +392,11 @@ export interface ProviderExtractionOutput {
   warnings?: string[];
 }
 
+/** One positional result from a provider-native physical batch operation. */
+export type ProviderExtractionBatchOutcome =
+  | { status: "fulfilled"; value: ProviderExtractionOutput }
+  | { status: "rejected"; reason: unknown };
+
 export type ExtractionProviderCapability =
   | "structured-output"
   | "exact-excerpts"
@@ -439,10 +444,11 @@ export interface ExtractionProvider {
   capabilities?: ExtractionProviderCapabilities;
   extract(input: ProviderExtractionInput): Promise<ProviderExtractionOutput>;
   /**
-   * Optional physical batching operation. Outputs must correspond to inputs
-   * by index. Omit it to retain the legacy one-input-per-call behavior.
+   * Optional physical batching operation. Outcomes must correspond to inputs
+   * by index. Per-item failures are values so successful siblings survive.
+   * Omit it unless one call maps to one provider/runtime-native operation.
    */
-  extractBatch?(inputs: ProviderExtractionInput[]): Promise<ProviderExtractionOutput[]>;
+  extractBatch?(inputs: ProviderExtractionInput[]): Promise<ProviderExtractionBatchOutcome[]>;
 }
 
 /**

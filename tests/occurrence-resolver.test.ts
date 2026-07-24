@@ -201,7 +201,12 @@ describe("exact occurrence resolver", () => {
       name: "occurrence-fixture",
       capabilities: { supported: ["structured-output", "exact-excerpts"] },
       async extract(input) { return proposalOutput(input, delay); },
-      async extractBatch(inputs) { return Promise.all(inputs.map((input) => proposalOutput(input, delay))); },
+      async extractBatch(inputs) {
+        return Promise.all(inputs.map(async (input) => ({
+          status: "fulfilled" as const,
+          value: await proposalOutput(input, delay),
+        })));
+      },
     });
     const input = {
       content: "Marker 1234567890 Marker",
