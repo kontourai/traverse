@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.23.0](https://github.com/kontourai/traverse/compare/v0.22.0...v0.23.0) (2026-07-24)
+
+
+### Features
+
+* add truthful Relay physical batching ([#113](https://github.com/kontourai/traverse/issues/113)) ([f9d3893](https://github.com/kontourai/traverse/commit/f9d389326f3fba0dd2ddfc5b962e9803cb71b01b))
+* **evals:** persist authorization-wide budgets ([#107](https://github.com/kontourai/traverse/issues/107)) ([dda1e55](https://github.com/kontourai/traverse/commit/dda1e55d8d2d47fbc60c4cd5e6679adcabb54065))
+
+
+### Fixes
+
+* **eval:** pass neighboring context as field hints ([9a2f8f8](https://github.com/kontourai/traverse/commit/9a2f8f8515c9cb16b64dbd49a8ba16fe345d22b6))
+* harden public content boundary checks ([#110](https://github.com/kontourai/traverse/issues/110)) ([d361e01](https://github.com/kontourai/traverse/commit/d361e0101b7efe9bac26174ff226f21df277cb6f))
+
+
+### Documentation
+
+* **evals:** record Relay 0.5 live canary ([#109](https://github.com/kontourai/traverse/issues/109)) ([b49a2c3](https://github.com/kontourai/traverse/commit/b49a2c3b40865032e210749018e3a60a3b5d2c6e))
+
 ## [0.22.0](https://github.com/kontourai/traverse/compare/v0.21.0...v0.22.0) (2026-07-23)
 
 
