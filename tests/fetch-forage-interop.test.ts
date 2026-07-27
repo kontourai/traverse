@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { toForageFetchOptions, toForageSourceConfig } from "../src/fetch/forage-interop.js";
+import { isSameSnapshotRef, parseAnySnapshotSourceRef, toForageFetchOptions, toForageSourceConfig } from "../src/fetch/forage-interop.js";
+import { parseSnapshotSourceRef } from "../src/fetch/compose.js";
 import type { SourceConfig, FetchSourceOptions } from "../src/fetch/types.js";
 
 const base: SourceConfig = {
@@ -70,4 +71,37 @@ test("carries every fetch option across, since that field set genuinely matches"
   // the fetch, and duplicating them would silently break that.
   assert.equal(translated.politenessState, politenessState);
   assert.equal(toForageFetchOptions(undefined), undefined);
+});
+
+test("reconciles a snapshot reference across both schemes", () => {
+  // The real pair that broke a migration: Lookout classified through forage
+  // while the application replayed through Traverse. Same capture, same
+  // content digest, different prefix — and `===` says they are different
+  // snapshots, which starts a new observation lineage over a string.
+  const traverse = "traverse-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "a".repeat(64) + "&fetchedAt=2026-07-11T03%3A00%3A00.000Z";
+  const forage = "forage-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "a".repeat(64) + "&fetchedAt=2026-07-11T03%3A00%3A00.000Z&snapshotSha256=" + "b".repeat(64);
+
+  assert.notEqual(traverse, forage, "the strings genuinely differ; that is the trap");
+  assert.equal(isSameSnapshotRef(traverse, forage), true, "same capture must reconcile");
+
+  const parsedForage = parseAnySnapshotSourceRef(forage)!;
+  assert.equal(parsedForage.scheme, "forage-snapshot");
+  assert.equal(parsedForage.snapshotSha256, "b".repeat(64));
+  assert.equal(parseAnySnapshotSourceRef(traverse)!.scheme, "traverse-snapshot");
+});
+
+test("a different capture stays different", () => {
+  const base = "traverse-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "a".repeat(64) + "&fetchedAt=2026-07-11T03%3A00%3A00.000Z";
+  const otherBody = "forage-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "c".repeat(64) + "&fetchedAt=2026-07-11T03%3A00%3A00.000Z";
+  const otherTime = "forage-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "a".repeat(64) + "&fetchedAt=2026-07-11T04%3A00%3A00.000Z";
+  assert.equal(isSameSnapshotRef(base, otherBody), false, "a different body digest is a different capture");
+  assert.equal(isSameSnapshotRef(base, otherTime), false, "a different fetch time is a different capture");
+  assert.equal(isSameSnapshotRef(base, "not-a-ref"), false);
+});
+
+test("the existing parser still answers only for Traverse", () => {
+  // Widening parseSnapshotSourceRef would silently change the answer for
+  // callers using it as "is this one of mine?", so reconciliation is additive.
+  const forage = "forage-snapshot:camp-1?url=https%3A%2F%2Fc.test&sha256=" + "a".repeat(64) + "&fetchedAt=2026-07-11T03%3A00%3A00.000Z";
+  assert.equal(parseSnapshotSourceRef(forage), undefined);
 });

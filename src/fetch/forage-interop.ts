@@ -31,6 +31,7 @@
 import type { EgressPolicy } from "@kontourai/forage/egress";
 import type { SourceConfig as ForageSourceConfig, FetchSourceOptions as ForageFetchSourceOptions } from "@kontourai/forage/fetch";
 import type { SourceConfig, FetchSourceOptions } from "./types.js";
+import { parseSnapshotSourceRef, type ParsedSnapshotSourceRef } from "./compose.js";
 
 /** What a Traverse source config cannot answer, so a caller must. */
 export interface ForageInteropPolicy {
@@ -85,4 +86,79 @@ export function toForageFetchOptions(options: FetchSourceOptions | undefined): F
     ...(renderImpl ? { renderImpl: renderImpl as ForageFetchSourceOptions["renderImpl"] } : {}),
     ...(store ? { store: store as ForageFetchSourceOptions["store"] } : {}),
   };
+}
+
+/**
+ * A snapshot reference parsed from either package's scheme.
+ *
+ * Both build the same string — `<scheme>:<sourceId>?url=&sha256=&fetchedAt=` —
+ * and differ only in the prefix, plus a `snapshotSha256` forage carries and
+ * Traverse does not.
+ */
+export interface ParsedAnySnapshotRef extends ParsedSnapshotSourceRef {
+  /** Which package emitted it. */
+  readonly scheme: "traverse-snapshot" | "forage-snapshot";
+  /** forage-only: digest of the stored snapshot record itself. */
+  readonly snapshotSha256?: string;
+}
+
+const FORAGE_PREFIX = "forage-snapshot:";
+
+/**
+ * Parse a snapshot reference emitted by **either** Traverse or forage.
+ *
+ * Additive on purpose. `parseSnapshotSourceRef` still accepts only Traverse's
+ * scheme, because callers use it to answer "is this one of mine?" and widening
+ * it would silently change that answer.
+ *
+ * Since Lookout moved onto forage in 0.3.1, an application can hold a stored
+ * reference in one scheme and a freshly classified one in the other. They
+ * describe the same capture and carry the same content digest, but string
+ * comparison says otherwise — and an application that concludes "different
+ * snapshot" from that starts a new observation lineage over a prefix change.
+ */
+export function parseAnySnapshotSourceRef(ref: string): ParsedAnySnapshotRef | undefined {
+  const traverse = parseSnapshotSourceRef(ref);
+  if (traverse) return { ...traverse, scheme: "traverse-snapshot" };
+  if (!ref.startsWith(FORAGE_PREFIX)) return undefined;
+  const rest = ref.slice(FORAGE_PREFIX.length);
+  const q = rest.indexOf("?");
+  if (q === -1) return undefined;
+  const params = new URLSearchParams(rest.slice(q + 1));
+  const url = params.get("url");
+  const bodyHash = params.get("sha256");
+  const fetchedAt = params.get("fetchedAt");
+  if (!url || !bodyHash || !fetchedAt) return undefined;
+  const snapshotSha256 = params.get("snapshotSha256");
+  return {
+    sourceId: decodeURIComponent(rest.slice(0, q)),
+    url,
+    bodyHash,
+    fetchedAt,
+    scheme: "forage-snapshot",
+    ...(snapshotSha256 ? { snapshotSha256 } : {}),
+  };
+}
+
+/**
+ * Whether two references describe the same capture, whichever scheme each uses.
+ *
+ * Compares the identity both packages agree on — source, URL, body digest and
+ * fetch time — and deliberately ignores the scheme prefix and forage's
+ * `snapshotSha256`, which is a digest of the stored record rather than of the
+ * captured bytes.
+ *
+ * This exists so a consumer does not answer the question with `===`. Getting it
+ * wrong is not a failed comparison; it is a forked lineage, and it fails
+ * silently because both strings are individually valid.
+ */
+export function isSameSnapshotRef(a: string, b: string): boolean {
+  if (a === b) return true;
+  const left = parseAnySnapshotSourceRef(a);
+  const right = parseAnySnapshotSourceRef(b);
+  if (!left || !right) return false;
+  return left.sourceId === right.sourceId
+    && left.url === right.url
+    && left.bodyHash === right.bodyHash
+    && left.fetchedAt === right.fetchedAt;
 }
