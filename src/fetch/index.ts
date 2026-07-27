@@ -13,6 +13,8 @@
  */
 
 export { fetchSource, resolveContentType, sha256Hex } from "./fetch-source.js";
+export { toForageSourceConfig, toForageFetchOptions } from "./forage-interop.js";
+export type { ForageInteropPolicy } from "./forage-interop.js";
 export {
   createFilesystemSnapshotStore,
   createInMemorySnapshotStore,
