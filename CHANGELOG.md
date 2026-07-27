@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/kontourai/traverse/compare/v0.24.0...v0.25.0) (2026-07-27)
+
+
+### Features
+
+* **fetch:** reconcile snapshot references across both schemes ([#117](https://github.com/kontourai/traverse/issues/117)) ([ebe80fb](https://github.com/kontourai/traverse/commit/ebe80fb5305fde5543fa8896052d2cd89a841ce9))
+
 ## [0.24.0](https://github.com/kontourai/traverse/compare/v0.23.0...v0.24.0) (2026-07-27)
 
 
