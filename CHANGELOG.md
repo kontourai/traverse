@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/kontourai/traverse/compare/v0.23.0...v0.24.0) (2026-07-27)
+
+
+### Features
+
+* **fetch:** supported translation across the forage boundary ([#115](https://github.com/kontourai/traverse/issues/115)) ([16da28e](https://github.com/kontourai/traverse/commit/16da28ebad5b98a77e195a6b0a51e633cd774abc))
+
 ## [0.23.0](https://github.com/kontourai/traverse/compare/v0.22.0...v0.23.0) (2026-07-24)
 
 
