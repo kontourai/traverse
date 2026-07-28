@@ -22,5 +22,11 @@
     "reason": "The governance-file change adding the release-automation entry above. Touches delivery/DECLARED only. Scope paired with author: per the ADR 0022 2026-07-03 addendum.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-27 session: scoped-DECLARED-exemption route)",
     "declared_at": "2026-07-27T22:00:00Z"
+  },
+  {
+    "scope": "author:briananderson1222 branch-prefix:chore/ts7",
+    "reason": "TypeScript 7 with the coupled tsconfig change the bot cannot author: tsgo no longer auto-includes @types/node, so the bump alone fails TS2591 on every node: builtin. Proven on the relay canary (relay#39); full verify green here under the new toolchain. Supersedes the bot's red dev-dependencies PR. Scope paired with author: per the ADR 0022 2026-07-03 addendum.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-28 session: scoped-DECLARED-exemption route)",
+    "declared_at": "2026-07-28T03:00:00Z"
   }
 ]
