@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { extract } from "../src/extract.js";
+import { deserializePortableExtractionResult, serializePortableExtractionResult } from "../src/extraction-result-envelope.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "../src/types.js";
 import { createMockExtractionProvider, createRegexScanProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
@@ -272,6 +273,56 @@ describe("extract() cost guard — both ceilings configured", () => {
 });
 
 describe("extract() cost guard — maxChunks interplay", () => {
+  it("maxChunks truncation alone is an honest partial stop with a distinct classification", async () => {
+    // fieldwork#50: this was the only limit that looked like success. The
+    // capped chunks were never read, so the run must say so the same way
+    // maxProviderCalls does — and the envelope must classify the drop
+    // distinctly from benign chunking so consumers can tell data loss
+    // from routine operation without the (unserialized) warning text.
+    const provider = createRegexScanProvider();
+    const result = await extract({
+      content: cardsHtml,
+      contentType: "html",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+      chunkSize: CHUNK_SIZE,
+      maxChunks: 4, // 6 natural chunks -> 4 dispatched, 2 silently dropped before this fix
+    });
+    assert.equal(provider.callContents.length, 4, "every surviving chunk still dispatches");
+    assert.deepEqual(result.partial, { reason: "max-chunks", completedChunks: 4, remainingChunks: 2 });
+    const parsed = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+    assert.deepEqual(parsed.result.outcome, { status: "partial", reason: "max-chunks" });
+    assert.ok(
+      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "content-truncated"),
+      `expected a content-truncated classification, got: ${JSON.stringify(parsed.result.warningClassifications)}`,
+    );
+    assert.ok(
+      parsed.result.warningClassifications?.some((w) => w.category === "content" && w.code === "content-chunking"),
+      "benign chunking keeps its own classification",
+    );
+  });
+
+  it("an earlier provider-call stop keeps its reason; truncation still classifies distinctly", async () => {
+    const provider = createRegexScanProvider();
+    const result = await extract({
+      content: cardsHtml,
+      contentType: "html",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider,
+      chunkSize: CHUNK_SIZE,
+      maxChunks: 4,
+      maxProviderCalls: 2,
+    });
+    assert.equal(result.partial?.reason, "max-provider-calls", "the earlier stop owns the partial reason");
+    const parsed = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+    assert.ok(
+      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "content-truncated"),
+      "truncation stays visible in classifications even when another stop owns the reason",
+    );
+  });
+
   it("maxChunks truncation and a maxProviderCalls stop are independent and both surface as warnings", async () => {
     const provider = createRegexScanProvider();
     const result = await extract({

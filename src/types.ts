@@ -352,7 +352,7 @@ export interface ExtractionResult {
 }
 
 /** Why an extraction run stopped before dispatching every prepared chunk. */
-export type ExtractionPartialReason = "cancelled" | "max-provider-calls" | "max-total-tokens";
+export type ExtractionPartialReason = "cancelled" | "max-provider-calls" | "max-total-tokens" | "max-chunks";
 
 /**
  * Typed progress retained when a run ends early. `completedChunks` counts

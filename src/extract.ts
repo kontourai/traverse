@@ -433,7 +433,8 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     let chunksSucceeded = 0;
     const dispatched = await dispatchBoundedWaves(input, chunks, maxChars);
     warnings.push(...dispatched.warnings);
-    const { outcomes, providerCalls, totalTokensUsed, partial } = dispatched;
+    const { outcomes, providerCalls, totalTokensUsed } = dispatched;
+    let partial = dispatched.partial;
 
     // Fold completed work strictly by original chunk index. Completion timing
     // therefore cannot alter proposal ordering, warnings, raw audit output, or
@@ -511,6 +512,14 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       warnings.push(
         `dropped ${prepared.truncatedChunks} chunk${prepared.truncatedChunks === 1 ? "" : "s"} beyond maxChunks; content truncated`,
       );
+      // Truncation is a partial stop, not routine chunking: the capped chunks
+      // were never dispatched, so the run did not read the whole document —
+      // the same honesty max-provider-calls already reports. An earlier stop
+      // (cancel, call cap, token cap) keeps its own reason; the
+      // content-truncated warning classification still records the drop.
+      if (!partial) {
+        partial = { reason: "max-chunks", completedChunks: chunks.length, remainingChunks: prepared.truncatedChunks };
+      }
     }
 
     const result: ExtractionResult = {
