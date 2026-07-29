@@ -515,10 +515,14 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       // Truncation is a partial stop, not routine chunking: the capped chunks
       // were never dispatched, so the run did not read the whole document —
       // the same honesty max-provider-calls already reports. An earlier stop
-      // (cancel, call cap, token cap) keeps its own reason; the
-      // content-truncated warning classification still records the drop.
+      // (cancel, call cap, token cap) keeps its own reason, but its
+      // remainingChunks was counted against the capped set only — the
+      // truncated tail was never dispatched either, and remainingChunks
+      // means exactly "never dispatched".
       if (!partial) {
         partial = { reason: "max-chunks", completedChunks: chunks.length, remainingChunks: prepared.truncatedChunks };
+      } else {
+        partial = { ...partial, remainingChunks: partial.remainingChunks + prepared.truncatedChunks };
       }
     }
 

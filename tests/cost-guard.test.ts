@@ -315,7 +315,11 @@ describe("extract() cost guard — maxChunks interplay", () => {
       maxChunks: 4,
       maxProviderCalls: 2,
     });
-    assert.equal(result.partial?.reason, "max-provider-calls", "the earlier stop owns the partial reason");
+    // The earlier stop owns the reason, and remainingChunks counts EVERY
+    // never-dispatched chunk: 2 undispatched within the cap + 2 truncated
+    // beyond it. Counting only the in-cap remainder would understate the
+    // unread content by half here (review finding on this change).
+    assert.deepEqual(result.partial, { reason: "max-provider-calls", completedChunks: 2, remainingChunks: 4 });
     const parsed = deserializePortableExtractionResult(serializePortableExtractionResult(result));
     assert.ok(
       parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "content-truncated"),
