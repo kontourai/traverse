@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/kontourai/traverse/compare/v0.25.0...v0.25.1) (2026-07-29)
+
+
+### Fixes
+
+* beyond-maxChunks truncation is a partial stop, not silent success ([#134](https://github.com/kontourai/traverse/issues/134)) ([0baf3e5](https://github.com/kontourai/traverse/commit/0baf3e5592925d5b5dd8d1d9df4f079caac60c0d))
+
 ## [0.25.0](https://github.com/kontourai/traverse/compare/v0.24.0...v0.25.0) (2026-07-27)
 
 
