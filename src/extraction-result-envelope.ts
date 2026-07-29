@@ -128,7 +128,7 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 const VALUE_TYPES: ReadonlySet<TargetFieldSchema["type"]> = new Set(["string", "number", "boolean", "date", "enum", "array", "object"]);
 const INFERENCE_TYPES = new Set(["explicit", "inferred"]);
-const PARTIAL_REASONS = new Set(["cancelled", "max-provider-calls", "max-total-tokens"]);
+const PARTIAL_REASONS = new Set(["cancelled", "max-provider-calls", "max-total-tokens", "max-chunks"]);
 const FAILURE_KINDS = new Set(["authentication", "rate-limit", "timeout", "invalid-request", "unavailable", "unknown"]);
 const ARTIFACT_REASONS = new Set<PreparedArtifactInvalidReason>([
   "not-an-object", "invalid-format", "invalid-version", "invalid-digest", "invalid-ref",
@@ -278,7 +278,8 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/^prepared artifact storage failed/.test(warning)) return { category: "storage", code: "prepared-artifact-storage-failed" };
   if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^clamped |normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
-  if (/chunked into|beyond maxChunks/.test(warning)) return { category: "content", code: "content-chunking" };
+  if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
+  if (/chunked into/.test(warning)) return { category: "content", code: "content-chunking" };
   if (/js-shell|embedded-state|markdown preparation|extractor-reported|pdfLayout|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
   return { category: "other", code: "unclassified-warning" };
 }
