@@ -50,8 +50,9 @@ jobs:
     needs: trust-verify
     permissions:
       pull-requests: write
-    uses: kontourai/.github/.github/workflows/trust-advisory-comment.yml@04e2430e537406244c28496c43e620fa0999332b
+    uses: kontourai/.github/.github/workflows/trust-advisory-comment.yml@66f62973ae2f01adf9abbcc2baff62f0a57d96a0
     with:
+      check-name: Trust Verify
       pr-number: ${{ github.event.pull_request.number }}
       result: ${{ needs['trust-verify'].result }}
       run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
