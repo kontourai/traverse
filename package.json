@@ -92,9 +92,9 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
-    "@kontourai/flow-agents": "5.5.0",
+    "@kontourai/flow-agents": "5.10.0",
     "@kontourai/relay": "^0.6.0",
-    "@kontourai/survey": "^2.3.0",
+    "@kontourai/survey": "^3.0.0",
     "@types/node": "^26.1.2",
     "@types/turndown": "^5.0.6",
     "typescript": "^7.0.2"
