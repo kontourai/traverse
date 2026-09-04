@@ -28,6 +28,13 @@ Every proposal is a reviewable record with an excerpt and locator.
 - Docs or fixture changes: `npm run check:content-boundary`.
 - Anything before push: `npm run verify` (content-boundary + typecheck + test +
   pack sanity — the exact chain CI's `verify` job runs).
+- Install with `pnpm install`; the pnpm version is pinned in `package.json`
+  (`packageManager`). Dependency install scripts are blocked by default, and a
+  package that needs one is named under `allowBuilds` in `pnpm-workspace.yaml`,
+  pinned by version. `autoInstallPeers` is off there: this package declares five
+  optional peers and the suite is tested against only the three npm installed.
+  Scripts are still run with `npm run …`, which only invokes `package.json`
+  scripts and does not depend on which tool installed `node_modules`.
 - Releases use release-please with conventional commits; the version lives in
   `.release-please-manifest.json` and `package.json`.
 
