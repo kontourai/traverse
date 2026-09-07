@@ -19,20 +19,20 @@ importers:
         version: 7.2.4
     devDependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.116.0
-        version: 0.116.0(zod@4.2.0)
+        specifier: ^0.123.0
+        version: 0.123.0(zod@4.2.0)
       '@kontourai/flow-agents':
         specifier: 5.10.0
         version: 5.10.0(typescript@7.0.2)(zod@4.2.0)
       '@kontourai/relay':
         specifier: ^0.6.0
-        version: 0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.2.0))
+        version: 0.6.0(@anthropic-ai/sdk@0.123.0(zod@4.2.0))
       '@kontourai/survey':
         specifier: ^3.0.0
         version: 3.0.0(typescript@7.0.2)
       '@types/node':
         specifier: ^26.1.2
-        version: 26.2.0
+        version: 26.4.1
       '@types/turndown':
         specifier: ^5.0.6
         version: 5.0.6
@@ -42,8 +42,8 @@ importers:
 
 packages:
 
-  '@anthropic-ai/sdk@0.116.0':
-    resolution: {integrity: sha512-4UEapYQ+epLEMsAuLZDvW8ExVSOtHD8a7zTyLzhw0H9RXJ1eilPgmqhjwgcdg22diwx13spw6fJ4rONZ+bS7Ww==}
+  '@anthropic-ai/sdk@0.123.0':
+    resolution: {integrity: sha512-Y9oX9mPNGZClHQOFqrWRk43Srcu/UHuPq3rfxxOq7JgW0gi+lJA2MAOK4Ul3k/+AUrwRWFJvd0tK3oC0Pw25dw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -364,8 +364,8 @@ packages:
   '@stablelib/base64@1.0.1':
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
 
-  '@types/node@26.2.0':
-    resolution: {integrity: sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==}
+  '@types/node@26.4.1':
+    resolution: {integrity: sha512-k97ENvZWtvA6yqz5/FS6a7duDgOPEeOQOc2iKS/nY6mX6qJUKtLnWzQS+Xj6tXweyj6ZcTAK2Qecetnvi9nCLA==}
 
   '@types/turndown@5.0.6':
     resolution: {integrity: sha512-ru00MoyeeouE5BX4gRL+6m/BsDfbRayOskWqUvh7CLGW+UXxHQItqALa38kKnOiZPqJrtzJUgAC2+F0rL1S4Pg==}
@@ -798,7 +798,7 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@0.116.0(zod@4.2.0)':
+  '@anthropic-ai/sdk@0.123.0(zod@4.2.0)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -942,9 +942,9 @@ snapshots:
     optionalDependencies:
       '@anthropic-ai/sdk': 0.74.0(zod@4.2.0)
 
-  '@kontourai/relay@0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.2.0))':
+  '@kontourai/relay@0.6.0(@anthropic-ai/sdk@0.123.0(zod@4.2.0))':
     optionalDependencies:
-      '@anthropic-ai/sdk': 0.116.0(zod@4.2.0)
+      '@anthropic-ai/sdk': 0.123.0(zod@4.2.0)
 
   '@kontourai/surface@2.13.0':
     optionalDependencies:
@@ -1033,7 +1033,7 @@ snapshots:
 
   '@stablelib/base64@1.0.1': {}
 
-  '@types/node@26.2.0':
+  '@types/node@26.4.1':
     dependencies:
       undici-types: 8.3.0
 
