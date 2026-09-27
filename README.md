@@ -597,6 +597,18 @@ value) are dropped, never silently accepted — each drop is reported in
 the model's response is truncated: `stop_reason === "max_tokens"` adds
 `"response truncated at maxTokens; proposals may be incomplete"` to
 `warnings`, so a truncated proposal set is never mistaken for a complete one.
+A response with no tool call at all adds
+`"provider returned no extraction tool call"`, as the OpenAI and Gemini
+adapters already did.
+
+`extract()` locates every loss of prepared text on its chunk: a failed chunk
+call, a chunk cut at `maxContentChars` before dispatch, an output-cap
+truncation and a missing tool call each produce a warning naming the chunk
+(`chunk <i>/<n>`) and the prepared-text range (`chars:<start>-<end>`) that was
+not read or not fully answered. In the portable envelope each keeps its own
+warning code — `chunk-provider-failure`, `content-truncated-at-dispatch`,
+`output-truncated`, `missing-tool-call` — though the range itself does not
+travel and the outcome stays `success`.
 For tests, inject a client: `createAnthropicExtractionProvider({ client })`.
 
 ## Provider conformance and additional adapters

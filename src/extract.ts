@@ -15,7 +15,7 @@
  * historical sequential behavior until a caller opts in.
  * `maxContentChars` is the PER-CHUNK provider budget: each chunk handed to the
  * provider is truncated to it (identical to the pre-0.5.0 whole-text truncation
- * in the common single-chunk case).
+ * in the common single-chunk case), with a warning naming the unsent range.
  *
  * Provenance across chunks. A proposal's `excerpt` is verified against the chunk
  * text the provider saw (via `indexOf`), then re-anchored to the FULL prepared
@@ -112,6 +112,9 @@ function preparationModeFor(
 const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
+
+/** Adapter warnings meaning a chunk's answer is incomplete: an output cap was hit or no tool call came back. */
+const CHUNK_LOSS_ADAPTER_WARNING = /^response truncated at maxTokens|^provider returned no extraction (?:tool|function) call/;
 
 interface ChunkDispatch {
   index: number;
@@ -442,16 +445,32 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     for (let i = 0; i < outcomes.length; i++) {
       const outcome = outcomes[i];
       if (!outcome) continue;
+      // Every loss below names the chunk and the prepared-text range it left
+      // unread (or not fully answered). Each call carries every target field,
+      // so the range applies to all of them.
+      const chunkLabel = `chunk ${i + 1}/${chunks.length}`;
+      const sentEnd = chunks[i].start + outcome.content.length;
+      if (sentEnd < chunks[i].end) {
+        warnings.push(
+          `${chunkLabel} content truncated at maxContentChars (${maxChars}): chars:${sentEnd}-${chunks[i].end} not sent to the provider`,
+        );
+      }
       if (outcome.error !== undefined) {
         const failure = normalizeProviderFailure(input.provider, outcome.error);
         providerFailures.push(failure);
         providerErrors.push(failure.message);
-        warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${failure.message}`);
+        warnings.push(`${chunkLabel} provider call failed: ${failure.message} (chars:${chunks[i].start}-${sentEnd} not read)`);
         continue;
       }
       const output = outcome.output as ProviderExtractionOutput;
       chunksSucceeded++;
-      if (output.warnings) warnings.push(...output.warnings);
+      // Adapter warnings that mean the answer for this chunk is incomplete are
+      // located here, since only the core knows which chunk a call served.
+      if (output.warnings) {
+        warnings.push(...output.warnings.map((warning) => CHUNK_LOSS_ADAPTER_WARNING.test(warning)
+          ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
+          : warning));
+      }
       if (output.raw) lastRaw = output.raw;
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(

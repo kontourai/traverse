@@ -116,6 +116,7 @@ function relayOutput(
   const toolInput = result.toolCalls.find((call) => call.name === toolName)?.input;
   const parsed = parseProposals(toolInput, providerName, contentType);
   const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
+  if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
   if (result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens") {
     warnings.push("response truncated at maxTokens; proposals may be incomplete");
   }
