@@ -44,6 +44,9 @@ const triggers: Array<{ name: string; bad: unknown; neighbour: typeof fee | type
   { name: "NaN value", bad: { ...fee, candidateValue: Number.NaN }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
   { name: "undefined value", bad: { ...fee, candidateValue: undefined }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
   { name: "non-plain object value", bad: { ...meta, candidateValue: new Date(0) }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },
+  { name: "accessor-property value", bad: { ...meta, candidateValue: Object.defineProperty({ a: 0 }, "g", { get: () => 1, enumerable: true }) }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },
+  { name: "symbol-keyed value", bad: { ...meta, candidateValue: { a: 0, [Symbol("s")]: 1 } }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },
+  { name: "array-with-extra-property value", bad: { ...meta, candidateValue: Object.assign([0], { extra: 1 }) }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },
   { name: "lone-surrogate excerpt", bad: { ...fee, provenance: { excerpt: "\ud83d", locator: "x" } }, neighbour: fee, warning: 'dropped proposal for "fee": excerpt is ill-formed Unicode' },
 ];
 
@@ -84,6 +87,32 @@ describe("envelope-safe proposal normalization", () => {
     const serialized = serializePortableExtractionResult(result);
     const proposal = JSON.parse(serialized).result.proposals[0];
     assert.deepEqual(proposal.candidateValue, { a: 0, b: [1, 0, { c: 0 }] });
+  });
+
+  // JSON.parse of provider output yields an own "__proto__" data key. The
+  // literals below are what origin/main serializes for these inputs.
+  for (const [name, json, expected] of [
+    ["string", '{"__proto__":"x","b":1}', '{"__proto__":"x","b":1}'],
+    ["object", '{"__proto__":{"c":0},"b":1}', '{"__proto__":{"c":0},"b":1}'],
+    ["object with a nested -0", '{"__proto__":{"c":-0},"b":1}', '{"__proto__":{"c":0},"b":1}'],
+  ] as const) {
+    it(`keeps an own __proto__ key with a ${name} value and serializes it`, async () => {
+      const result = await run([{ ...meta, candidateValue: JSON.parse(json) }]);
+      assert.equal(result.proposals.length, 1, `kept, not dropped; warnings ${JSON.stringify(result.warnings)}`);
+      const value = result.proposals[0].candidateValue as object;
+      assert.deepEqual(Object.keys(value), ["__proto__", "b"]);
+      assert.equal(Object.getPrototypeOf(value), Object.prototype, "the key is data, not a prototype swap");
+      const proposal = JSON.parse(serializePortableExtractionResult(result)).result.proposals[0];
+      assert.equal(JSON.stringify(proposal.candidateValue), expected);
+    });
+  }
+
+  it("never invokes a getter on a candidateValue it drops", async () => {
+    let calls = 0;
+    const value = Object.defineProperty({ a: -0 }, "g", { get: () => { calls++; return 1; }, enumerable: true });
+    const result = await run([{ ...meta, candidateValue: value }]);
+    assert.equal(result.proposals.length, 0);
+    assert.equal(calls, 0);
   });
 
   it("omits an unstable raw.model with a warning and keeps the proposals serializable", async () => {

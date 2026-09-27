@@ -798,30 +798,44 @@ function stableProposalIdentity(
  * writes both the same way, so this loses nothing, but `assertJsonSafe`
  * rejects a nested `-0` exactly like a top-level one — without this walk, a
  * value with `-0` three levels down would fail the portable-JSON check below
- * and drop the whole proposal instead of normalizing losslessly. Anything
- * that is not a plain object or array (a `Date`, a class instance, `NaN`,
- * `undefined`, …) passes through unchanged; `isPortableJsonValue` still gets
- * the final say on whether the result is representable.
+ * and drop the whole proposal instead of normalizing losslessly.
+ *
+ * Only containers `assertJsonSafe` would accept structurally are copied: an
+ * array with no holes or extra properties, or a plain object whose own keys
+ * are all enumerable string-keyed data properties. Anything else (a `Date`, a
+ * symbol key, an accessor, which is never invoked, a sparse array, `NaN`,
+ * `undefined`, …) is returned as-is, so `isPortableJsonValue` still sees the
+ * original and has the final say. Keys are defined, not assigned, so an own
+ * `__proto__` key (as `JSON.parse` produces) survives the copy as data.
  */
 function normalizeNestedNegativeZero(value: unknown, ancestors = new Set<object>()): unknown {
   if (Object.is(value, -0)) return 0;
-  if (Array.isArray(value)) {
-    if (ancestors.has(value)) return value;
-    ancestors.add(value);
-    const normalized = value.map((entry) => normalizeNestedNegativeZero(entry, ancestors));
-    ancestors.delete(value);
-    return normalized;
+  if (value === null || typeof value !== "object") return value;
+  const isArray = Array.isArray(value);
+  if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) return value;
+  if (ancestors.has(value)) return value;
+  const keys = Reflect.ownKeys(value);
+  const entries: Array<[string, unknown]> = [];
+  for (const key of keys) {
+    if (isArray && key === "length") continue;
+    if (typeof key === "symbol") return value;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return value;
+    entries.push([key, descriptor.value]);
   }
-  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
-    if (ancestors.has(value)) return value;
-    ancestors.add(value);
-    const record = value as Record<string, unknown>;
-    const normalized: Record<string, unknown> = {};
-    for (const key of Object.keys(record)) normalized[key] = normalizeNestedNegativeZero(record[key], ancestors);
-    ancestors.delete(value);
-    return normalized;
+  if (isArray) {
+    const length = (value as unknown[]).length;
+    if (entries.length !== length || entries.some(([key], index) => key !== String(index))) return value;
   }
-  return value;
+  ancestors.add(value);
+  const normalizedEntries = entries.map(([key, entry]) => [key, normalizeNestedNegativeZero(entry, ancestors)] as const);
+  ancestors.delete(value);
+  if (isArray) return normalizedEntries.map(([, entry]) => entry);
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of normalizedEntries) {
+    Object.defineProperty(normalized, key, { value: entry, enumerable: true, writable: true, configurable: true });
+  }
+  return normalized;
 }
 
 /**
