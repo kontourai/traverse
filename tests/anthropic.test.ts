@@ -110,12 +110,12 @@ describe("createAnthropicExtractionProvider", () => {
     assert.equal(out.raw.response, "");
   });
 
-  it("drops malformed tool items (missing excerpt / out-of-range confidence) and reports each drop as a warning", async () => {
+  it("drops malformed tool items (missing excerpt / missing confidence) and reports each drop as a warning", async () => {
     const client = fakeAnthropicClient(
       fakeAnthropicMessage(TOOL_NAME, {
         proposals: [
           { fieldPath: "title", value: "x", confidence: 0.5 }, // no excerpt -> dropped
-          { fieldPath: "title", value: "y", confidence: 5, excerpt: "y" }, // bad confidence -> dropped
+          { fieldPath: "title", value: "y", excerpt: "y" }, // missing confidence -> dropped
           { fieldPath: "title", value: "z", confidence: 0.7, excerpt: "z" }, // kept
         ],
       }),
@@ -131,7 +131,7 @@ describe("createAnthropicExtractionProvider", () => {
     // Both drops are reported — nothing is silently discarded.
     assert.equal(out.warnings?.length, 2);
     assert.ok(out.warnings?.some((w) => /index 0/.test(w) && /missing\/blank excerpt/.test(w)));
-    assert.ok(out.warnings?.some((w) => /index 1/.test(w) && /missing\/out-of-range confidence/.test(w)));
+    assert.ok(out.warnings?.some((w) => /index 1/.test(w) && /missing\/non-numeric confidence/.test(w)));
   });
 
   it("warns when the response is truncated at maxTokens, without discarding whatever proposals parsed", async () => {

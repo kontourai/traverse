@@ -251,10 +251,8 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
-function numberInRange(value: unknown, min: number, max: number): number | undefined {
-  if (typeof value !== "number" || !isFinite(value)) return undefined;
-  if (value < min || value > max) return undefined;
-  return value;
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && isFinite(value) ? value : undefined;
 }
 
 function extractToolUseInput(message: AnthropicMessage, toolName: string): unknown {
@@ -277,9 +275,12 @@ interface RawProposalItem {
 
 /**
  * Parse the tool output into ExtractionProposal[]. Malformed items — missing
- * fieldPath, missing/blank excerpt (no provenance), missing `value`, or
- * out-of-range/absent confidence — are dropped, never silently accepted; each
- * drop is reported in `warnings` (never silent). A missing locator is
+ * fieldPath, missing/blank excerpt (no provenance), missing `value`, or a
+ * missing/non-numeric confidence — are dropped, never silently accepted; each
+ * drop is reported in `warnings` (never silent). A finite out-of-range
+ * confidence is passed through unchanged: `extract()` clamps it into `0..1`
+ * with a warning. A missing confidence is still dropped because the portable
+ * envelope requires one. A missing locator is
  * synthesized deterministically as "<contentType>:field:<fieldPath>" — a
  * provisional value only; `extract()`'s normalization overwrites it once the
  * excerpt is verified against the prepared content (see src/extract.ts).
@@ -305,14 +306,14 @@ export function parseProposals(
 
     const fieldPath = stringOrUndefined(raw.fieldPath);
     const excerpt = stringOrUndefined(raw.excerpt);
-    const confidence = numberInRange(raw.confidence, 0, 1);
+    const confidence = finiteNumber(raw.confidence);
     const hasValue = "value" in raw;
 
     if (!fieldPath || !excerpt || confidence === undefined || !hasValue) {
       const reasons: string[] = [];
       if (!fieldPath) reasons.push("missing fieldPath");
       if (!excerpt) reasons.push("missing/blank excerpt");
-      if (confidence === undefined) reasons.push("missing/out-of-range confidence");
+      if (confidence === undefined) reasons.push("missing/non-numeric confidence");
       if (!hasValue) reasons.push("missing value");
       warnings.push(
         `dropped malformed tool item at index ${index}${fieldPath ? ` (fieldPath "${fieldPath}")` : ""}: ${reasons.join(", ")}`,
