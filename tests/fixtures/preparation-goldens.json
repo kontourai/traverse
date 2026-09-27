@@ -9,7 +9,12 @@
     "html-detail": {
       "preparationMode": "markdown",
       "preparationVersion": "2+linkedom@0.18.13+turndown@7.2.4",
-      "digest": "5901997f3bfbe57714402227cdf9981cef9cf2162cd11f32875b2e12fb0603a0"
+      "digest": "123450f3c6ff208baa80fdfae213ff54a5b76b5d05ee699442727dc4bf6d71d5"
+    },
+    "html-as-text": {
+      "preparationMode": "text",
+      "preparationVersion": "2",
+      "digest": "e840d6d39eb6200b94b778b6185460365d0d189229fd59fbefbb84b72f81b611"
     },
     "transcript": {
       "preparationMode": "transcript",

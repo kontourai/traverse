@@ -58,6 +58,7 @@ export type {
   PreparedArtifact,
   PreparedArtifactRef,
   PreparedArtifactOptions,
+  PreparationLibraryVersions,
   PreparedArtifactPreparationMode,
   PreparedArtifactStore,
   PreparedArtifactResolution,

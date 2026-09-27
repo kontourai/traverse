@@ -5,7 +5,10 @@
  */
 
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
+// Static JSON imports: bundlers and file tracers see them, and a missing
+// package fails at load time instead of producing an unknown version.
+import linkedomPackage from "linkedom/package.json" with { type: "json" };
+import turndownPackage from "turndown/package.json" with { type: "json" };
 
 export const PREPARED_ARTIFACT_FORMAT = "traverse-prepared-artifact";
 export const PREPARED_ARTIFACT_VERSION = 1;
@@ -18,42 +21,36 @@ export const PREPARED_ARTIFACT_PREPARATION_VERSION = "2";
 
 export type PreparedArtifactPreparationMode = "text" | "markdown" | "transcript" | "pdf-text" | "image-ocr";
 
-/** Libraries whose installed versions shape HTML Markdown output. */
-const MARKDOWN_PREPARATION_LIBRARIES = ["linkedom", "turndown"] as const;
+/** Installed versions of the libraries that shape HTML Markdown output. */
+export type PreparationLibraryVersions = { linkedom: string; turndown: string };
 
-const requireFromHere = createRequire(import.meta.url);
-const installedVersions = new Map<string, string>();
-
-/** The version of `name` this module resolves at runtime, read once. */
-function installedPackageVersion(name: string): string {
-  let version = installedVersions.get(name);
-  if (version === undefined) {
-    try {
-      const pkg = requireFromHere(`${name}/package.json`) as { version?: unknown };
-      version = typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : "unknown";
-    } catch {
-      version = "unknown";
-    }
-    installedVersions.set(name, version);
-  }
-  return version;
-}
+const INSTALLED_PREPARATION_LIBRARIES: PreparationLibraryVersions = {
+  linkedom: linkedomPackage.version,
+  turndown: turndownPackage.version,
+};
 
 /**
  * Default `preparationVersion` for a mode: the base version, plus the
  * installed `linkedom` and `turndown` versions for HTML Markdown preparation
  * (e.g. `2+linkedom@0.18.13+turndown@7.2.4`), because a dependency update can
  * change that output with no change here. Other modes do not use them.
+ * Fails closed: a library version that is not a stable token throws rather
+ * than letting two library versions share one preparation version.
  */
 export function preparationVersionFor(
   mode: PreparedArtifactPreparationMode,
-  readVersion: (name: string) => string = installedPackageVersion,
+  libraries: PreparationLibraryVersions = INSTALLED_PREPARATION_LIBRARIES,
 ): string {
   if (mode !== "markdown") return PREPARED_ARTIFACT_PREPARATION_VERSION;
-  return [
-    PREPARED_ARTIFACT_PREPARATION_VERSION,
-    ...MARKDOWN_PREPARATION_LIBRARIES.map((name) => `${name}@${readVersion(name)}`),
-  ].join("+");
+  const parts = [PREPARED_ARTIFACT_PREPARATION_VERSION];
+  for (const name of ["linkedom", "turndown"] as const) {
+    const version: unknown = libraries[name];
+    if (typeof version !== "string" || !/^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(version)) {
+      throw new Error(`prepared artifact preparationVersion: ${name} version is unresolved`);
+    }
+    parts.push(`${name}@${version}`);
+  }
+  return parts.join("+");
 }
 
 /** A versioned reference whose identity binds preparation metadata and text. */

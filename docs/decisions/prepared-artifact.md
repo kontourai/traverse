@@ -63,7 +63,9 @@ the same input. It is the base version of Traverse's own preparation code
 (`PREPARED_ARTIFACT_PREPARATION_VERSION`), which a golden test forces to be
 bumped when any pinned input's prepared-text digest changes. For HTML Markdown
 preparation it also names the installed versions of the libraries that shape
-that output, read once at runtime: `<base>+linkedom@<version>+turndown@<version>`.
+that output, read through static JSON imports:
+`<base>+linkedom@<version>+turndown@<version>`. A library version that is not a
+stable token throws instead of producing a placeholder two versions could share.
 The version lives in the existing string, so the artifact keeps its fields and
 its reference binding. A caller-supplied `preparationVersion` is used as given.
 

@@ -9,7 +9,8 @@ import {
   preparationVersionFor,
   serializePortableExtractionResult,
 } from "../src/index.js";
-import type { ContentType, ExtractionProvider, PreparedArtifact, TargetFieldSchema } from "../src/index.js";
+import type { ExtractionProvider, PreparedArtifact, TargetFieldSchema } from "../src/index.js";
+import { preparationInputs } from "./fixtures/preparation-inputs.js";
 
 // Pinned prepared-text digests for a fixed input set. When one of these fails
 // because the digest changed but the version did not, preparation output
@@ -22,20 +23,7 @@ const goldens = JSON.parse(fixture("preparation-goldens.json")) as {
   cases: Record<string, { preparationMode: string; preparationVersion: string; digest: string }>;
 };
 
-// Text that Turndown escapes (emphasis, list and heading markers, brackets)
-// so an escaping change moves the HTML digests.
-const detailHtml = `<!DOCTYPE html><html><body><h1>Riverside Clinic</h1><main>
-<section><p>Annual enrollment fee: $4,250 per participant.</p>
-<p>1. Bring *two* forms_of ID [original] # not a heading</p></section>
-<section><ul><li>Parking available</li><li>Wheelchair accessible</li><li>Open weekends</li></ul></section>
-</main></body></html>`;
-
-const inputs: Record<string, { content: string; contentType: ContentType }> = {
-  "html-listing": { content: fixture("repeated-cards-page.html"), contentType: "html" },
-  "html-detail": { content: detailHtml, contentType: "html" },
-  transcript: { content: fixture("auto-captions.vtt"), contentType: "transcript" },
-  text: { content: "Title: Alpine Hut\nFee: 1. *Twenty* dollars_per night", contentType: "text" },
-};
+const inputs = preparationInputs;
 
 const schema: TargetFieldSchema[] = [{ path: "title", type: "string" }];
 const silent: ExtractionProvider = {
@@ -84,13 +72,12 @@ describe("preparationVersion", () => {
     assert.equal((await artifactFor("html-listing")).preparationVersion, expected);
     assert.equal((await artifactFor("transcript")).preparationVersion, PREPARED_ARTIFACT_PREPARATION_VERSION);
     assert.equal((await artifactFor("text")).preparationVersion, PREPARED_ARTIFACT_PREPARATION_VERSION);
-    const htmlAsText = await extract({ ...inputs["html-detail"], prep: "text", sourceRef: "fixture", targetSchema: schema, provider: silent });
-    assert.equal(htmlAsText.preparedArtifact?.preparationVersion, PREPARED_ARTIFACT_PREPARATION_VERSION);
+    assert.equal((await artifactFor("html-as-text")).preparationVersion, PREPARED_ARTIFACT_PREPARATION_VERSION);
   });
 
   it("a different installed library version gives a different version and ref", () => {
     const installed = preparationVersionFor("markdown");
-    const stubbed = preparationVersionFor("markdown", (name) => (name === "turndown" ? "7.3.0" : installedVersion(name)));
+    const stubbed = preparationVersionFor("markdown", { linkedom: installedVersion("linkedom"), turndown: "7.3.0" });
     assert.notEqual(stubbed, installed);
     assert.match(stubbed, /\+turndown@7\.3\.0$/);
     const text = "# Riverside Clinic";
@@ -99,6 +86,18 @@ describe("preparationVersion", () => {
     assert.equal(current.preparationVersion, installed);
     assert.notEqual(other.ref, current.ref);
     assert.equal(other.digest, current.digest);
+  });
+
+  it("fails closed when a library version cannot be resolved", async () => {
+    for (const bad of ["", "unknown version", undefined]) {
+      assert.throws(
+        () => preparationVersionFor("markdown", { linkedom: bad as unknown as string, turndown: installedVersion("turndown") }),
+        /linkedom version is unresolved/,
+        String(bad),
+      );
+    }
+    // Other modes never read the library versions.
+    assert.equal(preparationVersionFor("text", { linkedom: "", turndown: "" }), PREPARED_ARTIFACT_PREPARATION_VERSION);
   });
 
   it("a caller-supplied preparationVersion still wins", async () => {

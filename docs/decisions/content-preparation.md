@@ -108,17 +108,26 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
 
 ## Structural HTML keeps content outside the card container
 
-Structural chunking (ADR 0004 §D2) changes where chunk boundaries fall; it does
-not remove content. The pruned page text outside the detected card container is
-converted with the same Turndown configuration as the whole-page path and kept
-as a leading and a trailing segment around the card batches. A segment that
-fits in one chunk is batched like a card (a boundary may fall before it); a
-longer one is split by the character window. This replaces the earlier rule
-that carried only the page's first `<h1>` into the first chunk: a detail page
-with a short repeated list would otherwise lose its own text, and a value
-there would read downstream as absent from the source. A cards-only page keeps
-its chunk boundaries. Pages with text outside the container get different
-prepared text, a different digest, and a new preparation version.
+Structural chunking (ADR 0004 §D2) changes where chunk boundaries fall; it
+should not silently remove a page's own text, and it must not let that text
+crowd out the cards. The page text outside the detected card container is
+converted with the same Turndown configuration as the whole-page path, after a
+second chrome pass that the element-name pruning misses: ARIA `navigation`,
+`banner`, and `contentinfo` landmarks, blocks with at least three links whose
+link text is at least half their text (div navbars, mega-menus, pagination),
+and the short label remnants those leave behind. Blocks are judged innermost
+first, so a wrapper that mixes a menu with real text keeps the text.
+
+What remains is a leading and a trailing segment. A segment of at most a
+quarter of `chunkSize` rides along with the first or last card batch without
+changing card boundaries, as the page title always did. A longer segment gets
+its own chunks (character window when longer than one chunk), and every card
+chunk is emitted, and dispatched, before any outside chunk, so `maxChunks`,
+`maxProviderCalls`, and `maxTotalTokens` reach the cards first. Outside chunks
+left out by `maxChunks` produce a warning naming the chunk and character
+counts. Chunks are therefore ordered cards first, not by offset. A cards-only
+page keeps its chunk boundaries. Pages with text outside the container get
+different prepared text, a different digest, and a new preparation version.
 
 ## Out of scope
 

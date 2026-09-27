@@ -315,7 +315,9 @@ describe("prepareAndChunk (structural) keeps content outside the card container"
   });
 
   it("windows outside text longer than one chunk, with every chunk re-slicing fullText", () => {
-    const intro = Array.from({ length: 30 }, (_, i) => `<p>Intro paragraph ${i} about the program.</p>`).join("");
+    // Two long paragraphs: too few to be detected as cards themselves.
+    const sentences = (p: number) => Array.from({ length: 15 }, (_, i) => `Intro paragraph ${p * 15 + i} about the program.`).join(" ");
+    const intro = `<p class="lead">${sentences(0)}</p><p>${sentences(1)}</p>`;
     const html = `<html><body><main><section>${intro}</section><div class="list">${
       [1, 2, 3, 4].map((i) => `<div class="card">Card ${i}</div>`).join("")
     }</div></main></body></html>`;
@@ -345,5 +347,74 @@ describe("prepareAndChunk (structural) keeps content outside the card container"
       assert.equal(r.structural, true);
       assert.deepEqual(r.chunks.map((c) => [c.start, c.end]), bounds, `chunkSize ${size}`);
     }
+  });
+});
+
+describe("structural page text outside the container cannot starve the cards", () => {
+  const card = (i: number) =>
+    `<div class="listing"><h3>Camp ${String(i).padStart(2, "0")} Bravo</h3><p>Weekly fee: $${i}00. Ages 8 to 12, outdoor program with lunch included.</p><a href="https://example.test/camp/${i}">Details</a></div>`;
+  const cards = Array.from({ length: 20 }, (_, i) => card(i + 1)).join("");
+  // A div-based mega-menu: no nav/header element for the tag pruning to catch.
+  const megaMenu = `<div class="navbar"><div class="mega">${
+    Array.from({ length: 12 }, (_, g) => `<div class="col"><span>Group ${g}</span><ul>${
+      Array.from({ length: 10 }, (_, k) => `<li><a href="https://example.test/c/${g}/${k}">Category ${g}-${k} programs</a></li>`).join("")
+    }</ul></div>`).join("")
+  }</div></div>`;
+  const cookieBanner = `<div class="consent"><p>${"We use cookies to measure visits and remember your settings. ".repeat(40)}</p><button>Accept</button></div>`;
+  const page = (outside: string) =>
+    `<!DOCTYPE html><html><body>${outside}<main><h1>Summer Camps</h1><section class="results">${cards}</section></main></body></html>`;
+  const titles = Array.from({ length: 20 }, (_, i) => `Camp ${String(i + 1).padStart(2, "0")} Bravo`);
+
+  function recordingProvider(): ExtractionProvider & { seen: string[] } {
+    const seen: string[] = [];
+    return {
+      name: "recording-mock",
+      seen,
+      async extract(input): Promise<ProviderExtractionOutput> {
+        seen.push(input.content);
+        return { proposals: [], raw: { response: "{}", model: "mock" } };
+      },
+    };
+  }
+  const reached = (seen: string[]) => titles.filter((title) => seen.some((content) => content.includes(title)));
+
+  it("prunes a div mega-menu and sends every card under a tight maxChunks", async () => {
+    const provider = recordingProvider();
+    const result = await extract({
+      content: page(megaMenu), contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider, chunkSize: 2000, maxChunks: 3,
+    });
+    assert.equal(result.error, undefined);
+    assert.deepEqual(reached(provider.seen), titles);
+    assert.ok(provider.seen.every((content) => !content.includes("Category 3-4 programs")), "mega-menu links pruned");
+    assert.ok(provider.seen[0].startsWith("# Summer Camps"), "page title still rides with the first card batch");
+  });
+
+  it("sends card chunks before long outside text, and names outside text left out by maxChunks", async () => {
+    const provider = recordingProvider();
+    const html = page(cookieBanner);
+    const cardOnly = prepareAndChunk(page(""), "html", { chunkSize: 2000 });
+    const result = await extract({
+      content: html, contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider, chunkSize: 2000, maxChunks: cardOnly.chunks.length,
+    });
+    assert.deepEqual(reached(provider.seen), titles);
+    assert.ok(provider.seen.every((content) => !content.includes("We use cookies")), "banner chunks were the ones left out");
+    assert.ok(
+      result.warnings?.some((w) => /^structural prep: \d+ chunks? of page text outside the card container \(\d+ chars\) left out beyond maxChunks/.test(w)),
+      JSON.stringify(result.warnings),
+    );
+
+    const full = prepareAndChunk(html, "html", { chunkSize: 2000 });
+    const firstOutside = full.chunks.findIndex((c) => c.text.includes("We use cookies"));
+    assert.ok(firstOutside >= cardOnly.chunks.length, "outside chunks are ordered after every card chunk");
+    assert.ok(full.chunks.every((c) => full.fullText.slice(c.start, c.end) === c.text));
+
+    const capped = recordingProvider();
+    await extract({
+      content: html, contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider: capped, chunkSize: 2000, maxProviderCalls: cardOnly.chunks.length,
+    });
+    assert.deepEqual(reached(capped.seen), titles);
   });
 });
