@@ -108,6 +108,7 @@ describe("createAnthropicExtractionProvider", () => {
     });
     assert.equal(out.proposals.length, 0);
     assert.equal(out.raw.response, "");
+    assert.deepEqual(out.warnings, ["provider returned no extraction tool call"]);
   });
 
   it("drops malformed tool items (missing excerpt / missing confidence) and reports each drop as a warning", async () => {

@@ -24,7 +24,8 @@
  * import of the optional peer dep.
  *
  * Nothing is dropped or noticed silently: every malformed tool-output item this
- * adapter drops, and a response truncated at `maxTokens`, is reported via
+ * adapter drops, a response truncated at `maxTokens`, and a response with no
+ * tool call at all, is reported via
  * `ProviderExtractionOutput.warnings` — `extract()` merges these into
  * `ExtractionResult.warnings` alongside its own normalization notes.
  */
@@ -423,6 +424,7 @@ export function createAnthropicExtractionProvider(
 
       const toolInput = extractToolUseInput(message, TOOL_NAME);
       const { proposals, warnings } = parseProposals(toolInput, name, input.contentType);
+      if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
 
       if (message.stop_reason === "max_tokens") {
         warnings.push("response truncated at maxTokens; proposals may be incomplete");
