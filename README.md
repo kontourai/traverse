@@ -292,8 +292,10 @@ normalizes proposals. A proposal survives only if ALL of the following hold:
   `"excerpt not found in prepared content"`; a hit derives/overwrites
   `provenance.locator` as `"chars:<start>-<end>"` — see "The provenance
   contract" above),
-- `confidence` is a finite number (otherwise dropped) — an out-of-range value
-  is **clamped** into `0..1` (never dropped), with a warning.
+- `confidence` is a finite number (otherwise dropped, including when missing,
+  because the portable envelope requires one) — an out-of-range value is
+  **clamped** into `0..1` (never dropped), with a warning. The bundled
+  adapters pass finite out-of-range values through to this clamp.
 
 `result.warnings` merges BOTH of the above normalization notes AND any
 `warnings` the provider itself returned (e.g. the Anthropic adapter's
@@ -590,8 +592,8 @@ const result = await extract({
 The adapter builds a forced tool-use schema **dynamically** from your
 `targetSchema` and instructs the model to return a verbatim `excerpt` per field
 — that is how provenance gets populated. Tool output is parsed defensively:
-malformed items (no excerpt, out-of-range confidence, missing field, missing
-value) are dropped, never silently accepted — each drop is reported in
+malformed items (no excerpt, missing or non-numeric confidence, missing field,
+missing value) are dropped, never silently accepted — each drop is reported in
 `ProviderExtractionOutput.warnings`, which `extract()` merges into
 `result.warnings`. The adapter also warns (rather than staying silent) when
 the model's response is truncated: `stop_reason === "max_tokens"` adds
