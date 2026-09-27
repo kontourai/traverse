@@ -107,6 +107,28 @@ describe("bundled provider conformance", () => {
     assert.equal(failure.native, native);
   });
 
+  // Codes as raised by Dispatch's authorization ledger; plain objects keep the
+  // test free of a Dispatch dependency while exercising the same `code` seam.
+  for (const code of ["AUTHORIZATION_PERSISTENCE_FAILED", "AUTHORIZATION_EXHAUSTED"]) {
+    it(`does not classify authorization-ledger code ${code} as authentication`, () => {
+      const native = Object.assign(new Error("authorization ledger refused"), { code });
+      const failure = normalizeProviderFailure(adapters()[0][1], native);
+      assert.equal(failure.kind, "unknown");
+      assert.equal(failure.retryable, false);
+      assert.equal(failure.native, native);
+    });
+  }
+
+  it("still classifies authentication codes and HTTP 401/403 as authentication", () => {
+    const provider = adapters()[0][1];
+    for (const code of ["AUTHENTICATION_FAILED", "authentication_error", "unauthorized", "forbidden", "invalid_api_key"]) {
+      assert.equal(normalizeProviderFailure(provider, Object.assign(new Error("denied"), { code })).kind, "authentication", code);
+    }
+    for (const status of [401, 403]) {
+      assert.equal(normalizeProviderFailure(provider, Object.assign(new Error("denied"), { status })).kind, "authentication", String(status));
+    }
+  });
+
   it("surfaces normalized failure provenance on extraction results", async () => {
     const native = Object.assign(new Error("temporarily unavailable"), { status: 503, requestId: "req-503" });
     const provider: ExtractionProvider = {
