@@ -45,9 +45,15 @@
  *    as any other unknown fieldPath. See
  *    `docs/adr/0003-indexed-path-normalization.md` for why this is
  *    accept-and-normalize rather than reject,
- *  - `extractor` MUST be a non-empty string; a blank one drops the item,
- *  - the proposal MUST carry provenance with a non-empty `excerpt`; a missing
- *    excerpt drops the item,
+ *  - `extractor` MUST be a non-empty string and a stable identity the
+ *    portable envelope accepts; otherwise the item is dropped,
+ *  - the proposal MUST carry provenance with a non-empty, well-formed Unicode
+ *    `excerpt`; otherwise the item is dropped,
+ *  - `candidateValue` MUST be representable as lossless portable JSON (`-0`
+ *    is normalized to `0`); `undefined`, `NaN`, non-plain objects and the like
+ *    drop the item. These representability checks share the envelope's own
+ *    predicates and run before occurrence resolution, so a dropped item never
+ *    shifts a surviving neighbour's locator,
  *  - that `excerpt` MUST OCCUR VERBATIM in the prepared content handed to the
  *    provider (checked via `String.prototype.indexOf` against the exact text
  *    `provider.extract()` was called with — never the caller's raw
@@ -60,7 +66,8 @@
  *    (only `extract()` holds the prepared text needed to verify one, so it is
  *    the sole owner of the final `locator` value),
  *  - `confidence` MUST be a finite number; a non-finite (or missing)
- *    confidence drops the item. An in-range value passes through; an
+ *    confidence drops the item (also before occurrence resolution); `-0` is
+ *    normalized to `0`. An in-range value passes through; an
  *    out-of-range value is CLAMPED into `0..1` (never dropped) with a warning.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
@@ -74,7 +81,8 @@ import { validateExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
-import { createPreparedArtifact } from "./prepared-artifact.js";
+import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
+import { isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import { randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
@@ -266,6 +274,16 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
+    // The provider name becomes the portable envelope's provider identity and
+    // every failure's provider; it is caller configuration, so reject it up
+    // front rather than after spending provider calls.
+    if (!isPortableStableIdentity(provider)) {
+      return {
+        proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId,
+        error: `invalid provider name: must be a credential-free stable identity (got ${JSON.stringify(provider)})`,
+        providerCalls: 0, totalTokensUsed: 0,
+      };
+    }
     if (input.taskSpec) {
       const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
       if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
@@ -452,7 +470,15 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const output = outcome.output as ProviderExtractionOutput;
       chunksSucceeded++;
       if (output.warnings) warnings.push(...output.warnings);
-      if (output.raw) lastRaw = output.raw;
+      if (output.raw) {
+        lastRaw = output.raw;
+        // raw.model becomes the envelope's model identity. Omit one the
+        // envelope cannot carry rather than failing the whole result.
+        if (lastRaw.model !== "" && !isPortableStableIdentity(lastRaw.model)) {
+          warnings.push(`provider returned a model identity that is not a stable identity; omitted ${JSON.stringify(lastRaw.model)}`);
+          lastRaw = { ...lastRaw, model: "" };
+        }
+      }
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
@@ -650,12 +676,34 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": missing extractor identity`);
       continue;
     }
+    // Envelope-representability checks run BEFORE occurrence resolution: a
+    // proposal dropped after resolve() has already consumed an allocation and
+    // would shift a valid neighbour's locator.
+    if (!isPortableStableIdentity(extractor)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": extractor is not a stable identity`);
+      continue;
+    }
 
     const provenance = candidate.provenance;
     const excerpt =
       provenance && typeof provenance.excerpt === "string" ? provenance.excerpt.trim() : "";
     if (!excerpt) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": missing provenance excerpt`);
+      continue;
+    }
+    if (!isWellFormedUnicode(excerpt)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt is ill-formed Unicode`);
+      continue;
+    }
+    // JSON writes -0 as 0, so normalizing it loses nothing.
+    const candidateValue = Object.is(candidate.candidateValue, -0) ? 0 : candidate.candidateValue;
+    if (!isPortableJsonValue(candidateValue)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
+      continue;
+    }
+    const rawConfidence = candidate.confidence;
+    if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
       continue;
     }
 
@@ -667,7 +715,7 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
-    const sourceOrderKey = stableProposalIdentity(effectiveFieldPath, pathIndices, candidate.candidateValue, excerpt);
+    const sourceOrderKey = stableProposalIdentity(effectiveFieldPath, pathIndices, candidateValue, excerpt);
     const occurrence = occurrenceResolver.resolve({
       text: fullText,
       visibleText: chunkContent,
@@ -682,12 +730,7 @@ function normalizeChunkProposals(
     }
     const locator = `chars:${occurrence.selected.start}-${occurrence.selected.end}`;
 
-    const rawConfidence = candidate.confidence;
-    if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
-      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
-      continue;
-    }
-    let confidence = rawConfidence;
+    let confidence = Object.is(rawConfidence, -0) ? 0 : rawConfidence;
     if (confidence < 0 || confidence > 1) {
       confidence = Math.max(0, Math.min(1, confidence));
       warnings.push(`clamped out-of-range confidence for "${effectiveFieldPath}" to ${confidence}`);
@@ -695,7 +738,7 @@ function normalizeChunkProposals(
 
     const proposal: ExtractionProposal = {
       fieldPath: effectiveFieldPath,
-      candidateValue: candidate.candidateValue,
+      candidateValue,
       confidence,
       provenance: { excerpt, locator, occurrence },
       extractor,
