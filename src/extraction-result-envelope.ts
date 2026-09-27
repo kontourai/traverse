@@ -7,6 +7,7 @@
  * diagnostics remain an in-process concern.
  */
 
+import { compareCodeUnits } from "./canonical-json.js";
 import {
   EXACT_OCCURRENCE_RESOLVER_VERSION,
   type ExactOccurrenceResolution,
@@ -276,6 +277,12 @@ function classifyOutcome(result: ExtractionResult): PortableExtractionOutcome {
 function classifyWarning(warning: string): PortableExtractionWarning {
   if (/^stopped after /.test(warning)) return { category: "limit", code: "partial-stop" };
   if (/^prepared artifact storage failed/.test(warning)) return { category: "storage", code: "prepared-artifact-storage-failed" };
+  // Chunk-loss cases each keep their own code: a consumer reading only the
+  // envelope can tell a failed chunk from a truncated output or dispatch.
+  if (/^chunk \d+\/\d+ provider call failed/.test(warning)) return { category: "provider", code: "chunk-provider-failure" };
+  if (/^chunk \d+\/\d+ content truncated at maxContentChars/.test(warning)) return { category: "limit", code: "content-truncated-at-dispatch" };
+  if (/response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
+  if (/provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
   if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^clamped |normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
@@ -616,7 +623,7 @@ function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  return `{${Object.keys(object).sort(compareCodeUnits).map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
 }
 
 function record(input: unknown, path: string): Record<string, unknown> {

@@ -15,7 +15,7 @@
  * historical sequential behavior until a caller opts in.
  * `maxContentChars` is the PER-CHUNK provider budget: each chunk handed to the
  * provider is truncated to it (identical to the pre-0.5.0 whole-text truncation
- * in the common single-chunk case).
+ * in the common single-chunk case), with a warning naming the unsent range.
  *
  * Provenance across chunks. A proposal's `excerpt` is verified against the chunk
  * text the provider saw (via `indexOf`), then re-anchored to the FULL prepared
@@ -66,9 +66,12 @@
  *    (only `extract()` holds the prepared text needed to verify one, so it is
  *    the sole owner of the final `locator` value),
  *  - `confidence` MUST be a finite number; a non-finite (or missing)
- *    confidence drops the item (also before occurrence resolution); `-0` is
- *    normalized to `0`. An in-range value passes through; an
- *    out-of-range value is CLAMPED into `0..1` (never dropped) with a warning.
+ *    confidence drops the item (also before occurrence resolution, and
+ *    because the portable envelope requires one); `-0` is normalized to `0`,
+ *    at any depth for `candidateValue` too. An in-range value passes through;
+ *    an out-of-range value is CLAMPED into `0..1` (never dropped) with a
+ *    warning. The bundled adapters pass finite out-of-range values through to
+ *    this clamp rather than dropping them.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
@@ -77,7 +80,7 @@
  */
 
 import { prepareAndChunk } from "./chunk.js";
-import { validateExtractionTaskSpec } from "./task.js";
+import { checkExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
@@ -120,6 +123,9 @@ function preparationModeFor(
 const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
+
+/** Adapter warnings meaning a chunk's answer is incomplete: an output cap was hit or no tool call came back. */
+const CHUNK_LOSS_ADAPTER_WARNING = /^response truncated at maxTokens|^provider returned no extraction (?:tool|function) call/;
 
 interface ChunkDispatch {
   index: number;
@@ -284,8 +290,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         providerCalls: 0, totalTokensUsed: 0,
       };
     }
+    const taskSpecWarnings: string[] = [];
     if (input.taskSpec) {
-      const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
+      const { error: taskError, legacyDigests } = checkExtractionTaskSpec(input.taskSpec, input.targetSchema);
+      if (legacyDigests.length > 0) {
+        taskSpecWarnings.push(`taskSpec uses the legacy locale-dependent digest (${legacyDigests.join(", ")}); regenerate it with createExtractionTaskSpec`);
+      }
       if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
     }
     const unsupportedCapability = unsupportedProviderCapability(input);
@@ -431,7 +441,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const { fullText, chunks } = prepared;
     const occurrenceResolver = new ExactOccurrenceResolver();
-    const warnings: string[] = [...prepared.warnings];
+    const warnings: string[] = [...taskSpecWarnings, ...prepared.warnings];
     const preparedArtifact: PreparedArtifact = createPreparedArtifact(fullText, {
       preparationMode: preparationModeFor(prepared, input.contentType === "pdf" && !!input.pdfTextExtractor, ocrDerived),
       preparationVersion: input.preparedArtifact?.preparationVersion,
@@ -460,16 +470,32 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     for (let i = 0; i < outcomes.length; i++) {
       const outcome = outcomes[i];
       if (!outcome) continue;
+      // Every loss below names the chunk and the prepared-text range it left
+      // unread (or not fully answered). Each call carries every target field,
+      // so the range applies to all of them.
+      const chunkLabel = `chunk ${i + 1}/${chunks.length}`;
+      const sentEnd = chunks[i].start + outcome.content.length;
+      if (sentEnd < chunks[i].end) {
+        warnings.push(
+          `${chunkLabel} content truncated at maxContentChars (${maxChars}): chars:${sentEnd}-${chunks[i].end} not sent to the provider`,
+        );
+      }
       if (outcome.error !== undefined) {
         const failure = normalizeProviderFailure(input.provider, outcome.error);
         providerFailures.push(failure);
         providerErrors.push(failure.message);
-        warnings.push(`chunk ${i + 1}/${chunks.length} provider call failed: ${failure.message}`);
+        warnings.push(`${chunkLabel} provider call failed: ${failure.message} (chars:${chunks[i].start}-${sentEnd} not read)`);
         continue;
       }
       const output = outcome.output as ProviderExtractionOutput;
       chunksSucceeded++;
-      if (output.warnings) warnings.push(...output.warnings);
+      // Adapter warnings that mean the answer for this chunk is incomplete are
+      // located here, since only the core knows which chunk a call served.
+      if (output.warnings) {
+        warnings.push(...output.warnings.map((warning) => CHUNK_LOSS_ADAPTER_WARNING.test(warning)
+          ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
+          : warning));
+      }
       if (output.raw) {
         lastRaw = output.raw;
         // raw.model becomes the envelope's model identity. Omit one the

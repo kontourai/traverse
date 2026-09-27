@@ -513,11 +513,11 @@ describe("extract()", () => {
     });
     assert.equal(result.proposals.length, 0);
     // Provider-side warning survives end-to-end...
-    assert.ok(result.warnings?.includes("response truncated at maxTokens; proposals may be incomplete"));
+    assert.ok(result.warnings?.includes(`chunk 1/1 (chars:0-${content.length}): response truncated at maxTokens; proposals may be incomplete`));
     // ...alongside extract()'s own normalization warning for the same call.
     assert.ok(result.warnings?.some((w) => /unknown fieldPath "notInSchema"/.test(w)));
     // Provider warnings are surfaced ahead of normalization warnings.
-    assert.equal(result.warnings?.[0], "response truncated at maxTokens; proposals may be incomplete");
+    assert.equal(result.warnings?.[0], `chunk 1/1 (chars:0-${content.length}): response truncated at maxTokens; proposals may be incomplete`);
   });
 
   describe("inferenceType carry-through", () => {

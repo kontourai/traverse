@@ -73,13 +73,22 @@ export function enumerateExactOccurrences(text: string, excerpt: string): ExactO
  */
 export class ExactOccurrenceResolver {
   private readonly allocations = new Map<string, AllocationState>();
+  /**
+   * Full-text enumerations memoized per excerpt. Keyed on excerpt only while
+   * the complete text is unchanged; a different text clears the cache, so a
+   * resolver reused across texts can never return another text's spans.
+   */
+  private cachedText: string | undefined;
+  private readonly fullTextOccurrences = new Map<string, FullTextOccurrences>();
+
+  /** `enumerate` is injectable only so tests can count full-text enumerations. */
+  constructor(private readonly enumerate: typeof enumerateExactOccurrences = enumerateExactOccurrences) {}
 
   resolve(input: ResolveExactOccurrenceInput): ExactOccurrenceResolution | undefined {
     if (!(Number.isInteger(input.visibleStart) && input.visibleStart >= 0)) return undefined;
     if (input.text.slice(input.visibleStart, input.visibleStart + input.visibleText.length) !== input.visibleText) return undefined;
-    const occurrences = enumerateExactOccurrences(input.text, input.excerpt);
-    const occurrenceBySpan = new Map(occurrences.map((occurrence) => [`${occurrence.start}:${occurrence.end}`, occurrence]));
-    const visibleOccurrences = enumerateExactOccurrences(input.visibleText, input.excerpt)
+    const { occurrences, occurrenceBySpan } = this.fullTextEnumeration(input.text, input.excerpt);
+    const visibleOccurrences = this.enumerate(input.visibleText, input.excerpt)
       .map((occurrence) => {
         const start = input.visibleStart + occurrence.start;
         return occurrenceBySpan.get(`${start}:${start + input.excerpt.length}`);
@@ -98,12 +107,36 @@ export class ExactOccurrenceResolver {
     return {
       resolverVersion: EXACT_OCCURRENCE_RESOLVER_VERSION,
       count: occurrences.length,
-      selected,
+      // Copy: cached occurrences are shared across resolutions and must not
+      // alias into caller-owned proposal provenance.
+      selected: { ...selected },
       selection: hintedVisibleIndex === undefined ? "source-order" : "occurrence-hint",
       hintUsed: hintedVisibleIndex !== undefined,
       ambiguous: occurrences.length > 1,
     };
   }
+
+  private fullTextEnumeration(text: string, excerpt: string): FullTextOccurrences {
+    if (this.cachedText !== text) {
+      this.cachedText = text;
+      this.fullTextOccurrences.clear();
+    }
+    let cached = this.fullTextOccurrences.get(excerpt);
+    if (!cached) {
+      const occurrences = this.enumerate(text, excerpt);
+      cached = {
+        occurrences,
+        occurrenceBySpan: new Map(occurrences.map((occurrence) => [`${occurrence.start}:${occurrence.end}`, occurrence])),
+      };
+      this.fullTextOccurrences.set(excerpt, cached);
+    }
+    return cached;
+  }
+}
+
+interface FullTextOccurrences {
+  occurrences: ExactOccurrence[];
+  occurrenceBySpan: Map<string, ExactOccurrence>;
 }
 
 function validHintIndex(hint: unknown, count: number): number | undefined {
