@@ -47,6 +47,7 @@ export {
   PREPARED_ARTIFACT_VERSION,
   PREPARED_ARTIFACT_PREPARATION_VERSION,
   createPreparedArtifact,
+  preparationVersionFor,
   parsePreparedArtifactRef,
   validatePreparedArtifact,
   resolvePreparedArtifact,

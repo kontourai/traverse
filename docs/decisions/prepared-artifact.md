@@ -5,6 +5,8 @@ decided: 2026-07-20
 evidence:
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/63
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/168
   - kind: doc
     ref: docs/adr/0001-proposals-only.md
   - kind: doc
@@ -55,6 +57,15 @@ store for capture/replay.
 artifact receives the page's existing `sourceRef`, plus the optional injected
 prepared-artifact store and preparation version. No crawl or snapshot semantics
 are duplicated inside the artifact module.
+
+The default `preparationVersion` changes whenever prepared text can change for
+the same input. It is the base version of Traverse's own preparation code
+(`PREPARED_ARTIFACT_PREPARATION_VERSION`), which a golden test forces to be
+bumped when any pinned input's prepared-text digest changes. For HTML Markdown
+preparation it also names the installed versions of the libraries that shape
+that output, read once at runtime: `<base>+linkedom@<version>+turndown@<version>`.
+The version lives in the existing string, so the artifact keeps its fields and
+its reference binding. A caller-supplied `preparationVersion` is used as given.
 
 The recorded preparation mode is the mode actually used, not merely requested.
 Transcript cleaning records `transcript`; a successful HTML Markdown path

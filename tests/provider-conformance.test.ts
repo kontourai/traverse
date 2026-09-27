@@ -6,6 +6,7 @@ import {
   extract,
   EXTRACTION_CONFORMANCE_CAPABILITIES,
   normalizeProviderFailure,
+  serializePortableExtractionResult,
 } from "../src/index.js";
 import type { ExtractionProvider, TargetFieldSchema } from "../src/index.js";
 import { createAnthropicExtractionProvider } from "../src/anthropic.js";
@@ -118,6 +119,35 @@ describe("bundled provider conformance", () => {
       assert.equal(failure.native, native);
     });
   }
+
+  it("keeps the upstream error code exactly as raised on the in-process failure", async () => {
+    const native = Object.assign(new Error("authorization ledger refused"), { code: "AUTHORIZATION_PERSISTENCE_FAILED" });
+    const failure = normalizeProviderFailure(adapters()[0][1], native);
+    assert.deepEqual(
+      { kind: failure.kind, retryable: failure.retryable, code: failure.code },
+      { kind: "unknown", retryable: false, code: "AUTHORIZATION_PERSISTENCE_FAILED" },
+    );
+    const provider: ExtractionProvider = {
+      name: "ledger-backed",
+      capabilities: EXTRACTION_CONFORMANCE_CAPABILITIES,
+      async extract() { throw native; },
+    };
+    const result = await extract({ content: "Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+    assert.equal(result.providerFailures?.[0].code, "AUTHORIZATION_PERSISTENCE_FAILED");
+    // Until envelope importers accept the key, the portable failure omits it.
+    const portable = JSON.parse(serializePortableExtractionResult(result));
+    assert.deepEqual(portable.result.providerFailures, [{ provider: "ledger-backed", kind: "unknown", retryable: false }]);
+  });
+
+  it("omits a code that is not a credential-free stable identity", () => {
+    const provider = adapters()[0][1];
+    for (const code of ["", "has space", "sk-ant-private-value", "x".repeat(300), "https://host/?token=private"]) {
+      const failure = normalizeProviderFailure(provider, Object.assign(new Error("failed"), { code }));
+      assert.equal("code" in failure, false, code);
+    }
+    assert.equal("code" in normalizeProviderFailure(provider, Object.assign(new Error("failed"), { code: 42 })), false);
+    assert.equal("code" in normalizeProviderFailure(provider, new Error("no code")), false);
+  });
 
   it("still classifies authentication codes and HTTP 401/403 as authentication", () => {
     const provider = adapters()[0][1];

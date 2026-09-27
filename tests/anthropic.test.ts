@@ -191,13 +191,13 @@ describe("resolveSdkClientOptions (unit)", () => {
   it("passes opts.baseUrl through to the SDK constructor options as baseURL", () => {
     assert.deepEqual(
       resolveSdkClientOptions({ apiKey: "k", baseUrl: "https://api.z.ai/api/anthropic" }),
-      { apiKey: "k", baseURL: "https://api.z.ai/api/anthropic" },
+      { apiKey: "k", baseURL: "https://api.z.ai/api/anthropic", maxRetries: 0 },
     );
   });
 
   it("omits baseURL entirely when opts.baseUrl is unset, preserving the SDK's own ANTHROPIC_BASE_URL env fallback", () => {
     const result = resolveSdkClientOptions({ apiKey: "k" });
-    assert.deepEqual(result, { apiKey: "k" });
+    assert.deepEqual(result, { apiKey: "k", maxRetries: 0 });
     assert.ok(!("baseURL" in result));
   });
 

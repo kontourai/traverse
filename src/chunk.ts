@@ -15,8 +15,11 @@
  *  - STRUCTURAL (html + markdown): parse the DOM (linkedom), prune chrome, detect
  *    the repeated-sibling "card" container (e.g. a run of `div.result` /
  *    `article.listing`), and cut chunk boundaries ON card boundaries so a card is
- *    never split across chunks. `fullText` is the Markdown of the kept chunks
- *    joined by a fixed separator, so each chunk's offset is exact by construction.
+ *    never split across chunks. Pruned page content outside the container (an
+ *    intro, a detail page's own paragraphs) is kept as leading/trailing segments,
+ *    so structural mode moves chunk boundaries but never removes content.
+ *    `fullText` is the Markdown of the kept segments joined by a fixed separator,
+ *    so each chunk's offset is exact by construction.
  *  - CHARACTER-WINDOW FALLBACK (no structure, or text/`prep:'text'`): slide a
  *    `chunkSize` window over `fullText` with `chunkOverlap`, so a value that would
  *    straddle a window boundary still appears whole in an adjacent window.
@@ -111,9 +114,11 @@ interface El {
   textContent: string | null;
   remove(): void;
   contains(other: El): boolean;
+  replaceWith(node: El): void;
 }
 interface Doc {
   body: El | null;
+  createElement(tagName: string): El;
   querySelector(selector: string): El | null;
   querySelectorAll(selector: string): Iterable<El>;
 }
@@ -226,32 +231,84 @@ function findRepeatedCards(doc: Doc): CardGroup | undefined {
 // Structural chunk assembly
 // ---------------------------------------------------------------------------
 
-/** Join per-chunk Markdown into a single fullText, recording exact offsets. */
-function assembleChunks(
-  texts: string[],
+/**
+ * One piece of structural `fullText`. A batch is sent as a single chunk; a
+ * `windowed` segment (page text outside the card container that is longer than
+ * one chunk) is split by the character window, like the whole-page path.
+ */
+interface Segment {
+  text: string;
+  windowed: boolean;
+}
+
+/** Join segments into a single fullText, recording exact chunk offsets. */
+function assembleSegments(
+  segments: Segment[],
+  chunkSize: number,
+  overlap: number,
   maxChunks: number,
 ): { chunks: Chunk[]; fullText: string; truncatedChunks: number } {
-  const nonEmpty = texts.filter((t) => t.length > 0);
-  const kept = nonEmpty.slice(0, maxChunks);
-  const truncatedChunks = nonEmpty.length > maxChunks ? nonEmpty.length - maxChunks : 0;
-
   const chunks: Chunk[] = [];
   const pieces: string[] = [];
+  let total = 0;
   let cursor = 0;
-  for (const text of kept) {
-    chunks.push({ text, start: cursor, end: cursor + text.length });
-    pieces.push(text);
-    cursor += text.length + CHUNK_SEPARATOR.length;
+  for (const segment of segments) {
+    if (segment.text.length === 0) continue;
+    const local = segment.windowed
+      ? windowChunks(segment.text, chunkSize, overlap, Number.MAX_SAFE_INTEGER).chunks
+      : [{ text: segment.text, start: 0, end: segment.text.length }];
+    total += local.length;
+    // A segment none of whose chunks survive the cap is left out of fullText,
+    // as structural mode has always done for chunks beyond maxChunks.
+    if (chunks.length >= maxChunks) continue;
+    for (const chunk of local.slice(0, maxChunks - chunks.length)) {
+      chunks.push({ text: chunk.text, start: cursor + chunk.start, end: cursor + chunk.end });
+    }
+    pieces.push(segment.text);
+    cursor += segment.text.length + CHUNK_SEPARATOR.length;
   }
-  return { chunks, fullText: pieces.join(CHUNK_SEPARATOR), truncatedChunks };
+  return { chunks, fullText: pieces.join(CHUNK_SEPARATOR), truncatedChunks: total - chunks.length };
+}
+
+/** Alphanumeric so Turndown never escapes it; lengthened until the page lacks it. */
+function containerMarker(html: string): string {
+  let marker = "traversecardcontainerboundary";
+  while (html.includes(marker)) marker += "x";
+  return marker;
+}
+
+/**
+ * The pruned page Markdown before and after the card container, converted the
+ * way the whole-page path converts it. Returns undefined when the split cannot
+ * be made exactly (the caller then prepares the whole page instead).
+ */
+function outsideContainer(
+  group: CardGroup,
+  doc: Doc,
+  html: string,
+  td: ReturnType<typeof createTurndownService>,
+): { leading: string; trailing: string } | undefined {
+  if (!doc.body || group.container === doc.body) return { leading: "", trailing: "" };
+  const marker = containerMarker(html);
+  const placeholder = doc.createElement("p");
+  placeholder.textContent = marker;
+  group.container.replaceWith(placeholder);
+  const md = collapseMarkdown(td.turndown(doc.body.innerHTML), SAFETY_CAP);
+  // Restore the document: the whole-page fallback may still read it.
+  placeholder.replaceWith(group.container);
+  const at = md.indexOf(marker);
+  if (at < 0 || md.indexOf(marker, at + 1) >= 0) return undefined;
+  return { leading: md.slice(0, at).trim(), trailing: md.slice(at + marker.length).trim() };
 }
 
 function buildStructuralChunks(
   group: CardGroup,
   doc: Doc,
+  html: string,
   chunkSize: number,
+  overlap: number,
   maxChunks: number,
-): { fullText: string; chunks: Chunk[]; truncatedChunks: number; cardCount: number } {
+): { fullText: string; chunks: Chunk[]; truncatedChunks: number; cardCount: number } | undefined {
   const td = createTurndownService();
   const children = [...group.container.children];
 
@@ -261,42 +318,48 @@ function buildStructuralChunks(
   // is what makes `fullText` = the chunks joined by the separator, exactly.
   const childTexts = children.map((child) => ({
     md: collapseMarkdown(td.turndown(child.outerHTML), SAFETY_CAP),
-    isCard: signatureOf(child) === group.signature,
+    breakBefore: signatureOf(child) === group.signature,
   }));
 
-  // Batch children in document order, breaking a new batch only at a card
-  // boundary so a card is never split. Non-card children (an intro heading, a
-  // filter bar) stay attached to the current batch.
-  const chunkTexts: string[] = [];
+  // Everything the pruned page holds outside the container: the page title, an
+  // intro, or a detail page's own text around a short repeated list.
+  const outside = outsideContainer(group, doc, html, td);
+  if (!outside) return undefined;
+
+  // Batch in document order, breaking a new batch only before a card or before
+  // the text outside the container, so a card is never split. Non-card children
+  // (an intro heading, a filter bar) stay attached to the current batch.
+  // Outside text longer than one chunk is windowed on its own instead.
+  const units = [
+    { md: outside.leading, breakBefore: true },
+    ...childTexts,
+    { md: outside.trailing, breakBefore: true },
+  ];
+  const segments: Segment[] = [];
   let parts: string[] = [];
   let curLen = 0;
   const flush = () => {
     if (parts.length > 0) {
-      chunkTexts.push(parts.join(CHUNK_SEPARATOR));
+      segments.push({ text: parts.join(CHUNK_SEPARATOR), windowed: false });
       parts = [];
       curLen = 0;
     }
   };
-  for (const { md, isCard } of childTexts) {
+  for (const [index, { md, breakBefore }] of units.entries()) {
     if (md.length === 0) continue;
-    if (parts.length > 0 && isCard && curLen + md.length > chunkSize) flush();
+    const isOutside = index === 0 || index === units.length - 1;
+    if (isOutside && md.length > chunkSize) {
+      flush();
+      segments.push({ text: md, windowed: true });
+      continue;
+    }
+    if (parts.length > 0 && breakBefore && curLen + md.length > chunkSize) flush();
     parts.push(md);
     curLen += md.length + CHUNK_SEPARATOR.length;
   }
   flush();
 
-  // Prepend the document's leading <h1> (page title) to the first chunk when it
-  // lives OUTSIDE the detected card container, so at least the page-level heading
-  // is carried into extraction. Content that is neither a card-container child nor
-  // this heading (already-pruned chrome, deep page chrome) is intentionally out
-  // of scope for structural chunking — see docs/adr/0004.
-  const heading = doc.querySelector("h1");
-  if (heading && chunkTexts.length > 0 && !group.container.contains(heading)) {
-    const preamble = collapseMarkdown(td.turndown(heading.outerHTML), chunkSize);
-    if (preamble.length > 0) chunkTexts[0] = preamble + CHUNK_SEPARATOR + chunkTexts[0];
-  }
-
-  const { chunks, fullText, truncatedChunks } = assembleChunks(chunkTexts, maxChunks);
+  const { chunks, fullText, truncatedChunks } = assembleSegments(segments, chunkSize, overlap, maxChunks);
   return { fullText, chunks, truncatedChunks, cardCount: group.cards.length };
 }
 
@@ -363,10 +426,10 @@ export function prepareAndChunk(
 
     const group = findRepeatedCards(doc);
     if (group && group.cards.length >= MIN_CARDS) {
-      const built = buildStructuralChunks(group, doc, chunkSize, maxChunks);
+      const built = buildStructuralChunks(group, doc, content, chunkSize, overlap, maxChunks);
       // Only report `structural` when it actually produced chunks; if the cards
       // converted to nothing, fall through to the whole-page path below.
-      if (built.chunks.length > 0) {
+      if (built && built.chunks.length > 0) {
         const result: PreparedChunks = {
           fullText: built.fullText,
           chunks: built.chunks,

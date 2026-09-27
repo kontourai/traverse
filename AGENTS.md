@@ -32,7 +32,8 @@ Every proposal is a reviewable record with an excerpt and locator.
   (`packageManager`). Dependency install scripts are blocked by default, and a
   package that needs one is named under `allowBuilds` in `pnpm-workspace.yaml`,
   pinned by version. `autoInstallPeers` is off there: this package declares five
-  optional peers and the suite is tested against only the three npm installed.
+  optional peers and the suite is tested against only those declared as
+  devDependencies.
   Scripts are still run with `npm run …`, which only invokes `package.json`
   scripts and does not depend on which tool installed `node_modules`.
 - Releases use release-please with conventional commits; the version lives in

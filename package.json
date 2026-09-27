@@ -97,6 +97,7 @@
     "@kontourai/survey": "^3.0.0",
     "@types/node": "^26.1.2",
     "@types/turndown": "^5.0.6",
+    "openai": "^6.49.0",
     "typescript": "^7.0.2"
   },
   "engines": {

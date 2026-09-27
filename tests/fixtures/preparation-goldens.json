@@ -1,0 +1,25 @@
+{
+  "baseVersion": "2",
+  "cases": {
+    "html-listing": {
+      "preparationMode": "markdown",
+      "preparationVersion": "2+linkedom@0.18.13+turndown@7.2.4",
+      "digest": "1e142fd5d568584cb1f2a624d5897d1eb6443d32fd079f286f3b1836153b5fa4"
+    },
+    "html-detail": {
+      "preparationMode": "markdown",
+      "preparationVersion": "2+linkedom@0.18.13+turndown@7.2.4",
+      "digest": "5901997f3bfbe57714402227cdf9981cef9cf2162cd11f32875b2e12fb0603a0"
+    },
+    "transcript": {
+      "preparationMode": "transcript",
+      "preparationVersion": "2",
+      "digest": "e3a4f070b60fdf7790a7eb53a39e1b2eed6cc446b3bcae1fbddf0a59afda727c"
+    },
+    "text": {
+      "preparationMode": "text",
+      "preparationVersion": "2",
+      "digest": "99387bfdeff246ba05eb188a6f6ae8e01396fae7df5b9c80d5543b40a396fae8"
+    }
+  }
+}

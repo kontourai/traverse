@@ -15,6 +15,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/25
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/33
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/167
 ---
 
 # Content preparation
@@ -103,6 +105,20 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
   code — `prepareContent` was deliberately not given a `pdfTextExtractor`
   parameter, to avoid a sync-to-async breaking change to a widely-called
   function. This is a documented asymmetry, not a bug.
+
+## Structural HTML keeps content outside the card container
+
+Structural chunking (ADR 0004 §D2) changes where chunk boundaries fall; it does
+not remove content. The pruned page text outside the detected card container is
+converted with the same Turndown configuration as the whole-page path and kept
+as a leading and a trailing segment around the card batches. A segment that
+fits in one chunk is batched like a card (a boundary may fall before it); a
+longer one is split by the character window. This replaces the earlier rule
+that carried only the page's first `<h1>` into the first chunk: a detail page
+with a short repeated list would otherwise lose its own text, and a value
+there would read downstream as absent from the source. A cards-only page keeps
+its chunk boundaries. Pages with text outside the container get different
+prepared text, a different digest, and a new preparation version.
 
 ## Out of scope
 

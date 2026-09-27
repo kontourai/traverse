@@ -3,8 +3,10 @@
 # optional peers, and npm installed only three of them. With pnpm's default,
 # importing the lockfile pulled in 34 extra packages -- @google/genai and openai
 # plus their Google auth and protobuf chains -- none of which npm ever installed
-# and none of which the suite has been tested against. Off, the lockfile is
-# exactly npm's 147 packages.
+# and none of which the suite has been tested against. Off, the lockfile held
+# exactly npm's 147 packages at the migration. The peers the suite does test against are
+# declared as devDependencies instead (openai was added that way for the
+# adapter retry tests).
 autoInstallPeers: false
 
 # Dependency install scripts are blocked by default (pnpm >= 10). Only the

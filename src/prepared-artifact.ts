@@ -5,12 +5,56 @@
  */
 
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 
 export const PREPARED_ARTIFACT_FORMAT = "traverse-prepared-artifact";
 export const PREPARED_ARTIFACT_VERSION = 1;
-export const PREPARED_ARTIFACT_PREPARATION_VERSION = "1";
+/**
+ * Base version of Traverse's own preparation code. Bump it with any change
+ * that can alter prepared text for the same input; the pinned digests in
+ * tests/preparation-version.test.ts fail until it is bumped.
+ */
+export const PREPARED_ARTIFACT_PREPARATION_VERSION = "2";
 
 export type PreparedArtifactPreparationMode = "text" | "markdown" | "transcript" | "pdf-text" | "image-ocr";
+
+/** Libraries whose installed versions shape HTML Markdown output. */
+const MARKDOWN_PREPARATION_LIBRARIES = ["linkedom", "turndown"] as const;
+
+const requireFromHere = createRequire(import.meta.url);
+const installedVersions = new Map<string, string>();
+
+/** The version of `name` this module resolves at runtime, read once. */
+function installedPackageVersion(name: string): string {
+  let version = installedVersions.get(name);
+  if (version === undefined) {
+    try {
+      const pkg = requireFromHere(`${name}/package.json`) as { version?: unknown };
+      version = typeof pkg.version === "string" && pkg.version.length > 0 ? pkg.version : "unknown";
+    } catch {
+      version = "unknown";
+    }
+    installedVersions.set(name, version);
+  }
+  return version;
+}
+
+/**
+ * Default `preparationVersion` for a mode: the base version, plus the
+ * installed `linkedom` and `turndown` versions for HTML Markdown preparation
+ * (e.g. `2+linkedom@0.18.13+turndown@7.2.4`), because a dependency update can
+ * change that output with no change here. Other modes do not use them.
+ */
+export function preparationVersionFor(
+  mode: PreparedArtifactPreparationMode,
+  readVersion: (name: string) => string = installedPackageVersion,
+): string {
+  if (mode !== "markdown") return PREPARED_ARTIFACT_PREPARATION_VERSION;
+  return [
+    PREPARED_ARTIFACT_PREPARATION_VERSION,
+    ...MARKDOWN_PREPARATION_LIBRARIES.map((name) => `${name}@${readVersion(name)}`),
+  ].join("+");
+}
 
 /** A versioned reference whose identity binds preparation metadata and text. */
 export type PreparedArtifactRef = `${typeof PREPARED_ARTIFACT_FORMAT}:v${typeof PREPARED_ARTIFACT_VERSION}:sha256:${string}`;
@@ -111,7 +155,7 @@ function canonicalBinding(artifact: Omit<PreparedArtifact, "ref">): string {
 
 /** Build the deterministic identity for exact prepared text and its preparation. */
 export function createPreparedArtifact(text: string, options: PreparedArtifactOptions): PreparedArtifact {
-  const preparationVersion = options.preparationVersion ?? PREPARED_ARTIFACT_PREPARATION_VERSION;
+  const preparationVersion = options.preparationVersion ?? preparationVersionFor(options.preparationMode);
   if (!isWellFormedUnicode(text)) throw new Error("prepared artifact text must be well-formed Unicode");
   if (!PREPARATION_MODES.has(options.preparationMode)) throw new Error("prepared artifact preparationMode is invalid");
   if (preparationVersion.trim().length === 0 || !isWellFormedUnicode(preparationVersion)) {
