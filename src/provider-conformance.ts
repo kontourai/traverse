@@ -22,6 +22,16 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" ? value as Record<string, unknown> : undefined;
 }
 
+// Exact codes only: a substring match on "auth" also caught authorization-ledger
+// codes (e.g. AUTHORIZATION_EXHAUSTED), which are budget/ledger state, not credentials.
+const AUTHENTICATION_CODES = new Set([
+  "authentication_failed",
+  "authentication_error",
+  "unauthorized",
+  "forbidden",
+  "invalid_api_key",
+]);
+
 /** Classify control-flow semantics without replacing the provider's diagnostic. */
 export function normalizeProviderFailure(provider: ExtractionProvider, error: unknown): ExtractionProviderFailure {
   const native = record(error);
@@ -32,7 +42,7 @@ export function normalizeProviderFailure(provider: ExtractionProvider, error: un
   const lower = message.toLowerCase();
   const timeout = code.includes("timeout") || lower.includes("timeout");
   let kind: ExtractionProviderFailure["kind"] = "unknown";
-  if (status === 401 || status === 403 || code.includes("auth")) kind = "authentication";
+  if (status === 401 || status === 403 || AUTHENTICATION_CODES.has(code)) kind = "authentication";
   else if (status === 429 || code.includes("rate")) kind = "rate-limit";
   else if (timeout || status === 408) kind = "timeout";
   else if (code.includes("invalid_request")) kind = "invalid-request";
