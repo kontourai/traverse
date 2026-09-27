@@ -40,7 +40,6 @@ const meta = { fieldPath: "meta", candidateValue: { a: 0 }, confidence: 0.9, ext
 // a drop after resolution would visibly shift the neighbour.
 const triggers: Array<{ name: string; bad: unknown; neighbour: typeof fee | typeof meta; warning: string }> = [
   { name: "unstable extractor", bad: { ...fee, extractor: "my extractor (v1)" }, neighbour: fee, warning: 'dropped proposal for "fee": extractor is not a stable identity' },
-  { name: "nested -0 value", bad: { ...meta, candidateValue: { a: -0 } }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },
   { name: "non-numeric confidence", bad: { ...fee, confidence: Number.NaN }, neighbour: fee, warning: 'dropped proposal for "fee": non-numeric confidence' },
   { name: "NaN value", bad: { ...fee, candidateValue: Number.NaN }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
   { name: "undefined value", bad: { ...fee, candidateValue: undefined }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
@@ -75,6 +74,16 @@ describe("envelope-safe proposal normalization", () => {
     const proposal = JSON.parse(serialized).result.proposals[0];
     assert.equal(proposal.candidateValue, 0);
     assert.equal(proposal.confidence, 0);
+  });
+
+  it("normalizes a nested -0 candidateValue to 0 instead of dropping the proposal", async () => {
+    const result = await run([{ ...meta, candidateValue: { a: -0, b: [1, -0, { c: -0 }] } }]);
+    assert.equal(result.proposals.length, 1, "the proposal is kept, not dropped");
+    assert.deepEqual(result.proposals[0].candidateValue, { a: 0, b: [1, 0, { c: 0 }] });
+    assert.ok(Object.is((result.proposals[0].candidateValue as { a: number }).a, 0), "rewritten, not just equal to -0");
+    const serialized = serializePortableExtractionResult(result);
+    const proposal = JSON.parse(serialized).result.proposals[0];
+    assert.deepEqual(proposal.candidateValue, { a: 0, b: [1, 0, { c: 0 }] });
   });
 
   it("omits an unstable raw.model with a warning and keeps the proposals serializable", async () => {

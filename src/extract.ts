@@ -695,8 +695,11 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt is ill-formed Unicode`);
       continue;
     }
-    // JSON writes -0 as 0, so normalizing it loses nothing.
-    const candidateValue = Object.is(candidate.candidateValue, -0) ? 0 : candidate.candidateValue;
+    // JSON writes -0 as 0, so normalizing it loses nothing, at any depth: a -0
+    // nested inside an object or array used to fail assertJsonSafe just like a
+    // top-level one, and dropped the whole proposal over a value the envelope
+    // could carry once rewritten.
+    const candidateValue = normalizeNestedNegativeZero(candidate.candidateValue);
     if (!isPortableJsonValue(candidateValue)) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
       continue;
@@ -762,6 +765,37 @@ function stableProposalIdentity(
   excerpt: string,
 ): string {
   return JSON.stringify([fieldPath, pathIndices ?? null, stableValue(candidateValue), excerpt]);
+}
+
+/**
+ * Rewrite every `-0` in a candidate value to `0`, at any depth. JSON already
+ * writes both the same way, so this loses nothing, but `assertJsonSafe`
+ * rejects a nested `-0` exactly like a top-level one — without this walk, a
+ * value with `-0` three levels down would fail the portable-JSON check below
+ * and drop the whole proposal instead of normalizing losslessly. Anything
+ * that is not a plain object or array (a `Date`, a class instance, `NaN`,
+ * `undefined`, …) passes through unchanged; `isPortableJsonValue` still gets
+ * the final say on whether the result is representable.
+ */
+function normalizeNestedNegativeZero(value: unknown, ancestors = new Set<object>()): unknown {
+  if (Object.is(value, -0)) return 0;
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) return value;
+    ancestors.add(value);
+    const normalized = value.map((entry) => normalizeNestedNegativeZero(entry, ancestors));
+    ancestors.delete(value);
+    return normalized;
+  }
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    if (ancestors.has(value)) return value;
+    ancestors.add(value);
+    const record = value as Record<string, unknown>;
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(record)) normalized[key] = normalizeNestedNegativeZero(record[key], ancestors);
+    ancestors.delete(value);
+    return normalized;
+  }
+  return value;
 }
 
 /**
