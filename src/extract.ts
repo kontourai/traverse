@@ -45,9 +45,15 @@
  *    as any other unknown fieldPath. See
  *    `docs/adr/0003-indexed-path-normalization.md` for why this is
  *    accept-and-normalize rather than reject,
- *  - `extractor` MUST be a non-empty string; a blank one drops the item,
- *  - the proposal MUST carry provenance with a non-empty `excerpt`; a missing
- *    excerpt drops the item,
+ *  - `extractor` MUST be a non-empty string and a stable identity the
+ *    portable envelope accepts; otherwise the item is dropped,
+ *  - the proposal MUST carry provenance with a non-empty, well-formed Unicode
+ *    `excerpt`; otherwise the item is dropped,
+ *  - `candidateValue` MUST be representable as lossless portable JSON (`-0`
+ *    is normalized to `0`); `undefined`, `NaN`, non-plain objects and the like
+ *    drop the item. These representability checks share the envelope's own
+ *    predicates and run before occurrence resolution, so a dropped item never
+ *    shifts a surviving neighbour's locator,
  *  - that `excerpt` MUST OCCUR VERBATIM in the prepared content handed to the
  *    provider (checked via `String.prototype.indexOf` against the exact text
  *    `provider.extract()` was called with — never the caller's raw
@@ -60,10 +66,12 @@
  *    (only `extract()` holds the prepared text needed to verify one, so it is
  *    the sole owner of the final `locator` value),
  *  - `confidence` MUST be a finite number; a non-finite (or missing)
- *    confidence drops the item (the portable envelope requires one). An
- *    in-range value passes through; an out-of-range value is CLAMPED into
- *    `0..1` (never dropped) with a warning. The bundled adapters pass finite
- *    out-of-range values through to this clamp rather than dropping them.
+ *    confidence drops the item (also before occurrence resolution, and
+ *    because the portable envelope requires one); `-0` is normalized to `0`,
+ *    at any depth for `candidateValue` too. An in-range value passes through;
+ *    an out-of-range value is CLAMPED into `0..1` (never dropped) with a
+ *    warning. The bundled adapters pass finite out-of-range values through to
+ *    this clamp rather than dropping them.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
@@ -76,7 +84,8 @@ import { checkExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
-import { createPreparedArtifact } from "./prepared-artifact.js";
+import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
+import { isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import { randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
@@ -271,6 +280,16 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
+    // The provider name becomes the portable envelope's provider identity and
+    // every failure's provider; it is caller configuration, so reject it up
+    // front rather than after spending provider calls.
+    if (!isPortableStableIdentity(provider)) {
+      return {
+        proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId,
+        error: `invalid provider name: must be a credential-free stable identity (got ${JSON.stringify(provider)})`,
+        providerCalls: 0, totalTokensUsed: 0,
+      };
+    }
     const taskSpecWarnings: string[] = [];
     if (input.taskSpec) {
       const { error: taskError, legacyDigests } = checkExtractionTaskSpec(input.taskSpec, input.targetSchema);
@@ -477,7 +496,15 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
           : warning));
       }
-      if (output.raw) lastRaw = output.raw;
+      if (output.raw) {
+        lastRaw = output.raw;
+        // raw.model becomes the envelope's model identity. Omit one the
+        // envelope cannot carry rather than failing the whole result.
+        if (lastRaw.model !== "" && !isPortableStableIdentity(lastRaw.model)) {
+          warnings.push(`provider returned a model identity that is not a stable identity; omitted ${JSON.stringify(lastRaw.model)}`);
+          lastRaw = { ...lastRaw, model: "" };
+        }
+      }
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
@@ -675,12 +702,37 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": missing extractor identity`);
       continue;
     }
+    // Envelope-representability checks run BEFORE occurrence resolution: a
+    // proposal dropped after resolve() has already consumed an allocation and
+    // would shift a valid neighbour's locator.
+    if (!isPortableStableIdentity(extractor)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": extractor is not a stable identity`);
+      continue;
+    }
 
     const provenance = candidate.provenance;
     const excerpt =
       provenance && typeof provenance.excerpt === "string" ? provenance.excerpt.trim() : "";
     if (!excerpt) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": missing provenance excerpt`);
+      continue;
+    }
+    if (!isWellFormedUnicode(excerpt)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt is ill-formed Unicode`);
+      continue;
+    }
+    // JSON writes -0 as 0, so normalizing it loses nothing, at any depth: a -0
+    // nested inside an object or array used to fail assertJsonSafe just like a
+    // top-level one, and dropped the whole proposal over a value the envelope
+    // could carry once rewritten.
+    const candidateValue = normalizeNestedNegativeZero(candidate.candidateValue);
+    if (!isPortableJsonValue(candidateValue)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
+      continue;
+    }
+    const rawConfidence = candidate.confidence;
+    if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
+      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
       continue;
     }
 
@@ -692,7 +744,7 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": excerpt not found in prepared content`);
       continue;
     }
-    const sourceOrderKey = stableProposalIdentity(effectiveFieldPath, pathIndices, candidate.candidateValue, excerpt);
+    const sourceOrderKey = stableProposalIdentity(effectiveFieldPath, pathIndices, candidateValue, excerpt);
     const occurrence = occurrenceResolver.resolve({
       text: fullText,
       visibleText: chunkContent,
@@ -707,12 +759,7 @@ function normalizeChunkProposals(
     }
     const locator = `chars:${occurrence.selected.start}-${occurrence.selected.end}`;
 
-    const rawConfidence = candidate.confidence;
-    if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
-      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
-      continue;
-    }
-    let confidence = rawConfidence;
+    let confidence = Object.is(rawConfidence, -0) ? 0 : rawConfidence;
     if (confidence < 0 || confidence > 1) {
       confidence = Math.max(0, Math.min(1, confidence));
       warnings.push(`clamped out-of-range confidence for "${effectiveFieldPath}" to ${confidence}`);
@@ -720,7 +767,7 @@ function normalizeChunkProposals(
 
     const proposal: ExtractionProposal = {
       fieldPath: effectiveFieldPath,
-      candidateValue: candidate.candidateValue,
+      candidateValue,
       confidence,
       provenance: { excerpt, locator, occurrence },
       extractor,
@@ -744,6 +791,51 @@ function stableProposalIdentity(
   excerpt: string,
 ): string {
   return JSON.stringify([fieldPath, pathIndices ?? null, stableValue(candidateValue), excerpt]);
+}
+
+/**
+ * Rewrite every `-0` in a candidate value to `0`, at any depth. JSON already
+ * writes both the same way, so this loses nothing, but `assertJsonSafe`
+ * rejects a nested `-0` exactly like a top-level one — without this walk, a
+ * value with `-0` three levels down would fail the portable-JSON check below
+ * and drop the whole proposal instead of normalizing losslessly.
+ *
+ * Only containers `assertJsonSafe` would accept structurally are copied: an
+ * array with no holes or extra properties, or a plain object whose own keys
+ * are all enumerable string-keyed data properties. Anything else (a `Date`, a
+ * symbol key, an accessor, which is never invoked, a sparse array, `NaN`,
+ * `undefined`, …) is returned as-is, so `isPortableJsonValue` still sees the
+ * original and has the final say. Keys are defined, not assigned, so an own
+ * `__proto__` key (as `JSON.parse` produces) survives the copy as data.
+ */
+function normalizeNestedNegativeZero(value: unknown, ancestors = new Set<object>()): unknown {
+  if (Object.is(value, -0)) return 0;
+  if (value === null || typeof value !== "object") return value;
+  const isArray = Array.isArray(value);
+  if (!isArray && Object.getPrototypeOf(value) !== Object.prototype) return value;
+  if (ancestors.has(value)) return value;
+  const keys = Reflect.ownKeys(value);
+  const entries: Array<[string, unknown]> = [];
+  for (const key of keys) {
+    if (isArray && key === "length") continue;
+    if (typeof key === "symbol") return value;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return value;
+    entries.push([key, descriptor.value]);
+  }
+  if (isArray) {
+    const length = (value as unknown[]).length;
+    if (entries.length !== length || entries.some(([key], index) => key !== String(index))) return value;
+  }
+  ancestors.add(value);
+  const normalizedEntries = entries.map(([key, entry]) => [key, normalizeNestedNegativeZero(entry, ancestors)] as const);
+  ancestors.delete(value);
+  if (isArray) return normalizedEntries.map(([, entry]) => entry);
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of normalizedEntries) {
+    Object.defineProperty(normalized, key, { value: entry, enumerable: true, writable: true, configurable: true });
+  }
+  return normalized;
 }
 
 /**

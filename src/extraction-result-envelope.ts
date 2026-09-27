@@ -658,8 +658,27 @@ function nonEmptyString(input: unknown, path: string): string {
 
 function stableIdentity(input: unknown, path: string): string {
   const value = nonEmptyString(input, path);
-  if (!STABLE_IDENTITY.test(value) || CREDENTIAL_IDENTITY.test(value) || referenceContainsAuthorization(value)) fail(`${path} must be a credential-free stable identity`);
+  if (!isPortableStableIdentity(value)) fail(`${path} must be a credential-free stable identity`);
   return value;
+}
+
+/**
+ * The envelope's own identity rule, shared with `extract()` normalization so a
+ * value extract() keeps can never be one the envelope rejects.
+ */
+export function isPortableStableIdentity(value: unknown): value is string {
+  return typeof value === "string" && isWellFormedUnicode(value) &&
+    STABLE_IDENTITY.test(value) && !CREDENTIAL_IDENTITY.test(value) && !referenceContainsAuthorization(value);
+}
+
+/** The envelope's own lossless-JSON rule, shared with `extract()` normalization. */
+export function isPortableJsonValue(value: unknown): boolean {
+  try {
+    assertJsonSafe(value, "value");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function preparedRef(input: unknown, path: string): string {
