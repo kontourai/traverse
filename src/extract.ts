@@ -70,7 +70,7 @@
  */
 
 import { prepareAndChunk } from "./chunk.js";
-import { validateExtractionTaskSpec } from "./task.js";
+import { checkExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
@@ -266,8 +266,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
   const maxChars = input.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
 
   try {
+    const taskSpecWarnings: string[] = [];
     if (input.taskSpec) {
-      const taskError = validateExtractionTaskSpec(input.taskSpec, input.targetSchema);
+      const { error: taskError, legacyDigests } = checkExtractionTaskSpec(input.taskSpec, input.targetSchema);
+      if (legacyDigests.length > 0) {
+        taskSpecWarnings.push(`taskSpec uses the legacy locale-dependent digest (${legacyDigests.join(", ")}); regenerate it with createExtractionTaskSpec`);
+      }
       if (taskError) return { proposals: [], raw: EMPTY_RAW, extractedAt, sourceRef, provider, runId, error: `invalid taskSpec: ${taskError}`, providerCalls: 0, totalTokensUsed: 0 };
     }
     const unsupportedCapability = unsupportedProviderCapability(input);
@@ -413,7 +417,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 
     const { fullText, chunks } = prepared;
     const occurrenceResolver = new ExactOccurrenceResolver();
-    const warnings: string[] = [...prepared.warnings];
+    const warnings: string[] = [...taskSpecWarnings, ...prepared.warnings];
     const preparedArtifact: PreparedArtifact = createPreparedArtifact(fullText, {
       preparationMode: preparationModeFor(prepared, input.contentType === "pdf" && !!input.pdfTextExtractor, ocrDerived),
       preparationVersion: input.preparedArtifact?.preparationVersion,

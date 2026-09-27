@@ -7,6 +7,7 @@
  * diagnostics remain an in-process concern.
  */
 
+import { compareCodeUnits } from "./canonical-json.js";
 import {
   EXACT_OCCURRENCE_RESOLVER_VERSION,
   type ExactOccurrenceResolution,
@@ -616,7 +617,7 @@ function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
+  return `{${Object.keys(object).sort(compareCodeUnits).map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
 }
 
 function record(input: unknown, path: string): Record<string, unknown> {

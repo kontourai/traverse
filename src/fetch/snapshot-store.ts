@@ -19,6 +19,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { compareCodeUnits } from "../canonical-json.js";
 import type { FetchResult, Snapshot, SnapshotStore } from "./types.js";
 
 /** Render a caller-owned sourceId into a stable, collision-resistant dir name. */
@@ -101,7 +102,7 @@ export function createFilesystemSnapshotStore(
     }
     // newest first by fetchedAt (ISO sorts lexicographically), hash as tiebreak.
     out.sort((a, b) =>
-      a.fetchedAt === b.fetchedAt ? b.bodyHash.localeCompare(a.bodyHash) : b.fetchedAt.localeCompare(a.fetchedAt),
+      a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );
     return out;
   }
@@ -136,7 +137,7 @@ export function createInMemorySnapshotStore(): SnapshotStore {
   function sorted(sourceId: string): Snapshot[] {
     const arr = [...(bySource.get(sourceId) ?? [])];
     arr.sort((a, b) =>
-      a.fetchedAt === b.fetchedAt ? b.bodyHash.localeCompare(a.bodyHash) : b.fetchedAt.localeCompare(a.fetchedAt),
+      a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );
     return arr;
   }
