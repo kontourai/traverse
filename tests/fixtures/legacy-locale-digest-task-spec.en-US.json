@@ -1,0 +1,30 @@
+{
+  "version": "1",
+  "targetSchema": [
+    {
+      "path": "meta",
+      "type": "object"
+    }
+  ],
+  "examples": [
+    {
+      "content": "Meta: ok",
+      "proposals": [
+        {
+          "fieldPath": "meta",
+          "candidateValue": {
+            "9": 6,
+            "10": 5,
+            "Zeta": 1,
+            "alpha": 2,
+            "_id": 3,
+            "ä": 4
+          },
+          "excerpt": "Meta: ok"
+        }
+      ],
+      "digest": "sha256:410595998183900e9bf695dbd6359847e42d67b2917c5a8d0378c6e21f30aec8"
+    }
+  ],
+  "digest": "sha256:2cc886b5445380a66c3607d316ecfe2d099bf766fc9862ccaef82e9733d31aa1"
+}

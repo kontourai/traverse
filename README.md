@@ -1180,7 +1180,12 @@ evidence contract and known-limitation policy.
 Callers that need reproducible instructions or few-shot examples can create a
 provider-neutral task spec. Examples are validated against the schema and their
 prepared source text before any provider call; successful results carry the task
-and example digests for audit.
+and example digests for audit. Digests sort object keys in UTF-16 code-unit
+order, so they are identical on every host and locale. A spec written by an
+earlier version, whose digest used the host's locale collation, still validates
+on a host where it validated before, with a warning to regenerate it with
+`createExtractionTaskSpec`; that fallback will be removed in a future major
+version.
 
 ```ts
 import { createExtractionTaskSpec, extract } from "@kontourai/traverse";
