@@ -60,8 +60,10 @@
  *    (only `extract()` holds the prepared text needed to verify one, so it is
  *    the sole owner of the final `locator` value),
  *  - `confidence` MUST be a finite number; a non-finite (or missing)
- *    confidence drops the item. An in-range value passes through; an
- *    out-of-range value is CLAMPED into `0..1` (never dropped) with a warning.
+ *    confidence drops the item (the portable envelope requires one). An
+ *    in-range value passes through; an out-of-range value is CLAMPED into
+ *    `0..1` (never dropped) with a warning. The bundled adapters pass finite
+ *    out-of-range values through to this clamp rather than dropping them.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.

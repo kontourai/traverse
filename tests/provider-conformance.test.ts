@@ -23,7 +23,8 @@ const taskSpec = createExtractionTaskSpec({
   examples: [{ content: "Alpine", proposals: [{ fieldPath: "title", candidateValue: "Alpine", excerpt: "Alpine" }] }],
 });
 
-function adapters(): Array<[string, ExtractionProvider]> {
+function adapters(payload: unknown = rawProposals): Array<[string, ExtractionProvider]> {
+  const rawProposals = payload;
   return [
     ["anthropic", createAnthropicExtractionProvider({ client: fakeAnthropicClient(fakeAnthropicMessage("submit_extraction_proposals", rawProposals, { inputTokens: 7, outputTokens: 4 })) })],
     ["openai", createOpenAIExtractionProvider({ client: { async create() { return { model: "openai-test", choices: [{ finish_reason: "tool_calls", message: { tool_calls: [{ function: { name: "submit_extraction_proposals", arguments: JSON.stringify(rawProposals) } }] } }], usage: { total_tokens: 11 } }; } } })],
@@ -64,6 +65,24 @@ describe("bundled provider conformance", () => {
         },
         inferenceType: "explicit", valueType: "string",
       }]);
+    });
+  }
+
+  for (const [label, provider] of adapters({ proposals: [{ fieldPath: "title", value: "Alpine", confidence: 1.2, excerpt: "Alpine" }] })) {
+    it(`${label} passes an out-of-range confidence through to the core clamp instead of dropping it`, async () => {
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      assert.equal(result.error, undefined);
+      assert.deepEqual(result.proposals.map(({ candidateValue, confidence }) => ({ candidateValue, confidence })), [{ candidateValue: "Alpine", confidence: 1 }]);
+      assert.deepEqual(result.warnings, ['clamped out-of-range confidence for "title" to 1']);
+    });
+  }
+
+  for (const [label, provider] of adapters({ proposals: [{ fieldPath: "title", value: "Alpine", excerpt: "Alpine" }] })) {
+    it(`${label} still drops a proposal with no confidence, with a warning`, async () => {
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      assert.equal(result.error, undefined);
+      assert.deepEqual(result.proposals, []);
+      assert.deepEqual(result.warnings, ['dropped malformed tool item at index 0 (fieldPath "title"): missing/non-numeric confidence']);
     });
   }
 
