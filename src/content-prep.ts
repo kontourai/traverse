@@ -22,6 +22,7 @@
 
 import TurndownService from "turndown";
 import { parseHTML } from "linkedom";
+import { compareCodeUnits } from "./canonical-json.js";
 import { inspectHtml } from "./embedded.js";
 import type {
   ContentType,
@@ -566,7 +567,7 @@ export function validatePdfLayout(
       a.range.start - b.range.start ||
       a.range.end - b.range.end ||
       a.pageNumber - b.pageNumber ||
-      a.kind.localeCompare(b.kind),
+      compareCodeUnits(a.kind, b.kind),
   );
 
   let tables: PdfTable[] | undefined;

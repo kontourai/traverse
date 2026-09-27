@@ -245,4 +245,49 @@ describe("exact occurrence resolver", () => {
     assert.deepEqual(result.proposals, []);
     assert.ok(result.warnings?.some((warning) => warning.includes("excerpt not found")));
   });
+
+  it("enumerates each distinct excerpt over the full text once per run, with identical resolutions", () => {
+    // Six windows over one text, each proposing the same two excerpts many
+    // times, as a many-chunk run with repeated short excerpts does.
+    const text = Array.from({ length: 60 }, (_, i) => `Row ${i}: 1. Yes. `).join("");
+    const windowSize = 200;
+    const windows = Array.from({ length: Math.ceil(text.length / windowSize) }, (_, i) => i * windowSize);
+    const run = (resolver: ExactOccurrenceResolver) => windows.flatMap((start) =>
+      Array.from({ length: 25 }, (_, k) => resolver.resolve({
+        text,
+        visibleText: text.slice(start, start + windowSize),
+        visibleStart: start,
+        excerpt: k % 2 === 0 ? "1." : "Yes.",
+        sourceOrderKey: `field-${k}`,
+      })));
+
+    let fullTextCalls = 0;
+    let visibleCalls = 0;
+    const spied = new ExactOccurrenceResolver((haystack, excerpt) => {
+      if (haystack === text) fullTextCalls += 1;
+      else visibleCalls += 1;
+      return enumerateExactOccurrences(haystack, excerpt);
+    });
+    const memoized = run(spied);
+    assert.equal(fullTextCalls, 2, "one full-text enumeration per distinct excerpt");
+    assert.equal(visibleCalls, windows.length * 25, "visible-window enumeration stays per call");
+    // Same allocations and metadata as a resolver that re-enumerates per call.
+    assert.deepEqual(memoized, run(new ExactOccurrenceResolver()));
+    assert.ok(memoized.every((resolution) => resolution !== undefined));
+
+    // A resolver reused on a different text never serves the old text's spans.
+    const other = `xx ${text}`;
+    const shifted = spied.resolve({ text: other, visibleText: other, visibleStart: 0, excerpt: "1.", sourceOrderKey: "fresh" });
+    assert.equal(shifted?.selected.start, text.indexOf("1.") + 3);
+  });
+
+  it("returns selected spans that do not alias the resolver's cache", () => {
+    const resolver = new ExactOccurrenceResolver();
+    const input = { text: "Marker; Marker", visibleText: "Marker; Marker", visibleStart: 0, excerpt: "Marker" };
+    const first = resolver.resolve({ ...input, sourceOrderKey: "a" });
+    assert.ok(first);
+    first.selected.start = 99;
+    const second = resolver.resolve({ ...input, sourceOrderKey: "b" });
+    assert.deepEqual(second?.selected, { index: 0, start: 0, end: 6 });
+  });
 });
