@@ -1,3 +1,4 @@
+import { isPortableStableIdentity } from "./extraction-result-envelope.js";
 import type {
   ExtractInput,
   ExtractionProvider,
@@ -37,7 +38,8 @@ export function normalizeProviderFailure(provider: ExtractionProvider, error: un
   const native = record(error);
   const status = typeof native?.["status"] === "number" ? native["status"] as number
     : typeof native?.["statusCode"] === "number" ? native["statusCode"] as number : undefined;
-  const code = typeof native?.["code"] === "string" ? (native["code"] as string).toLowerCase() : "";
+  const rawCode = typeof native?.["code"] === "string" ? native["code"] as string : undefined;
+  const code = rawCode?.toLowerCase() ?? "";
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
   const timeout = code.includes("timeout") || lower.includes("timeout");
@@ -54,6 +56,7 @@ export function normalizeProviderFailure(provider: ExtractionProvider, error: un
     retryable: typeof native?.["retryable"] === "boolean"
       ? native["retryable"] as boolean
       : kind === "rate-limit" || kind === "timeout" || kind === "unavailable",
+    ...(isPortableStableIdentity(rawCode) ? { code: rawCode } : {}),
     message,
     native: error,
   };

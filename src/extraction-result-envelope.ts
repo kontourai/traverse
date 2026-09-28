@@ -47,8 +47,11 @@ export interface PortableExtractionProposal extends Omit<ExtractionProposal, "oc
   };
 }
 
-/** Provider classification without non-portable native or message diagnostics. */
-export type PortableExtractionProviderFailure = Omit<ExtractionProviderFailure, "native" | "message">;
+/**
+ * Provider classification without non-portable native or message diagnostics.
+ * `code` also stays in-process until envelope importers accept the key.
+ */
+export type PortableExtractionProviderFailure = Omit<ExtractionProviderFailure, "native" | "message" | "code">;
 
 /** Default-safe provider audit fields. Raw response content is never included. */
 export interface PortableRawProviderResponse {

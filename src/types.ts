@@ -417,6 +417,14 @@ export interface ExtractionProviderFailure {
   provider: string;
   kind: "authentication" | "rate-limit" | "timeout" | "invalid-request" | "unavailable" | "unknown";
   retryable: boolean;
+  /**
+   * The upstream error's own `code`, exactly as raised (e.g. an authorization
+   * ledger's `AUTHORIZATION_PERSISTENCE_FAILED`), so a caller can tell a budget
+   * or ledger stop from a provider failure without guessing from `kind`.
+   * Present only when the code is a credential-free stable identity.
+   * In-process only for now: the portable envelope does not carry it yet.
+   */
+  code?: string;
   message: string;
   native: unknown;
 }

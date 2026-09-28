@@ -5,12 +5,53 @@
  */
 
 import { createHash } from "node:crypto";
+// Static JSON imports: bundlers and file tracers see them, and a missing
+// package fails at load time instead of producing an unknown version.
+import linkedomPackage from "linkedom/package.json" with { type: "json" };
+import turndownPackage from "turndown/package.json" with { type: "json" };
 
 export const PREPARED_ARTIFACT_FORMAT = "traverse-prepared-artifact";
 export const PREPARED_ARTIFACT_VERSION = 1;
-export const PREPARED_ARTIFACT_PREPARATION_VERSION = "1";
+/**
+ * Base version of Traverse's own preparation code. Bump it with any change
+ * that can alter prepared text for the same input; the pinned digests in
+ * tests/preparation-version.test.ts fail until it is bumped.
+ */
+export const PREPARED_ARTIFACT_PREPARATION_VERSION = "2";
 
 export type PreparedArtifactPreparationMode = "text" | "markdown" | "transcript" | "pdf-text" | "image-ocr";
+
+/** Installed versions of the libraries that shape HTML Markdown output. */
+export type PreparationLibraryVersions = { linkedom: string; turndown: string };
+
+const INSTALLED_PREPARATION_LIBRARIES: PreparationLibraryVersions = {
+  linkedom: linkedomPackage.version,
+  turndown: turndownPackage.version,
+};
+
+/**
+ * Default `preparationVersion` for a mode: the base version, plus the
+ * installed `linkedom` and `turndown` versions for HTML Markdown preparation
+ * (e.g. `2+linkedom@0.18.13+turndown@7.2.4`), because a dependency update can
+ * change that output with no change here. Other modes do not use them.
+ * Fails closed: a library version that is not a stable token throws rather
+ * than letting two library versions share one preparation version.
+ */
+export function preparationVersionFor(
+  mode: PreparedArtifactPreparationMode,
+  libraries: PreparationLibraryVersions = INSTALLED_PREPARATION_LIBRARIES,
+): string {
+  if (mode !== "markdown") return PREPARED_ARTIFACT_PREPARATION_VERSION;
+  const parts = [PREPARED_ARTIFACT_PREPARATION_VERSION];
+  for (const name of ["linkedom", "turndown"] as const) {
+    const version: unknown = libraries[name];
+    if (typeof version !== "string" || !/^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(version)) {
+      throw new Error(`prepared artifact preparationVersion: ${name} version is unresolved`);
+    }
+    parts.push(`${name}@${version}`);
+  }
+  return parts.join("+");
+}
 
 /** A versioned reference whose identity binds preparation metadata and text. */
 export type PreparedArtifactRef = `${typeof PREPARED_ARTIFACT_FORMAT}:v${typeof PREPARED_ARTIFACT_VERSION}:sha256:${string}`;
@@ -111,7 +152,7 @@ function canonicalBinding(artifact: Omit<PreparedArtifact, "ref">): string {
 
 /** Build the deterministic identity for exact prepared text and its preparation. */
 export function createPreparedArtifact(text: string, options: PreparedArtifactOptions): PreparedArtifact {
-  const preparationVersion = options.preparationVersion ?? PREPARED_ARTIFACT_PREPARATION_VERSION;
+  const preparationVersion = options.preparationVersion ?? preparationVersionFor(options.preparationMode);
   if (!isWellFormedUnicode(text)) throw new Error("prepared artifact text must be well-formed Unicode");
   if (!PREPARATION_MODES.has(options.preparationMode)) throw new Error("prepared artifact preparationMode is invalid");
   if (preparationVersion.trim().length === 0 || !isWellFormedUnicode(preparationVersion)) {

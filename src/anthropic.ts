@@ -114,6 +114,14 @@ export interface AnthropicAdapterOptions {
    * on its own, so that fallback is preserved without duplicating it here.
    */
   baseUrl?: string;
+  /**
+   * SDK-level retries for a client this adapter builds. Defaults to 0, so one
+   * counted call is exactly one provider request and `maxProviderCalls`,
+   * `maxTotalTokens`, and any router's receipts describe what was sent. Set it
+   * to opt into the SDK's own retries (the SDK default is 2). Ignored for an
+   * injected `client`, whose configuration is left untouched.
+   */
+  maxRetries?: number;
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
@@ -121,10 +129,11 @@ const DEFAULT_MAX_TOKENS = 2048;
 const TOOL_NAME = "submit_extraction_proposals";
 
 /**
- * Resolve the `{ apiKey, baseURL? }` object passed to the `@anthropic-ai/sdk`
- * constructor. Pulled out as a pure, exported function so the pass-through of
- * `opts.baseUrl` -> constructor `baseURL` is unit-testable without a network
- * call or a real SDK instance (see tests/anthropic.test.ts).
+ * Resolve the `{ apiKey, baseURL?, maxRetries }` object passed to the
+ * `@anthropic-ai/sdk` constructor. Pulled out as a pure, exported function so
+ * the pass-through of `opts.baseUrl` -> constructor `baseURL` is unit-testable
+ * without a network call or a real SDK instance (see tests/anthropic.test.ts).
+ * `maxRetries` is always passed (default 0) so the SDK never retries silently.
  *
  * `baseURL` is only included in the returned object when `opts.baseUrl` is
  * set — when omitted, the SDK constructor's own `ANTHROPIC_BASE_URL` env
@@ -133,14 +142,27 @@ const TOOL_NAME = "submit_extraction_proposals";
  */
 export function resolveSdkClientOptions(
   opts: AnthropicAdapterOptions,
-): { apiKey: string; baseURL?: string } {
+): { apiKey: string; baseURL?: string; maxRetries: number } {
   const apiKey = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"];
   if (!apiKey) {
     throw new Error(
       "AnthropicExtractionProvider: no API key. Provide opts.apiKey, set ANTHROPIC_API_KEY, or inject opts.client.",
     );
   }
-  return opts.baseUrl ? { apiKey, baseURL: opts.baseUrl } : { apiKey };
+  const maxRetries = resolveSdkMaxRetries(opts.maxRetries, "AnthropicExtractionProvider");
+  return opts.baseUrl ? { apiKey, baseURL: opts.baseUrl, maxRetries } : { apiKey, maxRetries };
+}
+
+/**
+ * SDK retry count for a client an adapter builds: 0 unless the caller opts in.
+ * A negative or fractional value is refused rather than rounded.
+ */
+export function resolveSdkMaxRetries(maxRetries: number | undefined, adapter: string): number {
+  if (maxRetries === undefined) return 0;
+  if (!Number.isSafeInteger(maxRetries) || maxRetries < 0) {
+    throw new Error(`${adapter}: maxRetries must be a non-negative integer.`);
+  }
+  return maxRetries;
 }
 
 /**
@@ -157,7 +179,7 @@ async function resolveClient(opts: AnthropicAdapterOptions): Promise<AnthropicMe
   const sdkModule = "@anthropic-ai/sdk";
   const sdkImport = await (Function("m", "return import(m)")(sdkModule) as Promise<unknown>);
   const { default: Anthropic } = sdkImport as {
-    default: new (opts: { apiKey: string; baseURL?: string }) => { messages: AnthropicMessagesClient };
+    default: new (opts: { apiKey: string; baseURL?: string; maxRetries: number }) => { messages: AnthropicMessagesClient };
   };
 
   const sdk = new Anthropic(resolveSdkClientOptions(opts));

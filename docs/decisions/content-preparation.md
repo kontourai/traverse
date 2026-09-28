@@ -15,6 +15,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/25
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/33
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/167
 ---
 
 # Content preparation
@@ -103,6 +105,29 @@ preparation, shipped as an **opt-in injected seam**, not a bundled parser.
   code — `prepareContent` was deliberately not given a `pdfTextExtractor`
   parameter, to avoid a sync-to-async breaking change to a widely-called
   function. This is a documented asymmetry, not a bug.
+
+## Structural HTML keeps content outside the card container
+
+Structural chunking (ADR 0004 §D2) changes where chunk boundaries fall; it
+should not silently remove a page's own text, and it must not let that text
+crowd out the cards. The page text outside the detected card container is
+converted with the same Turndown configuration as the whole-page path, after a
+second chrome pass that the element-name pruning misses: ARIA `navigation`,
+`banner`, and `contentinfo` landmarks, blocks with at least three links whose
+link text is at least half their text (div navbars, mega-menus, pagination),
+and the short label remnants those leave behind. Blocks are judged innermost
+first, so a wrapper that mixes a menu with real text keeps the text.
+
+What remains is a leading and a trailing segment. A segment of at most a
+quarter of `chunkSize` rides along with the first or last card batch without
+changing card boundaries, as the page title always did. A longer segment gets
+its own chunks (character window when longer than one chunk), and every card
+chunk is emitted, and dispatched, before any outside chunk, so `maxChunks`,
+`maxProviderCalls`, and `maxTotalTokens` reach the cards first. Outside chunks
+left out by `maxChunks` produce a warning naming the chunk and character
+counts. Chunks are therefore ordered cards first, not by offset. A cards-only
+page keeps its chunk boundaries. Pages with text outside the container get
+different prepared text, a different digest, and a new preparation version.
 
 ## Out of scope
 

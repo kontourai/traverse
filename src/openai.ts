@@ -1,4 +1,4 @@
-import { buildExtractionTool, parseProposals } from "./anthropic.js";
+import { buildExtractionTool, parseProposals, resolveSdkMaxRetries } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "./types.js";
 
@@ -10,7 +10,19 @@ export interface OpenAIChatCompletion {
 export interface OpenAIChatClient {
   create(params: Record<string, unknown>): Promise<OpenAIChatCompletion>;
 }
-export interface OpenAIAdapterOptions { client?: OpenAIChatClient; apiKey?: string; model?: string; maxTokens?: number; baseUrl?: string }
+export interface OpenAIAdapterOptions {
+  client?: OpenAIChatClient;
+  apiKey?: string;
+  model?: string;
+  maxTokens?: number;
+  baseUrl?: string;
+  /**
+   * SDK-level retries for a client this adapter builds. Defaults to 0 so one
+   * counted call is one provider request; set it to opt into the SDK's own
+   * retries (the SDK default is 2). Ignored for an injected `client`.
+   */
+  maxRetries?: number;
+}
 
 const TOOL_NAME = "submit_extraction_proposals";
 
@@ -20,8 +32,9 @@ async function resolveClient(opts: OpenAIAdapterOptions): Promise<OpenAIChatClie
   if (!apiKey) throw new Error("OpenAIExtractionProvider: no API key. Provide opts.apiKey, set OPENAI_API_KEY, or inject opts.client.");
   const moduleName = "openai";
   const imported = await (Function("m", "return import(m)")(moduleName) as Promise<unknown>);
-  const { default: OpenAI } = imported as { default: new (options: { apiKey: string; baseURL?: string }) => { chat: { completions: OpenAIChatClient } } };
-  return new OpenAI({ apiKey, ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}) }).chat.completions;
+  const maxRetries = resolveSdkMaxRetries(opts.maxRetries, "OpenAIExtractionProvider");
+  const { default: OpenAI } = imported as { default: new (options: { apiKey: string; baseURL?: string; maxRetries: number }) => { chat: { completions: OpenAIChatClient } } };
+  return new OpenAI({ apiKey, maxRetries, ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}) }).chat.completions;
 }
 
 function prompt(input: Parameters<ExtractionProvider["extract"]>[0]): string {

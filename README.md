@@ -110,6 +110,13 @@ const resolved = await resolvePreparedArtifact(result.preparedArtifact!, prepare
 The artifact's SHA-256 digest binds exact prepared text; its versioned reference
 also binds the preparation mode/version and optional source snapshot reference.
 This makes a changed preparation implementation visibly produce a new identity.
+Unless the caller supplies one, `preparationVersion` is Traverse's preparation
+base version (`PREPARED_ARTIFACT_PREPARATION_VERSION`), and for HTML Markdown
+preparation it also names the installed `linkedom` and `turndown` versions, e.g.
+`2+linkedom@0.18.13+turndown@7.2.4`. The library versions are read through
+static JSON imports, and a version that cannot be resolved throws rather than
+producing a shared placeholder. `preparationVersionFor(mode)` returns the same
+value before preparing, for keying a cache.
 Plain-text callers need no migration: `extract()` assigns the deterministic
 inline identity automatically, but retains no text unless a store is supplied.
 Artifact creation rejects ill-formed Unicode rather than allowing UTF-8
@@ -361,8 +368,15 @@ await extract({ content: html, contentType: "html", sourceRef, targetSchema, pro
 **Structural chunking.** For a page larger than one chunk, Traverse parses the
 DOM (via linkedom), prunes chrome (`script`/`style`/`nav`/`footer`/…), and
 detects the repeated-sibling "card" container of a listing, cutting chunk
-boundaries **on card boundaries** so a card is never split. When no repeated
-structure is found (or for `text` / `prep: "text"`), it falls back to a
+boundaries **on card boundaries** so a card is never split. Page text outside
+the card container (a title, an intro, a detail page's own paragraphs beside a
+short repeated list) is kept too, after a second chrome pass that removes ARIA
+navigation landmarks and link-dense blocks such as `div` navbars and
+mega-menus. Short outside text rides along with the first or last card chunk;
+longer outside text gets its own chunks, which are dispatched after every card
+chunk, so `maxChunks`, `maxProviderCalls`, and `maxTotalTokens` reach the cards
+first. Outside text left out by `maxChunks` is named in a warning. When no
+repeated structure is found (or for `text` / `prep: "text"`), it falls back to a
 character window with overlap so a value straddling a boundary is not lost.
 Chunks dispatch in bounded waves. `concurrency` and `batchSize` both default to
 `1`, so existing callers and providers keep the historical sequential behavior.
@@ -618,7 +632,16 @@ For tests, inject a client: `createAnthropicExtractionProvider({ client })`.
 Bundled adapters declare the same discoverable capability contract and pass one
 deterministic conformance suite. Unsupported declared capabilities fail before
 a provider call. Provider failures expose normalized retryability while keeping
-the original native diagnostic on `ExtractionResult.providerFailures`.
+the original native diagnostic on `ExtractionResult.providerFailures`. When the
+upstream error carries a credential-free `code` (for example an authorization
+ledger's `AUTHORIZATION_PERSISTENCE_FAILED`), the failure keeps it as `code`,
+exactly as raised. The portable envelope does not carry `code` yet.
+
+The Anthropic and OpenAI adapters build their SDK clients with `maxRetries: 0`
+by default, so one counted provider call is exactly one provider request and
+`maxProviderCalls`, `maxTotalTokens`, and any router's receipts describe what
+was sent. Pass `maxRetries` to opt into SDK retries. An injected `client` is
+used as given.
 
 OpenAI and Gemini are optional subpath adapters, following the same injected
 client and dynamic optional-peer pattern as the Anthropic adapter:

@@ -272,3 +272,149 @@ describe("extract() chunked path", () => {
     );
   });
 });
+
+describe("prepareAndChunk (structural) keeps content outside the card container", () => {
+  // A detail page whose own text sits beside a short repeated list: the list is
+  // detected as cards, but the fee paragraph is neither a card nor chrome.
+  const detailHtml = `<!DOCTYPE html><html><body>
+<h1>Riverside Clinic</h1>
+<main>
+  <section><p>Annual enrollment fee: $4,250 per participant.</p><p>Contact: registrar@example.org</p></section>
+  <section><ul><li>Parking available</li><li>Wheelchair accessible</li><li>Open weekends</li><li>Snacks provided</li></ul></section>
+  <section><p>Office hours: weekdays 9 to 5.</p></section>
+</main></body></html>`;
+  const feeSentence = "Annual enrollment fee: $4,250 per participant.";
+
+  it("keeps a detail page's non-card text in fullText, in document order", () => {
+    const r = prepareAndChunk(detailHtml, "html");
+    assert.equal(r.structural, true);
+    assert.equal(r.cardCount, 4);
+    const at = (text: string) => r.fullText.indexOf(text);
+    assert.ok(at(feeSentence) >= 0, r.fullText);
+    assert.ok(at("Office hours: weekdays 9 to 5.") >= 0, r.fullText);
+    assert.ok(at("# Riverside Clinic") < at(feeSentence));
+    assert.ok(at(feeSentence) < at("Parking available"));
+    assert.ok(at("Snacks provided") < at("Office hours"));
+    assert.ok(r.chunks.every((c) => r.fullText.slice(c.start, c.end) === c.text));
+    assert.deepEqual(r.warnings, []);
+  });
+
+  it("lets a proposal grounded in non-card text survive extract()", async () => {
+    const result = await extract({
+      content: detailHtml,
+      contentType: "html",
+      sourceRef: "ref",
+      targetSchema: genericTargetSchema,
+      provider: markerProvider(feeSentence),
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.proposals.length, 1, JSON.stringify(result.warnings));
+    const prepared = prepareAndChunk(detailHtml, "html");
+    const start = prepared.fullText.indexOf(feeSentence);
+    assert.equal(result.proposals[0].provenance.locator, `chars:${start}-${start + feeSentence.length}`);
+  });
+
+  it("windows outside text longer than one chunk, with every chunk re-slicing fullText", () => {
+    // Two long paragraphs: too few to be detected as cards themselves.
+    const sentences = (p: number) => Array.from({ length: 15 }, (_, i) => `Intro paragraph ${p * 15 + i} about the program.`).join(" ");
+    const intro = `<p class="lead">${sentences(0)}</p><p>${sentences(1)}</p>`;
+    const html = `<html><body><main><section>${intro}</section><div class="list">${
+      [1, 2, 3, 4].map((i) => `<div class="card">Card ${i}</div>`).join("")
+    }</div></main></body></html>`;
+    const r = prepareAndChunk(html, "html", { chunkSize: 200, chunkOverlap: 20 });
+    assert.equal(r.structural, true);
+    for (let i = 0; i < 30; i++) assert.ok(r.fullText.includes(`Intro paragraph ${i} about`), `paragraph ${i}`);
+    assert.ok(r.chunks.every((c) => r.fullText.slice(c.start, c.end) === c.text));
+    assert.ok(r.chunks.every((c) => c.text.length <= 200));
+    // Card chunks follow the windowed intro, and no card is split.
+    assert.ok(r.chunks.some((c) => c.text.includes("Card 1") && c.text.includes("Card 4")));
+  });
+
+  it("leaves a cards-only page's chunk boundaries unchanged", () => {
+    const card = (i: number) =>
+      `<article class="card"><h2>Item ${i}</h2><p>Price: $${i}0 per session. A description of item ${i} with some words.</p></article>`;
+    const html = `<!DOCTYPE html><html><body><nav><a href="/">Home</a></nav><main><section class="results">${
+      [1, 2, 3, 4, 5, 6, 7, 8].map(card).join("")
+    }</section></main><footer>f</footer></body></html>`;
+    // Boundaries recorded from the release before non-card content was kept.
+    const expected: Record<number, Array<[number, number]>> = {
+      100: [[0, 75], [77, 152], [154, 229], [231, 306], [308, 383], [385, 460], [462, 537], [539, 614]],
+      200: [[0, 152], [154, 306], [308, 460], [462, 614]],
+      400: [[0, 383], [385, 614]],
+    };
+    for (const [size, bounds] of Object.entries(expected)) {
+      const r = prepareAndChunk(html, "html", { chunkSize: Number(size) });
+      assert.equal(r.structural, true);
+      assert.deepEqual(r.chunks.map((c) => [c.start, c.end]), bounds, `chunkSize ${size}`);
+    }
+  });
+});
+
+describe("structural page text outside the container cannot starve the cards", () => {
+  const card = (i: number) =>
+    `<div class="listing"><h3>Camp ${String(i).padStart(2, "0")} Bravo</h3><p>Weekly fee: $${i}00. Ages 8 to 12, outdoor program with lunch included.</p><a href="https://example.test/camp/${i}">Details</a></div>`;
+  const cards = Array.from({ length: 20 }, (_, i) => card(i + 1)).join("");
+  // A div-based mega-menu: no nav/header element for the tag pruning to catch.
+  const megaMenu = `<div class="navbar"><div class="mega">${
+    Array.from({ length: 12 }, (_, g) => `<div class="col"><span>Group ${g}</span><ul>${
+      Array.from({ length: 10 }, (_, k) => `<li><a href="https://example.test/c/${g}/${k}">Category ${g}-${k} programs</a></li>`).join("")
+    }</ul></div>`).join("")
+  }</div></div>`;
+  const cookieBanner = `<div class="consent"><p>${"We use cookies to measure visits and remember your settings. ".repeat(40)}</p><button>Accept</button></div>`;
+  const page = (outside: string) =>
+    `<!DOCTYPE html><html><body>${outside}<main><h1>Summer Camps</h1><section class="results">${cards}</section></main></body></html>`;
+  const titles = Array.from({ length: 20 }, (_, i) => `Camp ${String(i + 1).padStart(2, "0")} Bravo`);
+
+  function recordingProvider(): ExtractionProvider & { seen: string[] } {
+    const seen: string[] = [];
+    return {
+      name: "recording-mock",
+      seen,
+      async extract(input): Promise<ProviderExtractionOutput> {
+        seen.push(input.content);
+        return { proposals: [], raw: { response: "{}", model: "mock" } };
+      },
+    };
+  }
+  const reached = (seen: string[]) => titles.filter((title) => seen.some((content) => content.includes(title)));
+
+  it("prunes a div mega-menu and sends every card under a tight maxChunks", async () => {
+    const provider = recordingProvider();
+    const result = await extract({
+      content: page(megaMenu), contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider, chunkSize: 2000, maxChunks: 3,
+    });
+    assert.equal(result.error, undefined);
+    assert.deepEqual(reached(provider.seen), titles);
+    assert.ok(provider.seen.every((content) => !content.includes("Category 3-4 programs")), "mega-menu links pruned");
+    assert.ok(provider.seen[0].startsWith("# Summer Camps"), "page title still rides with the first card batch");
+  });
+
+  it("sends card chunks before long outside text, and names outside text left out by maxChunks", async () => {
+    const provider = recordingProvider();
+    const html = page(cookieBanner);
+    const cardOnly = prepareAndChunk(page(""), "html", { chunkSize: 2000 });
+    const result = await extract({
+      content: html, contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider, chunkSize: 2000, maxChunks: cardOnly.chunks.length,
+    });
+    assert.deepEqual(reached(provider.seen), titles);
+    assert.ok(provider.seen.every((content) => !content.includes("We use cookies")), "banner chunks were the ones left out");
+    assert.ok(
+      result.warnings?.some((w) => /^structural prep: \d+ chunks? of page text outside the card container \(\d+ chars\) left out beyond maxChunks/.test(w)),
+      JSON.stringify(result.warnings),
+    );
+
+    const full = prepareAndChunk(html, "html", { chunkSize: 2000 });
+    const firstOutside = full.chunks.findIndex((c) => c.text.includes("We use cookies"));
+    assert.ok(firstOutside >= cardOnly.chunks.length, "outside chunks are ordered after every card chunk");
+    assert.ok(full.chunks.every((c) => full.fullText.slice(c.start, c.end) === c.text));
+
+    const capped = recordingProvider();
+    await extract({
+      content: html, contentType: "html", sourceRef: "ref", targetSchema: genericTargetSchema,
+      provider: capped, chunkSize: 2000, maxProviderCalls: cardOnly.chunks.length,
+    });
+    assert.deepEqual(reached(capped.seen), titles);
+  });
+});
