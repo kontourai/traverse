@@ -111,13 +111,14 @@ describe("createAnthropicExtractionProvider", () => {
     assert.deepEqual(out.warnings, ["provider returned no extraction tool call"]);
   });
 
-  it("drops malformed tool items (missing excerpt / missing confidence) and reports each drop as a warning", async () => {
+  it("drops malformed tool items (missing excerpt) with a warning, and keeps an item with no confidence", async () => {
     const client = fakeAnthropicClient(
       fakeAnthropicMessage(TOOL_NAME, {
         proposals: [
           { fieldPath: "title", value: "x", confidence: 0.5 }, // no excerpt -> dropped
-          { fieldPath: "title", value: "y", excerpt: "y" }, // missing confidence -> dropped
+          { fieldPath: "title", value: "y", excerpt: "y" }, // no confidence -> kept, field omitted
           { fieldPath: "title", value: "z", confidence: 0.7, excerpt: "z" }, // kept
+          { fieldPath: "title", value: "w", confidence: "high", excerpt: "w" }, // non-numeric -> kept, omitted with a warning
         ],
       }),
     );
@@ -127,12 +128,15 @@ describe("createAnthropicExtractionProvider", () => {
       contentType: "html",
       targetSchema: genericTargetSchema,
     });
-    assert.equal(out.proposals.length, 1);
-    assert.equal(out.proposals[0].candidateValue, "z");
-    // Both drops are reported — nothing is silently discarded.
-    assert.equal(out.warnings?.length, 2);
+    assert.deepEqual(out.proposals.map((p) => p.candidateValue), ["y", "z", "w"]);
+    assert.ok(!("confidence" in out.proposals[0]), "a missing confidence is omitted, not invented");
+    assert.equal(out.proposals[1].confidence, 0.7);
+    assert.ok(!("confidence" in out.proposals[2]));
+    // The drop and the omitted non-numeric confidence are reported; the
+    // missing confidence is not a defect and gets no warning.
+    assert.equal(out.warnings?.length, 2, JSON.stringify(out.warnings));
     assert.ok(out.warnings?.some((w) => /index 0/.test(w) && /missing\/blank excerpt/.test(w)));
-    assert.ok(out.warnings?.some((w) => /index 1/.test(w) && /missing\/non-numeric confidence/.test(w)));
+    assert.ok(out.warnings?.some((w) => /^omitted non-numeric confidence on tool item at index 3/.test(w)));
   });
 
   it("warns when the response is truncated at maxTokens, without discarding whatever proposals parsed", async () => {
@@ -151,6 +155,9 @@ describe("createAnthropicExtractionProvider", () => {
     });
     assert.equal(out.proposals.length, 1);
     assert.ok(out.warnings?.includes("response truncated at maxTokens; proposals may be incomplete"));
+    assert.equal(out.truncated, true, "the typed signal decides in extract(); the warning is only a fallback");
+    assert.equal(out.missingToolCall, false);
+    assert.equal(out.unusable, false);
   });
 
   it("defaults the model to claude-sonnet-4-6 and reflects it in provider.name", () => {
@@ -213,12 +220,12 @@ describe("resolveSdkClientOptions (unit)", () => {
 });
 
 describe("buildExtractionTool / parseProposals (units)", () => {
-  it("requires fieldPath, value, confidence, and excerpt in the tool schema", () => {
+  it("requires fieldPath, value, and excerpt (not confidence) in the tool schema", () => {
     const tool = buildExtractionTool(genericTargetSchema);
     const itemRequired = (tool.input_schema.properties.proposals as {
       items: { required: string[] };
     }).items.required;
-    assert.deepEqual([...itemRequired].sort(), ["confidence", "excerpt", "fieldPath", "value"]);
+    assert.deepEqual([...itemRequired].sort(), ["excerpt", "fieldPath", "value"]);
     const properties = (tool.input_schema.properties.proposals as {
       items: { properties: Record<string, { type?: string; minimum?: number }> };
     }).items.properties;
@@ -230,9 +237,20 @@ describe("buildExtractionTool / parseProposals (units)", () => {
   });
 
   it("returns empty proposals/warnings for non-record / missing proposals input", () => {
-    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [] });
-    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), { proposals: [], warnings: [] });
-    assert.deepEqual(parseProposals("string", "x", "html"), { proposals: [], warnings: [] });
+    // No tool call at all is the adapter's missingToolCall signal, not an unusable answer.
+    const none = { malformedItems: 0, totalItems: 0 };
+    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [], unusable: false, ...none });
+    const unusable = { proposals: [], warnings: ["provider tool call had no usable proposals array"], unusable: true, ...none };
+    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), unusable);
+    assert.deepEqual(parseProposals("string", "x", "html"), unusable);
+    assert.deepEqual(parseProposals({ proposals: null }, "x", "html"), unusable);
+    // A valid empty array is a usable answer: nothing found.
+    assert.deepEqual(parseProposals({ proposals: [] }, "x", "html"), { proposals: [], warnings: [], unusable: false, ...none });
+    // Every item malformed is unusable; some malformed is not.
+    assert.equal(parseProposals({ proposals: [7, { junk: 1 }] }, "x", "html").unusable, true);
+    const some = parseProposals({ proposals: [7, { fieldPath: "title", value: "t", excerpt: "t" }] }, "x", "html");
+    assert.equal(some.unusable, false);
+    assert.deepEqual([some.malformedItems, some.totalItems], [1, 2]);
   });
 
   it("preserves an optional integer occurrence hint for exact resolver verification", () => {
@@ -253,7 +271,7 @@ describe("buildExtractionTool / parseProposals (units)", () => {
           "For EACH field you can find in the content, return one proposal with:",
           "  - fieldPath: the exact target field path from the list below,",
           "  - value: the extracted value (typed per the field),",
-          "  - confidence: 0.0-1.0,",
+          "  - confidence: optional self-reported 0.0-1.0,",
           "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
           "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",
           "Only propose fields you can ground in a verbatim excerpt. Omit fields you cannot find.",
@@ -284,7 +302,7 @@ describe("buildExtractionTool / parseProposals (units)", () => {
       assert.equal(untaggedLine, '- "untaggedField" (string)');
     });
 
-    it("leaves input_schema (fieldPath/value/confidence/excerpt shape and required list) unchanged when fields are inferenceType-tagged", () => {
+    it("leaves input_schema (fieldPath/value/excerpt required list) unchanged when fields are inferenceType-tagged", () => {
       const tool = buildExtractionTool([
         { path: "explicitField", type: "string", inferenceType: "explicit" },
         { path: "inferredField", type: "string", inferenceType: "inferred" },
@@ -292,7 +310,7 @@ describe("buildExtractionTool / parseProposals (units)", () => {
       const itemRequired = (tool.input_schema.properties.proposals as {
         items: { required: string[] };
       }).items.required;
-      assert.deepEqual([...itemRequired].sort(), ["confidence", "excerpt", "fieldPath", "value"]);
+      assert.deepEqual([...itemRequired].sort(), ["excerpt", "fieldPath", "value"]);
     });
   });
 });

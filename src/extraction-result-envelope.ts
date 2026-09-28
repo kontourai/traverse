@@ -20,6 +20,9 @@ import {
   type PreparedArtifactResolution,
 } from "./prepared-artifact.js";
 import type {
+  ExtractionCoverageEntry,
+  ExtractionCoverageReason,
+  ExtractionCoverageStatus,
   ExtractionPartial,
   ExtractionModelSource,
   ExtractionProposal,
@@ -32,6 +35,9 @@ import { validatePdfLayout } from "./content-prep.js";
 
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT = "traverse-extraction-result";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION = 1;
+
+/** `ExtractionResult.error` when no dispatched chunk was answered and no call threw; classified `provider`/`no-usable-answer`. */
+export const NO_USABLE_ANSWER_ERROR = "no dispatched chunk returned a usable answer";
 
 export interface PortableExtractionSource {
   ref: string;
@@ -64,6 +70,13 @@ export interface PortableExtractionProducedBy {
  * authoritative), and is omitted when longer than 128 characters.
  */
 export type PortableExtractionProviderFailure = Omit<ExtractionProviderFailure, "native" | "message">;
+
+/**
+ * One prepared-text range and whether it was read and answered; identical to
+ * the in-process `ExtractionCoverageEntry`. Carried only on a `partial`
+ * outcome (see `PortableExtractionResult.coverage`).
+ */
+export type PortableExtractionCoverageEntry = ExtractionCoverageEntry;
 
 /** Default-safe provider audit fields. Raw response content is never included. */
 export interface PortableRawProviderResponse {
@@ -106,6 +119,14 @@ export interface PortableExtractionResult {
   providerCalls: number;
   totalTokensUsed: number;
   partial?: ExtractionPartial;
+  /**
+   * Per-chunk coverage of the prepared text, ordered by `start`; ranges may
+   * overlap. The serializer emits it only when `outcome.status` is `partial`,
+   * so a run that read everything serializes exactly as before. A validator
+   * accepts it on any outcome but rejects a non-`complete` entry on a
+   * `success` outcome. Requires `preparedArtifact`.
+   */
+  coverage?: PortableExtractionCoverageEntry[];
   providerFailures?: PortableExtractionProviderFailure[];
   taskDigest?: string;
   exampleDigests?: string[];
@@ -144,7 +165,14 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 const VALUE_TYPES: ReadonlySet<TargetFieldSchema["type"]> = new Set(["string", "number", "boolean", "date", "enum", "array", "object"]);
 const INFERENCE_TYPES = new Set(["explicit", "inferred"]);
-const PARTIAL_REASONS = new Set(["cancelled", "max-provider-calls", "max-total-tokens", "max-chunks"]);
+const PARTIAL_REASONS = new Set([
+  "cancelled", "max-provider-calls", "max-total-tokens", "max-chunks",
+  "provider-failure", "content-truncated", "output-truncated",
+]);
+/** Partial reasons meaning a dispatched chunk was not (fully) read or answered. */
+const LOSS_PARTIAL_REASONS = new Set<string>(["provider-failure", "content-truncated", "output-truncated"]);
+const COVERAGE_STATUSES = new Set<ExtractionCoverageStatus>(["complete", "unread", "output-truncated"]);
+const COVERAGE_REASONS = new Set<ExtractionCoverageReason>(["provider-failure", "content-truncated", "missing-tool-call", "not-dispatched"]);
 const FAILURE_KINDS = new Set(["authentication", "rate-limit", "timeout", "invalid-request", "unavailable", "unknown"]);
 const MODEL_SOURCES = new Set(["provider-reported", "configured"]);
 /** Envelope importers cap a portable failure code at this length. */
@@ -241,6 +269,11 @@ function envelopeFromResult(result: ExtractionResult, options: PortableExtractio
     providerCalls: result.providerCalls,
     totalTokensUsed: result.totalTokensUsed,
     ...(result.partial !== undefined ? { partial: result.partial } : {}),
+    // Only a partial run carries coverage, so envelopes of complete runs stay
+    // byte-identical to what readers of the earlier wire already accept.
+    ...(result.partial !== undefined && result.coverage !== undefined
+      ? { coverage: result.coverage.map((entry) => ({ ...entry })) }
+      : {}),
     ...(result.providerFailures !== undefined ? { providerFailures: result.providerFailures.map(portableFailure) } : {}),
     ...(result.taskDigest !== undefined ? { taskDigest: result.taskDigest } : {}),
     ...(result.exampleDigests !== undefined ? { exampleDigests: result.exampleDigests } : {}),
@@ -264,7 +297,8 @@ function portableProposal(proposal: ExtractionProposal): PortableExtractionPropo
   const occurrence = proposal.provenance?.occurrence;
   if (!occurrence) throw new TypeError("portable extraction-result proposal is missing exact occurrence metadata");
   return {
-    fieldPath: proposal.fieldPath, candidateValue: proposal.candidateValue, confidence: proposal.confidence,
+    fieldPath: proposal.fieldPath, candidateValue: proposal.candidateValue,
+    ...(proposal.confidence !== undefined ? { confidence: proposal.confidence } : {}),
     provenance: { excerpt: proposal.provenance.excerpt, locator: proposal.provenance.locator, occurrence },
     extractor: proposal.extractor,
     ...(proposal.pathIndices !== undefined ? { pathIndices: proposal.pathIndices } : {}),
@@ -292,6 +326,7 @@ function classifyOutcome(result: ExtractionResult): PortableExtractionOutcome {
     return { status: "failure", category: "invalid-config", code: result.error.includes("capability") ? "unsupported-provider-capability" : "invalid-extract-config" };
   }
   if (result.providerFailures?.length) return { status: "failure", category: "provider", code: "provider-failure" };
+  if (result.error === NO_USABLE_ANSWER_ERROR) return { status: "failure", category: "provider", code: "no-usable-answer" };
   if (/preparation|extraction failed|bytes are required|not implemented/i.test(result.error)) {
     return { status: "failure", category: "preparation", code: "content-preparation-failure" };
   }
@@ -305,10 +340,15 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   // envelope can tell a failed chunk from a truncated output or dispatch.
   if (/^chunk \d+\/\d+ provider call failed/.test(warning)) return { category: "provider", code: "chunk-provider-failure" };
   if (/^chunk \d+\/\d+ content truncated at maxContentChars/.test(warning)) return { category: "limit", code: "content-truncated-at-dispatch" };
-  if (/response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
-  if (/provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
-  if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
-  if (/^dropped .*proposal|^clamped |normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
+  // Only the located form extract() writes when it records the loss on a
+  // chunk, so these codes never appear on an envelope whose outcome ignores it.
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider answer unusable/.test(warning)) return { category: "provider", code: "unusable-answer" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): dropped \d+ of \d+ tool items as malformed$/.test(warning)) return { category: "normalization", code: "malformed-tool-items" };
+  if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
+  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
+  if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
   if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
   if (/chunked into/.test(warning)) return { category: "content", code: "content-chunking" };
   if (/js-shell|embedded-state|markdown preparation|extractor-reported|pdfLayout|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
@@ -380,7 +420,7 @@ function validateSource(input: unknown): PortableExtractionSource {
 function validateResult(input: unknown): PortableExtractionResult {
   const value = record(input, "result");
   exactKeys(value, ["proposals", "provider", "runId", "raw", "outcome", "extractedAt", "providerCalls", "totalTokensUsed"], [
-    "model", "warningClassifications", "partial", "providerFailures", "taskDigest", "exampleDigests",
+    "model", "warningClassifications", "partial", "coverage", "providerFailures", "taskDigest", "exampleDigests",
     "pdfPageOffsets", "pdfLayout", "ocrDerived", "preparedArtifact", "preparedArtifactState",
   ], "result");
   const preparedArtifact = value.preparedArtifact === undefined ? undefined : validArtifact(value.preparedArtifact, "result.preparedArtifact");
@@ -418,6 +458,7 @@ function validateResult(input: unknown): PortableExtractionResult {
     providerCalls: nonNegativeInteger(value.providerCalls, "result.providerCalls"),
     totalTokensUsed: nonNegativeInteger(value.totalTokensUsed, "result.totalTokensUsed"),
     ...(value.partial === undefined ? {} : { partial: validatePartial(value.partial) }),
+    ...(value.coverage === undefined ? {} : { coverage: validateCoverage(value.coverage, preparedArtifact) }),
     ...(value.providerFailures === undefined ? {} : { providerFailures: array(value.providerFailures, "result.providerFailures").map((item, index) => validateFailure(item, index)) }),
     ...(value.taskDigest === undefined ? {} : { taskDigest: digest(value.taskDigest, "result.taskDigest") }),
     ...(value.exampleDigests === undefined ? {} : { exampleDigests: strings(value.exampleDigests, "result.exampleDigests").map((item, index) => digest(item, `result.exampleDigests[${index}]`)) }),
@@ -433,12 +474,22 @@ function validateResult(input: unknown): PortableExtractionResult {
   if (result.outcome.status === "partial" && result.outcome.reason !== result.partial?.reason) {
     fail("result.outcome.reason must match result.partial.reason");
   }
+  const lost = result.coverage?.some((entry) => entry.status !== "complete") ?? false;
+  if (result.outcome.status === "success" && lost) {
+    fail("result.coverage has a range that was not read or answered, but result.outcome is success");
+  }
+  // A loss reason names a dispatched chunk, so a never-dispatched range alone
+  // cannot account for it.
+  const dispatchedLoss = result.coverage?.some((entry) => entry.status !== "complete" && entry.reason !== "not-dispatched") ?? false;
+  if (result.outcome.status === "partial" && LOSS_PARTIAL_REASONS.has(result.outcome.reason) && !dispatchedLoss) {
+    fail(`result.outcome.reason ${result.outcome.reason} requires a result.coverage entry for a dispatched chunk that was not read or answered`);
+  }
   return result;
 }
 
 function validateProposal(input: unknown, path: string, artifact: PreparedArtifact | undefined): PortableExtractionProposal {
   const value = record(input, path);
-  exactKeys(value, ["fieldPath", "candidateValue", "confidence", "provenance", "extractor"], ["pathIndices", "inferenceType", "valueType", "enumValues", "producedBy"], path);
+  exactKeys(value, ["fieldPath", "candidateValue", "provenance", "extractor"], ["confidence", "pathIndices", "inferenceType", "valueType", "enumValues", "producedBy"], path);
   const provenance = record(value.provenance, `${path}.provenance`);
   exactKeys(provenance, ["excerpt", "locator", "occurrence"], [], `${path}.provenance`);
   const locator = validateLocator(provenance.locator, `${path}.provenance.locator`);
@@ -449,7 +500,7 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
   return {
     fieldPath: nonEmptyString(value.fieldPath, `${path}.fieldPath`),
     candidateValue: value.candidateValue,
-    confidence: finiteNumber(value.confidence, `${path}.confidence`, 0, 1),
+    ...(value.confidence === undefined ? {} : { confidence: finiteNumber(value.confidence, `${path}.confidence`, 0, 1) }),
     provenance: { excerpt, locator: provenance.locator as string, occurrence },
     extractor: stableIdentity(value.extractor, `${path}.extractor`),
     ...(value.pathIndices === undefined ? {} : { pathIndices: array(value.pathIndices, `${path}.pathIndices`).map((item, index) => nonNegativeInteger(item, `${path}.pathIndices[${index}]`)) }),
@@ -507,6 +558,43 @@ function validatePartial(input: unknown): ExtractionPartial {
     remainingChunks: nonNegativeInteger(value.remainingChunks, "result.partial.remainingChunks"),
     ...(value.tokenOvershoot === undefined ? {} : { tokenOvershoot: positiveInteger(value.tokenOvershoot, "result.partial.tokenOvershoot") }),
   };
+}
+
+function validateCoverage(input: unknown, artifact: PreparedArtifact | undefined): PortableExtractionCoverageEntry[] {
+  if (artifact === undefined) fail("result.coverage requires result.preparedArtifact");
+  const entries = array(input, "result.coverage").map((item, index): PortableExtractionCoverageEntry => {
+    const path = `result.coverage[${index}]`;
+    const value = record(item, path);
+    exactKeys(value, ["chunk", "start", "end", "status"], ["reason"], path);
+    const chunk = positiveInteger(value.chunk, `${path}.chunk`);
+    const start = nonNegativeInteger(value.start, `${path}.start`);
+    const end = nonNegativeInteger(value.end, `${path}.end`);
+    if (end <= start) fail(`${path} must have start < end`);
+    if (end > artifact.contentLength) fail(`${path}.end exceeds prepared artifact contentLength`);
+    const status = enumValue(value.status, COVERAGE_STATUSES, `${path}.status`) as ExtractionCoverageStatus;
+    if (status === "unread" && value.reason === undefined) fail(`${path}.reason is required when status is unread`);
+    if (status !== "unread" && value.reason !== undefined) fail(`${path}.reason is only allowed when status is unread`);
+    return {
+      chunk, start, end, status,
+      ...(value.reason === undefined ? {} : { reason: enumValue(value.reason, COVERAGE_REASONS, `${path}.reason`) as ExtractionCoverageReason }),
+    };
+  });
+  // Ranges may overlap (adjacent chunks share chunkOverlap) but must be ordered.
+  if (entries.some((entry, index) => index > 0 && entry.start < entries[index - 1].start)) {
+    fail("result.coverage entries must be ordered by start");
+  }
+  // One entry per chunk, except a chunk cut at maxContentChars: its sent part
+  // and its unread/content-truncated tail, which starts where the sent part ends.
+  const byChunk = new Map<number, PortableExtractionCoverageEntry[]>();
+  for (const entry of entries) byChunk.set(entry.chunk, [...(byChunk.get(entry.chunk) ?? []), entry]);
+  for (const [chunk, group] of byChunk) {
+    if (group.length === 1) continue;
+    const [sent, tail] = group;
+    const cutPair = group.length === 2 && tail.status === "unread" && tail.reason === "content-truncated" &&
+      sent.reason !== "content-truncated" && sent.reason !== "not-dispatched" && tail.start === sent.end;
+    if (!cutPair) fail(`result.coverage has more than one entry for chunk ${chunk} that is not a sent part and its content-truncated tail`);
+  }
+  return entries;
 }
 
 function validateOutcome(input: unknown): PortableExtractionOutcome {

@@ -17,10 +17,24 @@ export const detailHtml = `<!DOCTYPE html><html><body><h1>Riverside Clinic</h1><
 <section><ul><li>Parking available</li><li>Wheelchair accessible</li><li>Open weekends</li></ul></section>
 </main></body></html>`;
 
+// Page chrome inside and outside an article: the article's own header,
+// footer and aside are kept; a form (even in the article), a header and aside
+// inside main but outside the article, a noscript, and the page nav/footer
+// are removed.
+export const chromeHtml = `<!DOCTYPE html><html><body><nav><a href="/">Home</a></nav><main>
+<header><p>Breadcrumbs: Home / Roles</p></header>
+<form><p>Accept cookies</p><button>OK</button></form>
+<article><header><h1>Field Technician</h1><p>Pay: $31 per hour</p></header>
+<p>Full-time role at the north depot.</p><aside><p>Shift: nights</p></aside>
+<form><p>Apply now</p></form><footer><p>Posted 2026-09-01</p></footer></article>
+<aside><p>Related roles: $28 per hour</p></aside><noscript>Enable scripts</noscript>
+</main><footer>Site footer</footer></body></html>`;
+
 export const preparationInputs: Record<string, { content: string; contentType: ContentType; prep?: PrepMode }> = {
   "html-listing": { content: fixture("repeated-cards-page.html"), contentType: "html" },
   "html-detail": { content: detailHtml, contentType: "html" },
   "html-as-text": { content: detailHtml, contentType: "html", prep: "text" },
+  "html-chrome": { content: chromeHtml, contentType: "html" },
   transcript: { content: fixture("auto-captions.vtt"), contentType: "transcript" },
   text: { content: "Title: Alpine Hut\nFee: 1. *Twenty* dollars_per night", contentType: "text" },
 };

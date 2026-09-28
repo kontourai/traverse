@@ -45,7 +45,7 @@ describe("preparationVersion", () => {
   it("golden inputs cover every case and the current base version", () => {
     assert.deepEqual(Object.keys(goldens.cases).sort(), Object.keys(inputs).sort());
     assert.equal(goldens.baseVersion, PREPARED_ARTIFACT_PREPARATION_VERSION);
-    assert.equal(PREPARED_ARTIFACT_PREPARATION_VERSION, "2");
+    assert.equal(PREPARED_ARTIFACT_PREPARATION_VERSION, "3");
   });
 
   for (const name of Object.keys(inputs)) {

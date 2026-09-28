@@ -51,14 +51,20 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
         },
       });
       const call = response.functionCalls?.find((item) => item.name === TOOL_NAME);
-      const parsed = parseProposals(call?.args, name, input.contentType);
+      // A call present with no args is an unusable answer, not a missing call.
+      const parsed = parseProposals(call ? (call.args ?? null) : undefined, name, input.contentType);
       const warnings = [...parsed.warnings];
       if (!call) warnings.push("provider returned no extraction function call");
-      if (response.candidates?.some((candidate) => candidate.finishReason === "MAX_TOKENS")) warnings.push("response truncated at maxTokens; proposals may be incomplete");
+      const truncated = response.candidates?.some((candidate) => candidate.finishReason === "MAX_TOKENS") ?? false;
+      if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
       return {
         proposals: parsed.proposals,
         raw: { response: call?.args === undefined ? "" : JSON.stringify(call.args), model: response.modelVersion ?? model, modelSource: response.modelVersion ? "provider-reported" : "configured", tokensUsed: response.usageMetadata?.totalTokenCount ?? ((response.usageMetadata?.promptTokenCount ?? 0) + (response.usageMetadata?.candidatesTokenCount ?? 0)) },
         ...(warnings.length ? { warnings } : {}),
+        truncated,
+        missingToolCall: !call,
+        unusable: parsed.unusable,
+        ...(parsed.malformedItems > 0 ? { malformedToolItems: { dropped: parsed.malformedItems, total: parsed.totalItems } } : {}),
       };
     },
   };

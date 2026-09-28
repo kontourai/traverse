@@ -40,7 +40,6 @@ const meta = { fieldPath: "meta", candidateValue: { a: 0 }, confidence: 0.9, ext
 // a drop after resolution would visibly shift the neighbour.
 const triggers: Array<{ name: string; bad: unknown; neighbour: typeof fee | typeof meta; warning: string }> = [
   { name: "unstable extractor", bad: { ...fee, extractor: "my extractor (v1)" }, neighbour: fee, warning: 'dropped proposal for "fee": extractor is not a stable identity' },
-  { name: "non-numeric confidence", bad: { ...fee, confidence: Number.NaN }, neighbour: fee, warning: 'dropped proposal for "fee": non-numeric confidence' },
   { name: "NaN value", bad: { ...fee, candidateValue: Number.NaN }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
   { name: "undefined value", bad: { ...fee, candidateValue: undefined }, neighbour: fee, warning: 'dropped proposal for "fee": value not representable as portable JSON' },
   { name: "non-plain object value", bad: { ...meta, candidateValue: new Date(0) }, neighbour: meta, warning: 'dropped proposal for "meta": value not representable as portable JSON' },

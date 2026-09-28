@@ -66,18 +66,25 @@ export function createOpenAIExtractionProvider(opts: OpenAIAdapterOptions = {}):
       });
       const call = response.choices[0]?.message.tool_calls?.find((item) => item.function.name === TOOL_NAME);
       const warnings: string[] = [];
+      // undefined only when there is no call; unparseable or absent arguments
+      // on a present call are an unusable answer (null), not a missing call.
       let rawInput: unknown;
       if (call) {
-        try { rawInput = JSON.parse(call.function.arguments); }
-        catch { warnings.push("provider returned malformed JSON tool arguments"); }
+        try { rawInput = JSON.parse(call.function.arguments) ?? null; }
+        catch { rawInput = null; warnings.push("provider returned malformed JSON tool arguments"); }
       } else warnings.push("provider returned no extraction tool call");
       const parsed = parseProposals(rawInput, name, input.contentType);
       warnings.push(...parsed.warnings);
-      if (response.choices[0]?.finish_reason === "length") warnings.push("response truncated at maxTokens; proposals may be incomplete");
+      const truncated = response.choices[0]?.finish_reason === "length";
+      if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
       return {
         proposals: parsed.proposals,
         raw: { response: call?.function.arguments ?? "", model: response.model || model, modelSource: response.model ? "provider-reported" : "configured", tokensUsed: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)) },
         ...(warnings.length ? { warnings } : {}),
+        truncated,
+        missingToolCall: !call,
+        unusable: parsed.unusable,
+        ...(parsed.malformedItems > 0 ? { malformedToolItems: { dropped: parsed.malformedItems, total: parsed.totalItems } } : {}),
       };
     },
   };

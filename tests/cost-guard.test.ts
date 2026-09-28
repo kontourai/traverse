@@ -407,12 +407,7 @@ describe("extract() cost guard — usage surfaced on every return path", () => {
     // count is still accurate on this path.
     assert.equal(result.providerCalls, NATURAL_CHUNK_COUNT);
     assert.equal(result.totalTokensUsed, 0);
-    // Known, pre-existing gap (Stop-short risk 1, not introduced by this
-    // delivery): the all-chunks-failed fatal path constructs its
-    // ExtractionResult WITHOUT a `warnings` field at all, so even the
-    // per-chunk "provider call failed" warnings are dropped here, same as
-    // today for any other warning on this path. This test documents that
-    // gap rather than asserting a warning this code path cannot carry.
-    assert.equal(result.warnings, undefined);
+    // The fatal path keeps the per-chunk warnings (it used to drop them all).
+    assert.equal(result.warnings?.filter((w) => / provider call failed: provider boom /.test(w)).length, NATURAL_CHUNK_COUNT, JSON.stringify(result.warnings));
   });
 });

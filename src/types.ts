@@ -142,11 +142,13 @@ export interface ExtractionProposal {
   fieldPath: string;
   candidateValue: unknown;
   /**
-   * Provider-local 0..1 signal, clamped by extract() if out of range. Scores
-   * from different extractors are not assumed to be calibrated or comparable;
-   * `extractor` preserves the identity needed for review-outcome calibration.
+   * Optional provider self-report in `0..1`, clamped by extract() if out of
+   * range, and absent when the provider did not report one. It is never a
+   * calibrated probability: scores from different extractors are not
+   * comparable, and `extractor` preserves the identity a downstream calibrator
+   * needs. A grounded proposal survives whether or not this is present.
    */
-  confidence: number;
+  confidence?: number;
   /** REQUIRED — both excerpt and locator must be present. */
   provenance: ExtractionProvenance;
   /** provider identity string, e.g. "anthropic-extraction-provider:claude-sonnet-4-6". */
@@ -335,6 +337,13 @@ export interface ExtractionResult {
    * have to infer a partial run by parsing a warning string.
    */
   partial?: ExtractionPartial;
+  /**
+   * Which ranges of the prepared text each chunk read and answered, ordered by
+   * `start`. Present whenever the run prepared at least one chunk and reached
+   * dispatch. A range that was not read (or whose answer stopped at the output
+   * cap) has a non-`complete` entry, and `partial` names the reason.
+   */
+  coverage?: ExtractionCoverageEntry[];
   /** Provider failures normalized for control flow while retaining native diagnostics. */
   providerFailures?: ExtractionProviderFailure[];
   /** Present only when this run used a validated versioned task spec. */
@@ -387,13 +396,61 @@ export interface ExtractionResult {
   preparedArtifact?: PreparedArtifact;
 }
 
-/** Why an extraction run stopped before dispatching every prepared chunk. */
-export type ExtractionPartialReason = "cancelled" | "max-provider-calls" | "max-total-tokens" | "max-chunks";
+/**
+ * Why an extraction run did not read and answer all of its prepared text.
+ * The first four are early stops (chunks never dispatched). The last three are
+ * losses on a dispatched chunk: its provider call failed or returned no
+ * extraction call (`provider-failure`), its content was cut at
+ * `maxContentChars` (`content-truncated`), or its answer stopped at the output
+ * cap (`output-truncated`). An early stop wins when several apply; otherwise
+ * the first loss in prepared-text order is reported, and `coverage` has the
+ * rest.
+ */
+export type ExtractionPartialReason =
+  | "cancelled"
+  | "max-provider-calls"
+  | "max-total-tokens"
+  | "max-chunks"
+  | "provider-failure"
+  | "content-truncated"
+  | "output-truncated";
+
+/** Status of one coverage range. */
+export type ExtractionCoverageStatus = "complete" | "unread" | "output-truncated";
+
+/** Why a coverage range was not read. Required on every `unread` entry. */
+export type ExtractionCoverageReason = "provider-failure" | "content-truncated" | "missing-tool-call" | "not-dispatched";
 
 /**
- * Typed progress retained when a run ends early. `completedChunks` counts
- * chunks whose provider work completed (successfully or with a reported
- * provider failure); `remainingChunks` were never dispatched.
+ * One range of the prepared text and what happened to it.
+ *
+ * - `complete`: the range was sent and the provider answered in full.
+ * - `unread`: the range was never read; `reason` says why. For a chunk cut at
+ *   `maxContentChars` only the cut-off tail is `unread` (the sent part has its
+ *   own entry).
+ * - `output-truncated`: the whole range was sent but the answer stopped at the
+ *   output cap, so proposals for it may be missing.
+ *
+ * Ranges of adjacent chunks may overlap (by `chunkOverlap`); that is expected.
+ */
+export interface ExtractionCoverageEntry {
+  /** 1-based chunk index. Chunks dropped beyond `maxChunks` continue the numbering. */
+  chunk: number;
+  /** Prepared-text UTF-16 offsets, the same space as `chars:` locators; `start < end`. */
+  start: number;
+  end: number;
+  status: ExtractionCoverageStatus;
+  /** Present exactly when `status` is `unread`. */
+  reason?: ExtractionCoverageReason;
+}
+
+/**
+ * Typed progress retained when a run did not read all of its prepared text.
+ * `completedChunks` counts dispatched chunks whose provider work finished,
+ * whether or not it was answered: a call that threw, returned no tool call,
+ * or returned an unusable answer still counts (this is its 1.0.0 meaning,
+ * kept unchanged). `remainingChunks` were never dispatched. Which chunks were
+ * actually read and answered is in `ExtractionResult.coverage`.
  */
 export interface ExtractionPartial {
   reason: ExtractionPartialReason;
@@ -426,6 +483,40 @@ export interface ProviderExtractionOutput {
    * `ExtractionResult.warnings` alongside its own normalization warnings.
    */
   warnings?: string[];
+  /**
+   * `true` when the answer stopped at the output cap, so proposals may be
+   * missing; `false` when the adapter knows it did not. When absent,
+   * `extract()` falls back to a warning that starts with
+   * `"response truncated at maxTokens"`. The bundled adapters always set it.
+   */
+  truncated?: boolean;
+  /**
+   * `true` when the provider returned no extraction tool/function call, so
+   * nothing was answered; `false` when it did. When absent, `extract()` falls
+   * back to a warning that starts with `"provider returned no extraction tool
+   * call"` (or `function call`). The bundled adapters always set it.
+   */
+  missingToolCall?: boolean;
+  /**
+   * `true` when the provider answered but the answer is unusable: the tool
+   * call held no input or no proposals array, or every tool item was
+   * malformed. The chunk is then recorded as not read (`unread`/
+   * `provider-failure`). Any `proposals` returned alongside `unusable: true`
+   * are still normalized and kept (the flag records coverage, it does not
+   * discard evidence), unless every dispatched chunk ends up not read, in
+   * which case the run fails and returns no proposals. The bundled adapters
+   * always set it; `extract()` also detects a `proposals` value that is not an
+   * array, or an output that is not an object.
+   */
+  unusable?: boolean;
+  /**
+   * How many tool items the adapter dropped as malformed out of how many it
+   * received. `extract()` writes one located warning per chunk (code
+   * `malformed-tool-items`) so a consumer can apply its own threshold; the
+   * chunk's coverage is unaffected unless every item was dropped. The bundled
+   * adapters set it whenever they dropped an item.
+   */
+  malformedToolItems?: { dropped: number; total: number };
 }
 
 /** One positional result from a provider-native physical batch operation. */

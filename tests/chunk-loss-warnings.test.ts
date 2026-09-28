@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { FakeModelRuntime } from "@kontourai/relay";
 import { importExtractionEnvelope } from "@kontourai/survey";
-import { extract, serializePortableExtractionResult } from "../src/index.js";
+import { deserializePortableExtractionResult, extract, serializePortableExtractionResult } from "../src/index.js";
 import type { ExtractionProvider, ExtractionResult, TargetFieldSchema } from "../src/index.js";
 import { createAnthropicExtractionProvider } from "../src/anthropic.js";
 import { createOpenAIExtractionProvider } from "../src/openai.js";
@@ -97,7 +97,8 @@ describe("chunk-loss warnings", () => {
     for (const [label, provider] of adapters) {
       it(label, async () => {
         const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
-        assert.equal(result.error, undefined);
+        // Its only chunk went unanswered, so the run fails, keeping the warning.
+        assert.equal(result.error, "no dispatched chunk returned a usable answer");
         assert.ok(
           result.warnings?.some((w) => /^chunk 1\/1 \(chars:0-7\): provider returned no extraction (tool|function) call$/.test(w)),
           JSON.stringify(result.warnings),
@@ -118,7 +119,7 @@ describe("chunk-loss warnings", () => {
     assert.equal(result.warnings, undefined);
   });
 
-  it("envelopes carrying the new codes import through Survey's importExtractionEnvelope", async () => {
+  it("an envelope carrying every chunk-loss code is a partial outcome, and the current Survey importer refuses it rather than reading success", async () => {
     let n = 0;
     const provider: ExtractionProvider = {
       name: "p",
@@ -143,15 +144,19 @@ describe("chunk-loss warnings", () => {
     for (const code of ["chunk-provider-failure", "content-truncated-at-dispatch", "output-truncated", "missing-tool-call"]) {
       assert.ok(found.includes(code), `${code} missing from ${JSON.stringify(found)}`);
     }
-    const imported = importExtractionEnvelope(serialized, {
+    const envelope = deserializePortableExtractionResult(serialized);
+    assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "content-truncated" });
+    assert.deepEqual(envelope.result.warningClassifications?.map((w) => w.code), found);
+    // The Survey importer this suite pins predates the loss reasons and
+    // `coverage`, so it refuses the envelope (fail closed) instead of
+    // importing a lossy run as a success. When the dev dependency moves to a
+    // Survey release that reads them, turn this into a round trip.
+    assert.throws(() => importExtractionEnvelope(serialized, {
       sourceKind: "uploaded-document",
       claimTarget: () => ({
         subjectType: "fixture", subjectId: "fixture-1", facet: "fixture", claimType: "field-value",
         fieldOrBehavior: "fee", impactLevel: "low",
       }),
-    });
-    // The importer throws on an invalid warning; the record keeps the codes.
-    const record = JSON.stringify(imported.record);
-    for (const code of found) assert.ok(record.includes(`"code":"${code}"`), `${code} not carried into the import record`);
+    }), /result\.coverage is unexpected/);
   });
 });

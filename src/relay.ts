@@ -119,13 +119,14 @@ function relayOutput(
   providerName: string,
   contentType: ContentType,
 ): ProviderExtractionOutput {
-  const toolInput = result.toolCalls.find((call) => call.name === toolName)?.input;
+  const call = result.toolCalls.find((candidate) => candidate.name === toolName);
+  // A call present with no input is an unusable answer, not a missing call.
+  const toolInput = call === undefined ? undefined : (call.input ?? null);
   const parsed = parseProposals(toolInput, providerName, contentType);
   const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
   if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
-  if (result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens") {
-    warnings.push("response truncated at maxTokens; proposals may be incomplete");
-  }
+  const truncated = result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens";
+  if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
   // Read as unknown: `modelSource` is optional in Relay's contract and
   // absent from runtimes that predate it, so only the two known values pass.
   const modelSource: unknown = (result as { modelSource?: unknown }).modelSource;
@@ -138,6 +139,10 @@ function relayOutput(
       ...(result.usage.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }),
     },
     ...(warnings.length === 0 ? {} : { warnings }),
+    truncated,
+    missingToolCall: toolInput === undefined,
+    unusable: parsed.unusable,
+    ...(parsed.malformedItems > 0 ? { malformedToolItems: { dropped: parsed.malformedItems, total: parsed.totalItems } } : {}),
   };
 }
 
@@ -184,7 +189,7 @@ export function buildRelayExtractionSchema(targetSchema: TargetFieldSchema[]): J
           properties: {
             fieldPath: { type: "string", enum: targetSchema.map((field) => field.path), description: "Exact target field path." },
             value: valueSchema,
-            confidence: { type: "number", description: "Confidence 0.0-1.0." },
+            confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
             excerpt: { type: "string", description: "Verbatim source span the value came from." },
             locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
             occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }

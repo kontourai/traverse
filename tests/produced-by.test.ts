@@ -151,10 +151,10 @@ describe("per-proposal producedBy", () => {
   });
 
   it("keeps the producedBy of the proposal dedup keeps", async () => {
-    // Two chunks both see "Shared Title" in their overlap; the second call's
-    // copy has the higher confidence, so its value, confidence and model win.
+    // Two chunks both see "Shared Title" in their overlap. Dedup keeps the
+    // first-seen copy whole, whatever confidence either call reported.
     const overlapContent = `${"a".repeat(84)}Shared Title${"b".repeat(84)}`;
-    for (const [confidences, winner] of [[[0.5, 0.9], "model-2"], [[0.7, 0.7], "model-1"]] as const) {
+    for (const [confidences, winner] of [[[0.5, 0.9], "model-1"], [[0.7, 0.7], "model-1"]] as const) {
       let call = 0;
       const provider: ExtractionProvider = {
         name: "p",
@@ -173,7 +173,7 @@ describe("per-proposal producedBy", () => {
       assert.equal(call, 2);
       assert.equal(result.proposals.length, 1);
       assert.equal(result.proposals[0]?.producedBy?.model, winner, JSON.stringify(confidences));
-      assert.equal(result.proposals[0]?.confidence, Math.max(...confidences));
+      assert.equal(result.proposals[0]?.confidence, confidences[0]);
     }
   });
 

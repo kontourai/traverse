@@ -13,6 +13,10 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/169
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/166
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/164
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/165
 ---
 
 # Portable extraction-result envelope
@@ -59,6 +63,82 @@ second artifact object. Successful, unavailable, storage, and digest states
 require exact artifact identity; identity mismatch requires every metadata
 field except the requested ref to match the canonical result artifact; invalid
 artifact retains its typed reason against that canonical reference.
+
+### Partial reasons and coverage
+
+`outcome: { status: "success" }` means every prepared-text range was read and
+answered. A loss on a dispatched chunk makes the outcome `partial` with one of
+three reasons besides the early stops (`cancelled`, `max-provider-calls`,
+`max-total-tokens`, `max-chunks`): `provider-failure` (the call failed or
+returned no extraction tool call), `content-truncated` (the chunk was cut at
+`maxContentChars`), or `output-truncated` (the answer stopped at the output
+cap). An early stop wins when several apply; otherwise the first loss in
+prepared-text order is the reason. `partial.completedChunks` and
+`remainingChunks` keep their meaning.
+
+A partial envelope carries `result.coverage`:
+
+```ts
+coverage?: Array<{
+  chunk: number;   // 1-based; chunks dropped by maxChunks continue the numbering
+  start: number;   // prepared-text UTF-16 offsets, the space of chars: locators
+  end: number;
+  status: "complete" | "unread" | "output-truncated";
+  reason?: "provider-failure" | "content-truncated" | "missing-tool-call" | "not-dispatched";
+}>
+```
+
+Entries are ordered by `start` and may overlap (adjacent chunks share
+`chunkOverlap`). An `unread` entry covers exactly the unread span, so a chunk
+cut at `maxContentChars` has a `complete` (or other) entry for the sent part and
+an `unread`/`content-truncated` entry for the tail. `reason` is present exactly
+on `unread` entries. An answer core cannot use (a tool call with no proposals
+array or only malformed items, a `proposals` value that is not an array, an
+output that is not an object, or normalization that threw) is
+`unread`/`provider-failure`, like a failed call, with a located
+`provider answer unusable` warning (code `unusable-answer`). Some malformed
+items beside usable ones are per-proposal drops (`proposal-normalization`),
+not a lost chunk; the chunk also gets one located
+`dropped k of n tool items as malformed` warning (code
+`normalization`/`malformed-tool-items`) so a consumer can apply a threshold.
+
+When no dispatched chunk was answered, the run is a failure, as when every
+call throws: `provider`/`provider-failure` if any call threw, otherwise
+`provider`/`no-usable-answer`. (An early stop still takes precedence and makes
+it `partial`, as before.) `partial.completedChunks` keeps its 1.0.0 meaning:
+dispatched chunks whose provider work finished, answered or not; coverage says
+which were answered.
+
+Coverage describes the prepared text only. Structural chunking drops a whole
+outside-text segment beyond `maxChunks` before the prepared text is built, so
+that text has no range: only `partial.reason: "max-chunks"` records the loss.
+Coverage of a success outcome is therefore not required to span
+`[0, contentLength)`; structural segments are also joined by two-character
+separators that no chunk covers.
+
+The validator requires `result.preparedArtifact`,
+`0 <= start < end <= contentLength`, ascending `start`, and at most one entry
+per chunk except a sent part followed by its `unread`/`content-truncated` tail
+starting where the sent part ends. It rejects a non-`complete` entry on a
+`success` outcome, and a loss reason (`provider-failure`, `content-truncated`,
+`output-truncated`) without a non-`complete` entry for a dispatched chunk (one
+whose reason is not `not-dispatched`). A never-dispatched range cannot have a
+`content-truncated` tail.
+
+The `output-truncated` and `missing-tool-call` warning codes are given only to
+the chunk-located warning `extract()` writes when it records that loss, so they
+never appear beside an outcome that ignores it.
+
+The serializer emits `coverage` only on a `partial` outcome. A run that read
+everything therefore serializes exactly as it did before coverage existed, and
+a reader that predates these fields keeps importing it; such a reader refuses a
+lossy envelope instead of reading it as a success.
+
+### Optional confidence
+
+`proposal.confidence` is optional: an uncalibrated provider self-report,
+absent when the provider did not report one. When present it must be a finite
+number in `0..1`.
 
 Validation is fail-closed: it rejects unknown format versions, unexpected
 properties (including symbol, accessor, and non-enumerable properties),
