@@ -218,6 +218,47 @@ export interface ExtractionProposal {
    * fallback), so this, not `ExtractionResult.raw.model`, attributes a value.
    */
   producedBy?: ExtractionProducedBy;
+  /**
+   * Deterministic facts about how `candidateValue` relates to the matched
+   * schema entry and to `provenance.excerpt`, set by `extract()` on every
+   * proposal it returns. Annotation only: no proposal is dropped, warned about
+   * or reordered because of it, and it is not a verdict on whether the value
+   * is correct. Provider-supplied values are ignored. Optional in the type so
+   * code that builds proposals by hand keeps compiling.
+   */
+  evidenceMatch?: ExtractionEvidenceMatch;
+}
+
+/** Exact validity of a candidate value against its schema entry's type and enum. */
+export type ExtractionSchemaMatch = "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
+
+/** Whether a normalized candidate value occurs in its excerpt. */
+export type ExtractionValueInExcerpt = "match" | "mismatch" | "not-evaluated" | "not-applicable";
+
+/**
+ * Checks computed from the proposal's own text. See
+ * `docs/decisions/extraction-proposals.md` ("Evidence annotations") for each
+ * rule and a recommended consumer policy.
+ */
+export interface ExtractionEvidenceMatch {
+  /** Names the rules that produced this record, e.g. `"evidence-match-v1"`. */
+  checkerVersion: string;
+  /**
+   * `ok`, or why not: `type-mismatch` (wrong JSON type for the declared
+   * `type`), `enum-mismatch` (a string outside `enumValues`), or
+   * `format-invalid` (a `date` string that is not an ISO-8601 calendar date or
+   * date-time).
+   */
+  schema: ExtractionSchemaMatch;
+  /**
+   * `match`/`mismatch` when the value was compared with the excerpt;
+   * `not-evaluated` when the value or the excerpt could not be normalized for
+   * comparison; `not-applicable` when the field is not declared
+   * `inferenceType: "explicit"` or is an `array`/`object`.
+   */
+  valueInExcerpt: ExtractionValueInExcerpt;
+  /** False when the excerpt starts or ends inside a word of the prepared text (e.g. `"3"` taken from `"2023"`). */
+  tokenBoundary?: boolean;
 }
 
 /** Where a model identity came from. */

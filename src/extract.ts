@@ -75,6 +75,10 @@
  *    through; an out-of-range value is CLAMPED into `0..1` with a warning. The
  *    bundled adapters pass finite out-of-range values through to this clamp.
  *
+ * Every surviving proposal also gets `evidenceMatch`, deterministic schema and
+ * value-in-excerpt annotations (src/evidence-match.ts). They never drop, warn
+ * about or reorder a proposal.
+ *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
  * the Anthropic adapter's malformed-tool-item / maxTokens-truncation notes) —
@@ -89,6 +93,7 @@ import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, prepa
 import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
 import { NO_USABLE_ANSWER_ERROR, isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
+import { evidenceMatchFor } from "./evidence-match.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
@@ -939,6 +944,12 @@ function normalizeChunkProposals(
     if (matchedSchema?.inferenceType !== undefined) proposal.inferenceType = matchedSchema.inferenceType;
     if (matchedSchema?.type !== undefined) proposal.valueType = matchedSchema.type;
     if (matchedSchema?.enumValues?.length) proposal.enumValues = [...matchedSchema.enumValues];
+    // Annotation only: evidenceMatch never drops, warns about or reorders a proposal.
+    if (matchedSchema) {
+      proposal.evidenceMatch = evidenceMatchFor(
+        candidateValue, matchedSchema, excerpt, fullText, occurrence.selected.start, occurrence.selected.end,
+      );
+    }
     proposals.push(proposal);
   }
 

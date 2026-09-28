@@ -7,6 +7,10 @@ evidence:
     ref: docs/adr/0001-proposals-only.md
   - kind: doc
     ref: .kontourai/flow-agents/inference-type/inference-type--deliver-plan.md
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/170
+  - kind: doc
+    ref: src/evidence-match.ts
 ---
 
 # Extraction proposals
@@ -82,24 +86,82 @@ positive or negative):
    honest "offset-grounded value" vs. "derived value, excerpt-grounded only"
    badge; a caller who does not read it observes nothing different at all.
 
+## Evidence annotations (`evidenceMatch`)
+
+`extract()` sets `evidenceMatch` on every proposal it returns: deterministic,
+versioned facts computed from the proposal's own value, schema entry and
+excerpt. It is an annotation, not a verdict. No proposal is dropped, warned
+about, clamped or reordered because of it, the `[AC6]` test above is
+unchanged, and a provider-supplied `evidenceMatch` is ignored. Traverse
+computes only these deterministic checks; checking a value with a model is
+not Traverse's job, and no Traverse confidence is derived from them.
+
+```ts
+evidenceMatch: {
+  checkerVersion: "evidence-match-v1";
+  schema: "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
+  valueInExcerpt: "match" | "mismatch" | "not-evaluated" | "not-applicable";
+  tokenBoundary?: boolean;
+}
+```
+
+- **`schema`** is exact. The value's JSON type must be the declared `type`
+  (the same predicate task examples use); an `enum` string outside
+  `enumValues` is `enum-mismatch`; a `date` string that is not an ISO-8601
+  calendar date in extended format (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`,
+  optionally `THH:MM[:SS[.fff]]` and `Z` or `±HH:MM`, each component
+  range-checked) is `format-invalid`.
+- **`valueInExcerpt`** runs only for fields declared
+  `inferenceType: "explicit"` with a scalar type. Inferred and unclassified
+  fields, and `array`/`object` fields, are `not-applicable`: only an explicit
+  value is meant to appear in the source. The rule for every type is
+  containment on token boundaries after a fixed normalization; equality is
+  not required, so `"open"` matches `"Status: Open"`.
+  - `string`/`enum`: NFKC, lower case, and letters/marks/digits as tokens,
+    so whitespace and punctuation fold away (`"303.555.1234"` matches
+    `"(303) 555-1234"`). The value's tokens must occur as a contiguous run of
+    the excerpt's tokens (`"open"` does not match `"Reopened"`).
+  - `number`: written numbers in the excerpt, each optionally signed and led
+    by a currency symbol, with comma thousands separators and a point
+    decimal, not touching a letter or digit (`3` is not read from `2023`).
+    `match` when one equals the value.
+  - `boolean`: the words yes/true and no/false.
+  - `date`: the value must be `YYYY-MM-DD`; the excerpt is read for
+    `2026-06-09`, `June 9, 2026` and `9 June 2026` (English month names, full
+    or abbreviated, optional ordinal and comma). Numeric forms like
+    `06/09/2026` are ambiguous between day-first and month-first and are not
+    read.
+  - A value or excerpt the normalizer cannot read (a number written in
+    words, no yes/no word, no readable date, a value with no word
+    characters, a value of the wrong type) is `not-evaluated`, never
+    `mismatch`.
+- **`tokenBoundary`** is false when the excerpt starts or ends inside a word
+  of the prepared text (the excerpt `"3"` located inside `"2023"`).
+
+Changing any rule so that some input gets a different result changes
+`checkerVersion`.
+
+**Recommended consumer policy.** A `schema` result other than `ok` can block
+by default, because it is exact. `valueInExcerpt` and `tokenBoundary` are
+annotations until the value-in-excerpt check's false-mismatch rate has been
+measured on a labelled set; after that a consumer may choose to block on
+`mismatch`. `not-evaluated` and `not-applicable` say nothing about the value.
+The consumer decides what blocks; Traverse does not.
+
+The portable envelope carries `evidenceMatch` as an optional proposal key
+(see `portable-extraction-result-envelope.md`).
+
 ## Out of scope
 
 - **A stricter, `inferenceType === "explicit"`-gated "candidateValue must be
-  groundable in the excerpt" check** (opt-in via some future flag), deferred
-  as an explicit follow-up, not a silently-dropped TODO. Reasoning:
-  - Today, `candidateValue` passes through `normalizeChunkProposals`
-    completely unverified — only `provenance.excerpt` is checked against the
-    prepared text via `indexOf`. There is no existing normalization/
-    comparison utility for "does this value appear in this text," and
-    building one correctly is a much bigger, separate design problem:
-    `candidateValue` is typed per field (`"string" | "number" | "boolean" |
-    "date" | "enum" | "array" | "object"`) so a literal substring check
-    would need format-aware equivalence — number-vs-formatted-text (`45` vs
-    `"$45.00"`), date-vs-prose (`"2026-06-09"` vs `"June 9, 2026"`), and
-    whitespace/casing/punctuation folding for strings (`"(303) 555-1234"` vs
-    `"303.555.1234"`; `"123 Main St."` vs `"123 Main St"` inside a longer
-    address excerpt) — none of which today's strict, single-mechanism
-    `indexOf` excerpt check does or is designed to do.
+  groundable in the excerpt" check that drops proposals.** The annotation
+  above records the comparison without dropping anything ("Evidence
+  annotations", issue #170); a gate remains the consumer's choice. The
+  original reasons for not building a dropping check here still hold:
+  - Format-aware equivalence is heuristic. The normalizers above cover a
+    fixed set of forms and report anything else as `not-evaluated`; their
+    false-mismatch rate on real pages has not been measured, so dropping on
+    `mismatch` could remove well-grounded values.
   - The fields most likely to be tagged `"explicit"` in practice (address/
     zip/contact fields, money amounts) are exactly the ones most prone to
     formatting drift between a provider's returned value and the raw
@@ -111,10 +173,8 @@ positive or negative):
     `tests/extract.test.ts`'s `"inferenceType carry-through"` suite,
     `"[AC6] adds no new drop/warning/clamp condition..."`, which pins this
     exact no-op behavior for a reformatted phone number.)
-  - No test/spec exists yet for what "close enough" means for a stricter
-    check (locale-aware date parsing, number-format equivalence, casing/
-    whitespace folding rules) — inventing that scope inside this slice would
-    turn an additive field into a value-dropping gate with unreviewed
-    semantics.
+  - A gate needs a labelled evaluation set first; until one exists, blocking
+    on `valueInExcerpt` would turn an annotation into a value-dropping gate
+    with unmeasured error.
   - Downstream rendering of the explicit/inferred distinction in a review UI
     (e.g. Survey-side) is separate work, not attempted here.

@@ -236,6 +236,28 @@ itself adds **no new drop behavior** — constraint metadata only. Additive and
 optional: a consumer that ignores these fields sees no change. `enumValues` is
 a defensive copy, so mutating it never reaches the caller's schema.
 
+## Evidence annotations (`evidenceMatch`)
+
+Every proposal `extract()` returns carries deterministic facts about its value:
+
+```ts
+// schema: { path: "price", type: "number", inferenceType: "explicit" }
+// proposal: { fieldPath: "price", candidateValue: 999,
+//             provenance: { excerpt: "Price: $10 per session.", ... },
+//             evidenceMatch: { checkerVersion: "evidence-match-v1", schema: "ok",
+//                              valueInExcerpt: "mismatch", tokenBoundary: true }, ... }
+```
+
+`schema` is an exact check of the value against the declared type, enum and
+(for `date`) ISO-8601 format. `valueInExcerpt` checks, for fields declared
+`inferenceType: "explicit"`, whether the value appears in its excerpt after a
+fixed format-aware normalization (`45` matches `"$45.00"`, `"303.555.1234"`
+matches `"(303) 555-1234"`); anything it cannot read is `not-evaluated`.
+`tokenBoundary` is false when the excerpt was cut from inside a word. These are
+annotations, not verdicts: nothing is dropped because of them, and your review
+policy decides what blocks. The rules and a recommended policy are in
+[`docs/decisions/extraction-proposals.md`](docs/decisions/extraction-proposals.md).
+
 ## Quickstart
 
 ```ts

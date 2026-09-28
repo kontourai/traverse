@@ -73,7 +73,8 @@ export function createExtractionTaskSpec(input: TaskDraft): ExtractionTaskSpec {
   return { ...payload, digest: digest(payload) };
 }
 
-function valueMatches(value: unknown, field: TargetFieldSchema): boolean {
+/** Whether a value has the JSON type (and, for an enum, a member) the field declares. */
+export function valueMatches(value: unknown, field: TargetFieldSchema): boolean {
   switch (field.type) {
     case "string": case "date": return typeof value === "string";
     case "number": return typeof value === "number" && Number.isFinite(value);

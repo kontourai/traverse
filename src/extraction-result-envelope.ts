@@ -25,6 +25,9 @@ import type {
   ExtractionCoverageStatus,
   ExtractionPartial,
   ExtractionModelSource,
+  ExtractionEvidenceMatch,
+  ExtractionSchemaMatch,
+  ExtractionValueInExcerpt,
   ExtractionProposal,
   ExtractionProviderFailure,
   ExtractionResult,
@@ -165,6 +168,8 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 const VALUE_TYPES: ReadonlySet<TargetFieldSchema["type"]> = new Set(["string", "number", "boolean", "date", "enum", "array", "object"]);
 const INFERENCE_TYPES = new Set(["explicit", "inferred"]);
+const SCHEMA_MATCHES = new Set<ExtractionSchemaMatch>(["ok", "type-mismatch", "enum-mismatch", "format-invalid"]);
+const VALUE_IN_EXCERPT_MATCHES = new Set<ExtractionValueInExcerpt>(["match", "mismatch", "not-evaluated", "not-applicable"]);
 const PARTIAL_REASONS = new Set([
   "cancelled", "max-provider-calls", "max-total-tokens", "max-chunks",
   "provider-failure", "content-truncated", "output-truncated",
@@ -307,6 +312,16 @@ function portableProposal(proposal: ExtractionProposal): PortableExtractionPropo
     ...(proposal.enumValues !== undefined ? { enumValues: proposal.enumValues } : {}),
     ...(proposal.producedBy?.modelSource !== undefined
       ? { producedBy: { model: proposal.producedBy.model, modelSource: proposal.producedBy.modelSource, requestDigest: proposal.producedBy.requestDigest } }
+      : {}),
+    ...(proposal.evidenceMatch !== undefined
+      ? {
+        evidenceMatch: {
+          checkerVersion: proposal.evidenceMatch.checkerVersion,
+          schema: proposal.evidenceMatch.schema,
+          valueInExcerpt: proposal.evidenceMatch.valueInExcerpt,
+          ...(proposal.evidenceMatch.tokenBoundary !== undefined ? { tokenBoundary: proposal.evidenceMatch.tokenBoundary } : {}),
+        },
+      }
       : {}),
   };
 }
@@ -489,7 +504,7 @@ function validateResult(input: unknown): PortableExtractionResult {
 
 function validateProposal(input: unknown, path: string, artifact: PreparedArtifact | undefined): PortableExtractionProposal {
   const value = record(input, path);
-  exactKeys(value, ["fieldPath", "candidateValue", "provenance", "extractor"], ["confidence", "pathIndices", "inferenceType", "valueType", "enumValues", "producedBy"], path);
+  exactKeys(value, ["fieldPath", "candidateValue", "provenance", "extractor"], ["confidence", "pathIndices", "inferenceType", "valueType", "enumValues", "producedBy", "evidenceMatch"], path);
   const provenance = record(value.provenance, `${path}.provenance`);
   exactKeys(provenance, ["excerpt", "locator", "occurrence"], [], `${path}.provenance`);
   const locator = validateLocator(provenance.locator, `${path}.provenance.locator`);
@@ -508,6 +523,18 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
     ...(value.valueType === undefined ? {} : { valueType: enumValue(value.valueType, VALUE_TYPES, `${path}.valueType`) as TargetFieldSchema["type"] }),
     ...(value.enumValues === undefined ? {} : { enumValues: strings(value.enumValues, `${path}.enumValues`) }),
     ...(value.producedBy === undefined ? {} : { producedBy: validateProducedBy(value.producedBy, `${path}.producedBy`) }),
+    ...(value.evidenceMatch === undefined ? {} : { evidenceMatch: validateEvidenceMatch(value.evidenceMatch, `${path}.evidenceMatch`) }),
+  };
+}
+
+function validateEvidenceMatch(input: unknown, path: string): ExtractionEvidenceMatch {
+  const value = record(input, path);
+  exactKeys(value, ["checkerVersion", "schema", "valueInExcerpt"], ["tokenBoundary"], path);
+  return {
+    checkerVersion: stableIdentity(value.checkerVersion, `${path}.checkerVersion`),
+    schema: enumValue(value.schema, SCHEMA_MATCHES, `${path}.schema`) as ExtractionSchemaMatch,
+    valueInExcerpt: enumValue(value.valueInExcerpt, VALUE_IN_EXCERPT_MATCHES, `${path}.valueInExcerpt`) as ExtractionValueInExcerpt,
+    ...(value.tokenBoundary === undefined ? {} : { tokenBoundary: boolean(value.tokenBoundary, `${path}.tokenBoundary`) }),
   };
 }
 

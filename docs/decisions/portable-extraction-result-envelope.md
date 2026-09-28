@@ -18,6 +18,8 @@ evidence:
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/165
   - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/170
+  - kind: issue
     ref: https://github.com/kontourai/traverse/issues/183
 ---
 
@@ -57,7 +59,16 @@ model that served that proposal's own provider call, whether that identity was
 request. All three keys are required when `producedBy` is present; a proposal
 whose provider did not say where its model identity came from carries no
 `producedBy`. `result.model` keeps its meaning (the last successful chunk's
-model), so in a multi-chunk run `producedBy.model` is the per-value model. Prepared artifact resolution can be attached as a text-free
+model), so in a multi-chunk run `producedBy.model` is the per-value model.
+A proposal may carry `evidenceMatch: { checkerVersion, schema, valueInExcerpt,
+tokenBoundary? }`, the deterministic schema and value-in-excerpt annotations
+defined in `extraction-proposals.md`. The validator requires the first three
+keys when the object is present, requires `checkerVersion` to be a stable
+identity, checks `schema` against `ok`/`type-mismatch`/`enum-mismatch`/
+`format-invalid` and `valueInExcerpt` against `match`/`mismatch`/
+`not-evaluated`/`not-applicable`, requires `tokenBoundary` to be a boolean
+when present, and rejects other keys. It is a set of facts, not a trust
+state. Prepared artifact resolution can be attached as a text-free
 typed state (`available`, `unavailable`, `storage-error`, `identity-mismatch`,
 `digest-mismatch`, or `invalid-artifact`).
 Resolution states carry requested/canonical reference evidence rather than a
@@ -159,6 +170,20 @@ The serializer emits `coverage` only on a `partial` outcome. A run that read
 everything therefore serializes exactly as it did before coverage existed, and
 a reader that predates these fields keeps importing it; such a reader refuses a
 lossy envelope instead of reading it as a success.
+
+### Adding optional proposal keys
+
+`producedBy` and `evidenceMatch` were added to version 1 as optional keys, and
+a writer omits each when it has nothing to say, so an envelope without them
+reads exactly as before. The validator is fail-closed, so a reader that
+predates a key rejects an envelope carrying it with an explicit
+unexpected-property error rather than dropping the key or misreading it. For
+`evidenceMatch`: `@kontourai/traverse` 2.0.0 and earlier, and
+`@kontourai/survey` 3.x and earlier, reject it; `@kontourai/survey` 4.0.0 and
+5.0.0 accept it with the same key set and enums. Because `extract()` sets it on
+every proposal, an envelope with at least one proposal from this version no
+longer imports into those older readers; a producer must upgrade its readers
+first. The format version stays 1 because no existing field changed meaning.
 
 ### Optional confidence
 
