@@ -278,10 +278,15 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && isFinite(value) ? value : undefined;
 }
 
+/**
+ * The extraction tool call's input: `undefined` only when there is no such
+ * call. A call present with no input yields `null`, so parseProposals reports
+ * it as an unusable answer rather than a missing call.
+ */
 function extractToolUseInput(message: AnthropicMessage, toolName: string): unknown {
   for (const block of message.content) {
     if (block.type === "tool_use" && block.name === toolName) {
-      return block.input;
+      return block.input ?? null;
     }
   }
   return undefined;
@@ -312,16 +317,16 @@ export function parseProposals(
   rawToolInput: unknown,
   extractorName: string,
   contentType: ContentType,
-): { proposals: ExtractionProposal[]; warnings: string[]; unusable: boolean } {
+): { proposals: ExtractionProposal[]; warnings: string[]; unusable: boolean; malformedItems: number; totalItems: number } {
   const warnings: string[] = [];
 
   // A missing tool call (undefined) is the caller's missingToolCall signal;
   // a tool call whose input holds no proposals array is an unusable answer.
-  if (rawToolInput === undefined) return { proposals: [], warnings, unusable: false };
+  if (rawToolInput === undefined) return { proposals: [], warnings, unusable: false, malformedItems: 0, totalItems: 0 };
   const rawProposals = isRecord(rawToolInput) ? rawToolInput["proposals"] : undefined;
   if (!isArray(rawProposals)) {
     warnings.push("provider tool call had no usable proposals array");
-    return { proposals: [], warnings, unusable: true };
+    return { proposals: [], warnings, unusable: true, malformedItems: 0, totalItems: 0 };
   }
 
   const results: ExtractionProposal[] = [];
@@ -368,7 +373,12 @@ export function parseProposals(
   });
   // Every item malformed leaves nothing answered; some malformed is a
   // per-proposal drop, reported like any other normalization drop.
-  return { proposals: results, warnings, unusable: rawProposals.length > 0 && results.length === 0 };
+  return {
+    proposals: results, warnings,
+    unusable: rawProposals.length > 0 && results.length === 0,
+    malformedItems: rawProposals.length - results.length,
+    totalItems: rawProposals.length,
+  };
 }
 
 /** Build the domain-owned prompt shared by direct-SDK and Relay adapters. */
@@ -455,7 +465,7 @@ export function createAnthropicExtractionProvider(
       });
 
       const toolInput = extractToolUseInput(message, TOOL_NAME);
-      const { proposals, warnings, unusable } = parseProposals(toolInput, name, input.contentType);
+      const { proposals, warnings, unusable, malformedItems, totalItems } = parseProposals(toolInput, name, input.contentType);
       if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
 
       if (message.stop_reason === "max_tokens") {
@@ -474,6 +484,7 @@ export function createAnthropicExtractionProvider(
         truncated: message.stop_reason === "max_tokens",
         missingToolCall: toolInput === undefined,
         unusable,
+        ...(malformedItems > 0 ? { malformedToolItems: { dropped: malformedItems, total: totalItems } } : {}),
       };
     },
   };

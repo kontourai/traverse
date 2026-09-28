@@ -446,9 +446,11 @@ export interface ExtractionCoverageEntry {
 
 /**
  * Typed progress retained when a run did not read all of its prepared text.
- * `completedChunks` counts chunks whose provider work completed (successfully
- * or with a reported provider failure); `remainingChunks` were never
- * dispatched. Per-range detail is in `ExtractionResult.coverage`.
+ * `completedChunks` counts dispatched chunks whose provider work finished,
+ * whether or not it was answered: a call that threw, returned no tool call,
+ * or returned an unusable answer still counts (this is its 1.0.0 meaning,
+ * kept unchanged). `remainingChunks` were never dispatched. Which chunks were
+ * actually read and answered is in `ExtractionResult.coverage`.
  */
 export interface ExtractionPartial {
   reason: ExtractionPartialReason;
@@ -497,12 +499,24 @@ export interface ProviderExtractionOutput {
   missingToolCall?: boolean;
   /**
    * `true` when the provider answered but the answer is unusable: the tool
-   * call held no proposals array, or every tool item was malformed. The chunk
-   * is then recorded as not read (`unread`/`provider-failure`). The bundled
-   * adapters always set it; `extract()` also detects a `proposals` value that
-   * is not an array, or an output that is not an object.
+   * call held no input or no proposals array, or every tool item was
+   * malformed. The chunk is then recorded as not read (`unread`/
+   * `provider-failure`). Any `proposals` returned alongside `unusable: true`
+   * are still normalized and kept (the flag records coverage, it does not
+   * discard evidence), unless every dispatched chunk ends up not read, in
+   * which case the run fails and returns no proposals. The bundled adapters
+   * always set it; `extract()` also detects a `proposals` value that is not an
+   * array, or an output that is not an object.
    */
   unusable?: boolean;
+  /**
+   * How many tool items the adapter dropped as malformed out of how many it
+   * received. `extract()` writes one located warning per chunk (code
+   * `malformed-tool-items`) so a consumer can apply its own threshold; the
+   * chunk's coverage is unaffected unless every item was dropped. The bundled
+   * adapters set it whenever they dropped an item.
+   */
+  malformedToolItems?: { dropped: number; total: number };
 }
 
 /** One positional result from a provider-native physical batch operation. */

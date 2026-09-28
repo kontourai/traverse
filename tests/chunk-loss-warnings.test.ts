@@ -97,7 +97,8 @@ describe("chunk-loss warnings", () => {
     for (const [label, provider] of adapters) {
       it(label, async () => {
         const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
-        assert.equal(result.error, undefined);
+        // Its only chunk went unanswered, so the run fails, keeping the warning.
+        assert.equal(result.error, "no dispatched chunk returned a usable answer");
         assert.ok(
           result.warnings?.some((w) => /^chunk 1\/1 \(chars:0-7\): provider returned no extraction (tool|function) call$/.test(w)),
           JSON.stringify(result.warnings),

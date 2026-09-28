@@ -238,16 +238,19 @@ describe("buildExtractionTool / parseProposals (units)", () => {
 
   it("returns empty proposals/warnings for non-record / missing proposals input", () => {
     // No tool call at all is the adapter's missingToolCall signal, not an unusable answer.
-    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [], unusable: false });
-    const unusable = { proposals: [], warnings: ["provider tool call had no usable proposals array"], unusable: true };
+    const none = { malformedItems: 0, totalItems: 0 };
+    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [], unusable: false, ...none });
+    const unusable = { proposals: [], warnings: ["provider tool call had no usable proposals array"], unusable: true, ...none };
     assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), unusable);
     assert.deepEqual(parseProposals("string", "x", "html"), unusable);
     assert.deepEqual(parseProposals({ proposals: null }, "x", "html"), unusable);
     // A valid empty array is a usable answer: nothing found.
-    assert.deepEqual(parseProposals({ proposals: [] }, "x", "html"), { proposals: [], warnings: [], unusable: false });
+    assert.deepEqual(parseProposals({ proposals: [] }, "x", "html"), { proposals: [], warnings: [], unusable: false, ...none });
     // Every item malformed is unusable; some malformed is not.
     assert.equal(parseProposals({ proposals: [7, { junk: 1 }] }, "x", "html").unusable, true);
-    assert.equal(parseProposals({ proposals: [7, { fieldPath: "title", value: "t", excerpt: "t" }] }, "x", "html").unusable, false);
+    const some = parseProposals({ proposals: [7, { fieldPath: "title", value: "t", excerpt: "t" }] }, "x", "html");
+    assert.equal(some.unusable, false);
+    assert.deepEqual([some.malformedItems, some.totalItems], [1, 2]);
   });
 
   it("preserves an optional integer occurrence hint for exact resolver verification", () => {

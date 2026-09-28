@@ -98,7 +98,16 @@ output that is not an object, or normalization that threw) is
 `unread`/`provider-failure`, like a failed call, with a located
 `provider answer unusable` warning (code `unusable-answer`). Some malformed
 items beside usable ones are per-proposal drops (`proposal-normalization`),
-not a lost chunk.
+not a lost chunk; the chunk also gets one located
+`dropped k of n tool items as malformed` warning (code
+`normalization`/`malformed-tool-items`) so a consumer can apply a threshold.
+
+When no dispatched chunk was answered, the run is a failure, as when every
+call throws: `provider`/`provider-failure` if any call threw, otherwise
+`provider`/`no-usable-answer`. (An early stop still takes precedence and makes
+it `partial`, as before.) `partial.completedChunks` keeps its 1.0.0 meaning:
+dispatched chunks whose provider work finished, answered or not; coverage says
+which were answered.
 
 Coverage describes the prepared text only. Structural chunking drops a whole
 outside-text segment beyond `maxChunks` before the prepared text is built, so

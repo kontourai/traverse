@@ -51,7 +51,8 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
         },
       });
       const call = response.functionCalls?.find((item) => item.name === TOOL_NAME);
-      const parsed = parseProposals(call?.args, name, input.contentType);
+      // A call present with no args is an unusable answer, not a missing call.
+      const parsed = parseProposals(call ? (call.args ?? null) : undefined, name, input.contentType);
       const warnings = [...parsed.warnings];
       if (!call) warnings.push("provider returned no extraction function call");
       const truncated = response.candidates?.some((candidate) => candidate.finishReason === "MAX_TOKENS") ?? false;
@@ -63,6 +64,7 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
         truncated,
         missingToolCall: !call,
         unusable: parsed.unusable,
+        ...(parsed.malformedItems > 0 ? { malformedToolItems: { dropped: parsed.malformedItems, total: parsed.totalItems } } : {}),
       };
     },
   };

@@ -120,15 +120,17 @@ describe("bundled provider conformance", () => {
     ["no proposals key", {}],
     ["null proposals", { proposals: null }],
     ["every item malformed", { proposals: [7, { junk: 1 }] }],
+    ["a call present with no input", undefined],
   ];
   for (const [what, payload] of unusablePayloads) {
     for (const [label, provider] of adaptersWith(payload)) {
       it(`${label}: an unusable tool call (${what}) is unread/provider-failure`, async () => {
         const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
-        assert.equal(result.error, undefined);
+        // The only chunk went unanswered, so the run fails, keeping coverage and warnings.
+        assert.equal(result.error, "no dispatched chunk returned a usable answer");
+        assert.deepEqual(result.coverage, [{ chunk: 1, start: 0, end: 13, status: "unread", reason: "provider-failure" }]);
         const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
-        assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
-        assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 13, status: "unread", reason: "provider-failure" }]);
+        assert.deepEqual(envelope.result.outcome, { status: "failure", category: "provider", code: "no-usable-answer" });
         assert.ok(envelope.result.warningClassifications?.some((w) => w.code === "unusable-answer"), JSON.stringify(result.warnings));
       });
     }
@@ -149,7 +151,11 @@ describe("bundled provider conformance", () => {
       assert.equal(result.proposals.length, 1);
       const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
       assert.deepEqual(envelope.result.outcome, { status: "success" });
-      assert.deepEqual(envelope.result.warningClassifications, [{ category: "normalization", code: "proposal-normalization" }]);
+      assert.deepEqual(envelope.result.warningClassifications, [
+        { category: "normalization", code: "proposal-normalization" },
+        { category: "normalization", code: "malformed-tool-items" },
+      ]);
+      assert.ok(result.warnings?.includes("chunk 1/1 (chars:0-13): dropped 1 of 2 tool items as malformed"), JSON.stringify(result.warnings));
     });
   }
 

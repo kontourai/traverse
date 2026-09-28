@@ -92,12 +92,47 @@ describe("partial outcome and coverage for chunk losses", () => {
     assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 7, status: "output-truncated" }]);
   });
 
-  it("a missing tool call serializes partial/provider-failure with an unread missing-tool-call entry", async () => {
-    const provider = relayProvider({ stopReason: "end_turn", outputText: "The fee is 5." });
-    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
+  it("a missing tool call on one chunk serializes partial/provider-failure with an unread missing-tool-call entry", async () => {
+    const missing = relayProvider({ stopReason: "end_turn", outputText: "The fee is 5." });
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) { return input.chunkIndex === 1 ? missing.extract(input) : empty; },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
     const envelope = envelopeOf(result);
     assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
-    assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 7, status: "unread", reason: "missing-tool-call" }]);
+    assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "missing-tool-call" });
+  });
+
+  it("a run none of whose dispatched chunks was answered fails, keeping coverage and warnings", async () => {
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) {
+        return input.chunkIndex === 1 ? { ...empty, missingToolCall: true } : { ...empty, unusable: true };
+      },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+    assert.equal(result.error, "no dispatched chunk returned a usable answer");
+    assert.equal(result.proposals.length, 0);
+    assert.deepEqual(result.coverage?.map((entry) => `${entry.status}/${entry.reason}`), [
+      "unread/provider-failure", "unread/missing-tool-call", "unread/provider-failure",
+    ]);
+    const envelope = envelopeOf(result);
+    assert.deepEqual(envelope.result.outcome, { status: "failure", category: "provider", code: "no-usable-answer" });
+    assert.deepEqual(envelope.result.warningClassifications?.map((w) => w.code), ["unusable-answer", "missing-tool-call", "unusable-answer"]);
+  });
+
+  it("a run where every call threw and one chunk was unusable is still a provider failure", async () => {
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) {
+        if (input.chunkIndex === 0) return { ...empty, unusable: true };
+        throw Object.assign(new Error("503"), { status: 503 });
+      },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+    assert.equal(result.error, "503");
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "failure", category: "provider", code: "provider-failure" });
   });
 
   it("an answer that is not a proposals array leaves the chunk unread/provider-failure", async () => {
@@ -143,12 +178,18 @@ describe("partial outcome and coverage for chunk losses", () => {
     });
   }
 
-  it("unusable: true from a custom provider records the chunk as not read", async () => {
-    const provider: ExtractionProvider = { name: "p", async extract() { return { ...empty, unusable: true }; } };
-    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
+  it("unusable: true from a custom provider records the chunk as not read, keeping its proposals", async () => {
+    const proposal = { fieldPath: "fee", candidateValue: 5, extractor: "e", provenance: { excerpt: "x", locator: "x" } };
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) { return input.chunkIndex === 1 ? { ...empty, proposals: [proposal], unusable: true } : empty; },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+    assert.equal(result.proposals.length, 1, "the flag records coverage; it does not discard evidence");
     const envelope = envelopeOf(result);
     assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
-    assert.deepEqual(envelope.result.warningClassifications, [{ category: "provider", code: "unusable-answer" }]);
+    assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "provider-failure" });
+    assert.deepEqual(envelope.result.warningClassifications?.map((w) => w.code), ["unusable-answer", "content-chunking"]);
   });
 
   it("the first loss in prepared-text order is the reason when several chunks lose text", async () => {
@@ -257,7 +298,9 @@ describe("typed output-cap and missing-tool-call signals", () => {
 
   it("missingToolCall: true with no warning records the loss and writes the located warning", async () => {
     const result = await run(withOutput({ missingToolCall: true }));
-    assert.deepEqual(envelopeOf(result).result.outcome, { status: "partial", reason: "provider-failure" });
+    // The only chunk went unanswered, so the run fails.
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "failure", category: "provider", code: "no-usable-answer" });
+    assert.deepEqual(result.coverage, [{ chunk: 1, start: 0, end: 7, status: "unread", reason: "missing-tool-call" }]);
     assert.deepEqual(result.warnings, ["chunk 1/1 (chars:0-7): provider returned no extraction tool call"]);
     assert.deepEqual(codes(result), ["missing-tool-call"]);
   });

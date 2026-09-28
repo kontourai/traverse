@@ -119,7 +119,9 @@ function relayOutput(
   providerName: string,
   contentType: ContentType,
 ): ProviderExtractionOutput {
-  const toolInput = result.toolCalls.find((call) => call.name === toolName)?.input;
+  const call = result.toolCalls.find((candidate) => candidate.name === toolName);
+  // A call present with no input is an unusable answer, not a missing call.
+  const toolInput = call === undefined ? undefined : (call.input ?? null);
   const parsed = parseProposals(toolInput, providerName, contentType);
   const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
   if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
@@ -140,6 +142,7 @@ function relayOutput(
     truncated,
     missingToolCall: toolInput === undefined,
     unusable: parsed.unusable,
+    ...(parsed.malformedItems > 0 ? { malformedToolItems: { dropped: parsed.malformedItems, total: parsed.totalItems } } : {}),
   };
 }
 

@@ -438,7 +438,11 @@ These bound CONTENT (how much is prepared/chunked). To bound provider SPEND
 detection mode, cards detected, any `maxChunks` truncation, dropped duplicates,
 and any per-chunk provider failure. A provider error on **one** chunk is a
 warning and the other chunks still run; only if **every** chunk's call fails
-does `result.error` get set. `result.coverage` records which prepared-text
+does `result.error` get set. The same holds when no dispatched chunk was
+answered at all (each threw, returned no tool call, or returned an unusable
+answer): the run fails (`no dispatched chunk returned a usable answer` when
+none threw, envelope code `no-usable-answer`), keeping its coverage and
+warnings. `result.coverage` records which prepared-text
 range each chunk read and answered, and any loss (a failed call, an answer
 core cannot use (no proposals array, every tool item malformed, or no output
 object), a cut at `maxContentChars`, an output cap, a missing tool

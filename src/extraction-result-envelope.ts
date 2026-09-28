@@ -36,6 +36,9 @@ import { validatePdfLayout } from "./content-prep.js";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT = "traverse-extraction-result";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION = 1;
 
+/** `ExtractionResult.error` when no dispatched chunk was answered and no call threw; classified `provider`/`no-usable-answer`. */
+export const NO_USABLE_ANSWER_ERROR = "no dispatched chunk returned a usable answer";
+
 export interface PortableExtractionSource {
   ref: string;
   /** Immutable fetch/replay identity when one is available. */
@@ -323,6 +326,7 @@ function classifyOutcome(result: ExtractionResult): PortableExtractionOutcome {
     return { status: "failure", category: "invalid-config", code: result.error.includes("capability") ? "unsupported-provider-capability" : "invalid-extract-config" };
   }
   if (result.providerFailures?.length) return { status: "failure", category: "provider", code: "provider-failure" };
+  if (result.error === NO_USABLE_ANSWER_ERROR) return { status: "failure", category: "provider", code: "no-usable-answer" };
   if (/preparation|extraction failed|bytes are required|not implemented/i.test(result.error)) {
     return { status: "failure", category: "preparation", code: "content-preparation-failure" };
   }
@@ -341,6 +345,7 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider answer unusable/.test(warning)) return { category: "provider", code: "unusable-answer" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): dropped \d+ of \d+ tool items as malformed$/.test(warning)) return { category: "normalization", code: "malformed-tool-items" };
   if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };

@@ -87,7 +87,7 @@ import { normalizeProviderFailure, unsupportedProviderCapability } from "./provi
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
-import { isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
+import { NO_USABLE_ANSWER_ERROR, isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
@@ -499,7 +499,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
     const providerFailures: ExtractionProviderFailure[] = [];
-    let chunksSucceeded = 0;
+    // Dispatched chunks, and those whose answer was usable (complete or cut at
+    // the output cap). A run none of whose dispatched chunks was answered fails.
+    let chunksDispatched = 0;
+    let chunksAnswered = 0;
     const dispatched = await dispatchBoundedWaves(input, chunks, maxChars, runId);
     warnings.push(...dispatched.warnings);
     const { outcomes, providerCalls, totalTokensUsed } = dispatched;
@@ -514,6 +517,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         coverage.push({ chunk: i + 1, start: chunks[i].start, end: chunks[i].end, status: "unread", reason: "not-dispatched" });
         continue;
       }
+      chunksDispatched++;
       // Every loss below names the chunk and the prepared-text range it left
       // unread (or not fully answered). Each call carries every target field,
       // so the range applies to all of them.
@@ -542,7 +546,6 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       // answered nothing usable for this chunk; the other chunks still count.
       const outputIsObject = typeof outcome.output === "object" && outcome.output !== null;
       const output = (outputIsObject ? outcome.output : { proposals: undefined, raw: undefined }) as ProviderExtractionOutput;
-      chunksSucceeded++;
       // Adapter warnings that mean the answer for this chunk is incomplete are
       // located here, since only the core knows which chunk a call served.
       // The adapter's typed signal decides; a warning prefix is only the
@@ -600,6 +603,14 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         );
       }
       if (unusableAnswer && !missingToolCall) warnings.push(located(UNUSABLE_ANSWER_WARNING));
+      // Coverage-neutral unless every item was dropped (then unusable above);
+      // the count lets a consumer apply its own threshold.
+      const malformed = output.malformedToolItems;
+      if (malformed && Number.isSafeInteger(malformed.dropped) && Number.isSafeInteger(malformed.total) &&
+          malformed.dropped > 0 && malformed.dropped <= malformed.total) {
+        warnings.push(located(`dropped ${malformed.dropped} of ${malformed.total} tool items as malformed`));
+      }
+      if (!missingToolCall && !unusableAnswer) chunksAnswered++;
       // No tool call means nothing was answered, whatever stopped the model.
       sent(missingToolCall
         ? { status: "unread", reason: "missing-tool-call" }
@@ -615,10 +626,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     });
     coverage.sort((a, b) => a.start - b.start || a.end - b.end);
 
-    // Every chunk's provider call failed -> surface as a fatal error. This
+    // No dispatched chunk was answered (every call threw, returned no tool
+    // call, or returned an unusable answer) -> surface as a fatal error. This
     // preserves the single-shot contract: a 1-chunk page whose only provider
-    // call throws is an error, not an empty success.
-    if (chunks.length > 0 && chunksSucceeded === 0 && providerErrors.length > 0) {
+    // call throws is an error, not an empty success. Coverage and the
+    // per-chunk warnings are kept.
+    if (chunksDispatched > 0 && chunksAnswered === 0) {
       // The embedded-state sidecar is prep-derived, not provider-derived, so it
       // survives even when every provider call fails — a shell page with rich
       // `__NEXT_DATA__` is still extractable from the sidecar without a render.
@@ -629,12 +642,13 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         sourceRef,
         provider,
         runId,
-        error: providerErrors[0],
+        error: providerErrors[0] ?? NO_USABLE_ANSWER_ERROR,
         providerCalls,
         totalTokensUsed,
         ...(partial ? { partial } : {}),
         coverage,
         ...(providerFailures.length ? { providerFailures } : {}),
+        ...(warnings.length ? { warnings } : {}),
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
       if (pdfPageOffsets) failed.pdfPageOffsets = pdfPageOffsets;
