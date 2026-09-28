@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 
 /** Changes whenever a rule below changes what it reports for some input. */
-export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v2";
+export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v3";
 
 /**
  * Annotate a proposal. `start`/`end` are the excerpt's UTF-16 offsets in
@@ -95,9 +95,12 @@ export function valueInExcerpt(value: unknown, field: TargetFieldSchema, excerpt
   }
 }
 
-/** NFKC, lower case, a Unicode minus as `-`, and `n't` as the word `not`. */
+/** NFKC, lower case, a Unicode minus as `-`, `n't` as the word `not`, and `No.` before a digit as `number`. */
 function prepare(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/−/g, "-").replace(/n['’]t(?![\p{L}\p{N}])/gu, " not");
+  return text.normalize("NFKC").toLowerCase().replace(/\u2212/g, "-")
+    .replace(/n['\u2019]t(?![\p{L}\p{N}])/gu, " not")
+    // "No. 5" / "No 5" abbreviates "number"; it is not the word no.
+    .replace(/(?<![\p{L}\p{N}])no\.?\s*(?=\d)/gu, " number ");
 }
 
 /** Case-, whitespace- and punctuation-folded word tokens. */
@@ -155,12 +158,17 @@ function negatedAt(tokens: string[], index: number): boolean {
 }
 
 /**
- * A value of only digits and phone-style separators, with at least seven
- * digits, compares by its digit groups alone (`"303.555.1234"` matches
- * `"(303) 555-1234"`).
+ * A phone-style value compares by its digit groups alone (`"303.555.1234"`
+ * matches `"(303) 555-1234"`): only digits and the separators `( ) . - /` and
+ * spaces, at least seven digits in at least three groups, and no leading
+ * sign. Two groups could be a decimal (`1234567.89`) and one group a plain
+ * number, where a separator or sign changes the value.
  */
 function isDigitGroupIdentifier(value: string): boolean {
-  return /^[\d\s().\-/]+$/.test(value) && (value.match(/\d/g) ?? []).length >= 7;
+  const trimmed = value.trim();
+  if (!/^[\d\s().\-/]+$/.test(trimmed) || trimmed.startsWith("-")) return false;
+  const groups = trimmed.match(/\d+/g) ?? [];
+  return groups.length >= 3 && groups.join("").length >= 7;
 }
 
 /** `"open"` matches `"Status: Open"`; `"A+"` against `"Grade: A-"` is not-evaluated. */
@@ -182,8 +190,11 @@ function textInExcerpt(value: string, excerpt: string): ExtractionValueInExcerpt
  * or digit on either side, so `3` is not read out of `2023`.
  */
 const NUMBER_IN_TEXT = /(?<![\p{L}\p{N}.,])(-)?(?:[$€£¥₹]\s?)?(-)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![\p{L}\p{N}]|[.,]\d)/gu;
-/** Dates and times written with digits, masked before numbers are read (`6` is not read out of `2026-06-09`). */
-const DIGIT_DATE_OR_TIME = /\d+(?:[-/]\d+){2,}|\d+(?::\d+)+/g;
+/**
+ * Dates, times and fractions written with digits, masked before numbers are
+ * read (`6` is not read out of `2026-06-09`, nor `1` or `2` out of `1/2`).
+ */
+const DIGIT_DATE_OR_TIME = /\d+(?:[-/]\d+)+|\d+(?::\d+)+/g;
 /** A scale word after a number (`$4.2 million`). */
 const SCALE_AFTER = /^\s*(?:thousand|million|billion|trillion|bn|mn)(?![\p{L}\p{N}])/iu;
 
@@ -199,6 +210,14 @@ function numberInExcerpt(value: number, excerpt: string): ExtractionValueInExcer
     // Readable but written at another scale or sign convention: `45%`,
     // accounting `(5)`, `$4.2 million`. Neither a match nor a mismatch.
     if (after.startsWith("%") || (text[start - 1] === "(" && after.startsWith(")")) || SCALE_AFTER.test(after)) {
+      uncertain = true;
+      continue;
+    }
+    // A negation cue in the three words before the number (`not 5`).
+    // Tokenized through the number so "No. 5" reads as "number 5".
+    const upTo = wordTokens(text.slice(0, end));
+    const own = wordTokens(m[0]).length;
+    if (negatedAt(upTo, upTo.length - own)) {
       uncertain = true;
       continue;
     }

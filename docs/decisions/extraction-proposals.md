@@ -98,7 +98,7 @@ not Traverse's job, and no Traverse confidence is derived from them.
 
 ```ts
 evidenceMatch: {
-  checkerVersion: "evidence-match-v2";
+  checkerVersion: "evidence-match-v3";
   schema: "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
   valueInExcerpt: "match" | "mismatch" | "not-evaluated" | "not-applicable";
   tokenBoundary?: boolean;
@@ -130,19 +130,24 @@ evidenceMatch: {
     does not match `"Reopened"`; `"C++"` matches `"C++."`). When only the
     words agree and that punctuation or a sign differs (`"A+"` vs
     `"Grade: A-"`, `"C++"` vs `"C#"`, `"-5"` vs `"5"`, `"1.5"` vs `"1,5"`),
-    the result is `not-evaluated`. One exception: a value made only of
-    digits and phone-style separators (spaces, `( ) . - /`) with at least
-    seven digits compares by its digit groups, so `"303.555.1234"` matches
-    `"(303) 555-1234"`.
-  - Negation: when a cue (`not`, `no`, `never`, `without`, `cannot`, `nor`,
-    or a word ending in `n't`) is in the three words before an occurrence
-    of the value, the result is `not-evaluated` (`"open"` vs
-    `"no longer open"` or `"Not open"`).
+    the result is `not-evaluated`. One exception: a phone-style value (only
+    digits, spaces and `( ) . - /`, at least seven digits in at least three
+    groups, no leading `-`) compares by its digit groups, so
+    `"303.555.1234"` matches `"(303) 555-1234"`. A signed value or one with
+    a single decimal separator (`"-1234567"`, `"1234567.89"`) does not.
+  - Negation, for string, enum, number and boolean values: when a cue
+    (`not`, `no`, `never`, `without`, `cannot`, `nor`, or a word ending in
+    `n't`) is in the three words before an occurrence of the value, the
+    result is `not-evaluated` (`"open"` vs `"no longer open"`, `5` vs
+    `"not 5"`). `No.` or `No` directly before a digit is read as the
+    abbreviation for number, not as the word no (`"Ticket No. 5"`). Dates
+    are not checked for negation.
   - `number`: written numbers in the excerpt, each optionally signed and led
     by a currency symbol, with comma thousands separators and a point
     decimal, not touching a letter or digit (`3` is not read from `2023`).
-    Dates and times written in digits (`2026-06-09`, `10:30`) are skipped,
-    so `6` is not read from a date. `match` when a number equals the value.
+    Dates, times and fractions written in digits (`2026-06-09`, `10:30`,
+    `1/2`) are skipped, so `6` is not read from a date, and a number is
+    `not-evaluated` rather than `match` when only such a form contains it. `match` when a number equals the value.
     A number written at another scale or sign convention (`45%`, accounting
     `(5)`, `$4.2 million`) neither matches nor mismatches: when no plainly
     written number equals the value and one of these is present, the result
@@ -163,9 +168,21 @@ evidenceMatch: {
 - **`tokenBoundary`** is false when the excerpt starts or ends inside a word
   of the prepared text (the excerpt `"3"` located inside `"2023"`).
 
+**Known false matches that remain.** The checks are lexical, so `match` can
+still appear where the excerpt does not support the value:
+
+- a negation more than three words before the value, or after it
+  (`"open, but not this week"`);
+- contrastive or hypothetical wording (`"formerly open"`, `"if open"`);
+- exclusion wording (`"excludes C"` matches `"C"`);
+- enum members that differ only in case (`"Open"` and `"open"` fold together);
+- a number in a different currency (`45` matches `"€45"` when the value
+  meant dollars).
+
 Changing any rule so that some input gets a different result changes
-`checkerVersion`. `evidence-match-v2` replaced `evidence-match-v1` (never
-released) to stop the false matches listed above.
+`checkerVersion`, released or not. `evidence-match-v1` and
+`evidence-match-v2` were never released; `evidence-match-v3` is the first
+released version.
 
 **Recommended consumer policy.** A `schema` result other than `ok` can block
 by default, because it is exact. `valueInExcerpt` and `tokenBoundary` are

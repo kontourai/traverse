@@ -63,7 +63,7 @@ describe("evidenceMatch", () => {
     assert.equal(byField(result, "rating").evidenceMatch?.schema, "type-mismatch");
     // A value the number normalizer cannot read is never a mismatch.
     assert.equal(byField(result, "rating").evidenceMatch?.valueInExcerpt, "not-evaluated");
-    assert.equal(EVIDENCE_MATCH_CHECKER_VERSION, "evidence-match-v2");
+    assert.equal(EVIDENCE_MATCH_CHECKER_VERSION, "evidence-match-v3");
   });
 
   const matches: Array<[string, TargetFieldSchema["type"], unknown, string, string[]?]> = [
@@ -196,7 +196,7 @@ describe("evidenceMatch", () => {
     const text = serializePortableExtractionResult(result);
     const envelope = JSON.parse(text);
     assert.deepEqual(envelope.result.proposals[0].evidenceMatch, {
-      checkerVersion: "evidence-match-v2", schema: "ok", tokenBoundary: true, valueInExcerpt: "match",
+      checkerVersion: "evidence-match-v3", schema: "ok", tokenBoundary: true, valueInExcerpt: "match",
     });
     assert.equal(serializePortableExtractionResult(deserializePortableExtractionResult(text)), text);
 
@@ -245,6 +245,16 @@ describe("evidenceMatch never reports a false match", () => {
     ["-5 vs (5)", { path: "f", type: "number", inferenceType: "explicit" }, -5, "Net (5)", "not-evaluated"],
     ["0.45 vs 45%", { path: "f", type: "number", inferenceType: "explicit" }, 0.45, "Rate 45%", "not-evaluated"],
     ["45 vs 45%", { path: "f", type: "number", inferenceType: "explicit" }, 45, "Rate 45%", "not-evaluated"],
+    // Round 2: negation before a number, sign and decimal in digit groups,
+    // "No." as an abbreviation, and fractions.
+    ["number 5 vs not 5", { path: "f", type: "number", inferenceType: "explicit" }, 5, "not 5", "not-evaluated"],
+    ["number 5 vs never 5", { path: "f", type: "number", inferenceType: "explicit" }, 5, "never 5", "not-evaluated"],
+    ["number 5 vs Ticket No. 5", { path: "f", type: "number", inferenceType: "explicit" }, 5, "Ticket No. 5", "match"],
+    ["string -1234567 vs 1234567", { path: "f", type: "string", inferenceType: "explicit" }, "-1234567", "Account 1234567", "not-evaluated"],
+    ["string 1234567.89 vs 1234567,89", { path: "f", type: "string", inferenceType: "explicit" }, "1234567.89", "Total 1234567,89", "not-evaluated"],
+    ["boolean false vs Ticket No. 5", { path: "f", type: "boolean", inferenceType: "explicit" }, false, "Ticket No. 5", "not-evaluated"],
+    ["number 1 vs 1/2 cup", { path: "f", type: "number", inferenceType: "explicit" }, 1, "1/2 cup", "not-evaluated"],
+    ["number 2 vs 1/2 cup", { path: "f", type: "number", inferenceType: "explicit" }, 2, "1/2 cup", "not-evaluated"],
   ];
   for (const [name, field, value, excerpt, expected] of cases) {
     it(name, async () => {
@@ -300,6 +310,8 @@ describe("the envelope validator recomputes evidenceMatch", () => {
   it("accepts only the known checkerVersion", async () => {
     const envelope = await envelopeWith({ path: "f", type: "number" }, 45, "Fee: $45");
     envelope.result.proposals[0].evidenceMatch.checkerVersion = "evidence-match-v1";
+    assert.equal(status(envelope), "invalid");
+    envelope.result.proposals[0].evidenceMatch.checkerVersion = "evidence-match-v2";
     assert.equal(status(envelope), "invalid");
     envelope.result.proposals[0].evidenceMatch.checkerVersion = "evidence-match-v9";
     assert.equal(status(envelope), "invalid");

@@ -73,7 +73,7 @@ functions of the proposal's `candidateValue`, `valueType`, `enumValues`,
 record that disagrees (for example `match` on an `inferred` or `array` field,
 or `schema: "ok"` on a string declared `number`). A proposal with
 `evidenceMatch` must therefore carry `valueType`, and `checkerVersion` must be
-the version this Traverse release computes (`evidence-match-v2`); a reader
+the version this Traverse release computes (`evidence-match-v3`); a reader
 cannot check rules it does not know. `tokenBoundary` depends on the prepared
 text around the excerpt, which the envelope does not carry, so only its type
 is checked. It is a set of facts, not a trust

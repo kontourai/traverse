@@ -241,7 +241,7 @@ export type ExtractionValueInExcerpt = "match" | "mismatch" | "not-evaluated" | 
  * rule and a recommended consumer policy.
  */
 export interface ExtractionEvidenceMatch {
-  /** Names the rules that produced this record, e.g. `"evidence-match-v2"`. */
+  /** Names the rules that produced this record, e.g. `"evidence-match-v3"`. */
   checkerVersion: string;
   /**
    * `ok`, or why not: `type-mismatch` (wrong JSON type for the declared
