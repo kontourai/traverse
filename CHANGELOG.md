@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.0.0](https://github.com/kontourai/traverse/compare/v2.0.0...v3.0.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* envelopes that carry a proposal now include evidenceMatch, which readers that predate it reject as an unexpected property (@kontourai/traverse <= 2.0.0, @kontourai/survey <= 3.x). @kontourai/survey 4.0.0 and 5.0.0 accept it.
+
+### Features
+
+* annotate each proposal with deterministic evidence checks ([#189](https://github.com/kontourai/traverse/issues/189)) ([984b444](https://github.com/kontourai/traverse/commit/984b444f4ea081aab1b27391ce5b79425d0d98d9)), closes [#170](https://github.com/kontourai/traverse/issues/170)
+
+
+### Fixes
+
+* bound provider error text, document outcomes when nothing was answered ([#186](https://github.com/kontourai/traverse/issues/186)) ([6425779](https://github.com/kontourai/traverse/commit/6425779b5a75c3102dad536f05354b75baf8d49b)), closes [#183](https://github.com/kontourai/traverse/issues/183)
+
 ## [2.0.0](https://github.com/kontourai/traverse/compare/v1.0.0...v2.0.0) (2026-09-28)
 
 
