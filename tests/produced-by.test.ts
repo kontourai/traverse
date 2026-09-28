@@ -10,6 +10,8 @@ import {
 import type { ExtractionProvider, TargetFieldSchema } from "../src/index.js";
 import { createAnthropicExtractionProvider, type AnthropicMessageCreateParams } from "../src/anthropic.js";
 import { createRelayExtractionProvider } from "../src/relay.js";
+import { createOpenAIExtractionProvider } from "../src/openai.js";
+import { createGeminiExtractionProvider } from "../src/gemini.js";
 import { canonicalTaskJson } from "../src/task.js";
 import { fakeAnthropicMessage } from "./fixtures/mock-provider.js";
 
@@ -77,6 +79,21 @@ describe("per-proposal producedBy", () => {
 
     const envelope = JSON.parse(serializePortableExtractionResult(result));
     assert.deepEqual(envelope.result.proposals.map((p: { producedBy: unknown }) => p.producedBy), result.proposals.map((p) => p.producedBy));
+  });
+
+  it("direct adapters say whether the model was reported or configured", async () => {
+    const input = { content: "Alpha", contentType: "text" as const, targetSchema };
+    const cases: Array<[string, (reported: string) => ExtractionProvider]> = [
+      ["anthropic", (reported) => createAnthropicExtractionProvider({ model: "configured-model", client: { async create() { return { ...fakeAnthropicMessage("submit_extraction_proposals", { proposals: [] }), model: reported }; } } })],
+      ["openai", (reported) => createOpenAIExtractionProvider({ model: "configured-model", client: { async create() { return { model: reported, choices: [{ finish_reason: "stop", message: { content: "" } }], usage: { total_tokens: 1 } }; } } as never })],
+      ["gemini", (reported) => createGeminiExtractionProvider({ model: "configured-model", client: { async generateContent() { return { ...(reported ? { modelVersion: reported } : {}), usageMetadata: { totalTokenCount: 1 } }; } } as never })],
+    ];
+    for (const [label, create] of cases) {
+      const served = await create("served-model").extract(input);
+      assert.deepEqual([served.raw.model, served.raw.modelSource], ["served-model", "provider-reported"], label);
+      const configured = await create("").extract(input);
+      assert.deepEqual([configured.raw.model, configured.raw.modelSource], ["configured-model", "configured"], label);
+    }
   });
 
   it("digests the request content, not its correlation fields", async () => {
