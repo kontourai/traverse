@@ -244,7 +244,7 @@ Every proposal `extract()` returns carries deterministic facts about its value:
 // schema: { path: "price", type: "number", inferenceType: "explicit" }
 // proposal: { fieldPath: "price", candidateValue: 999,
 //             provenance: { excerpt: "Price: $10 per session.", ... },
-//             evidenceMatch: { checkerVersion: "evidence-match-v1", schema: "ok",
+//             evidenceMatch: { checkerVersion: "evidence-match-v2", schema: "ok",
 //                              valueInExcerpt: "mismatch", tokenBoundary: true }, ... }
 ```
 
@@ -252,7 +252,11 @@ Every proposal `extract()` returns carries deterministic facts about its value:
 (for `date`) ISO-8601 format. `valueInExcerpt` checks, for fields declared
 `inferenceType: "explicit"`, whether the value appears in its excerpt after a
 fixed format-aware normalization (`45` matches `"$45.00"`, `"303.555.1234"`
-matches `"(303) 555-1234"`); anything it cannot read is `not-evaluated`.
+matches `"(303) 555-1234"`). Anything doubtful is `not-evaluated`: a form it
+cannot read, a difference only in meaningful punctuation or sign (`"A+"` vs
+`"A-"`), a negation before the value (`"not open"`), or a number at another
+scale (`45%`, `$4.2 million`). **`match` means the value was found in the
+excerpt, not that the excerpt supports it.**
 `tokenBoundary` is false when the excerpt was cut from inside a word. These are
 annotations, not verdicts: nothing is dropped because of them, and your review
 policy decides what blocks. The rules and a recommended policy are in

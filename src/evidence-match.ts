@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 
 /** Changes whenever a rule below changes what it reports for some input. */
-export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v1";
+export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v2";
 
 /**
  * Annotate a proposal. `start`/`end` are the excerpt's UTF-16 offsets in
@@ -41,6 +41,9 @@ export function evidenceMatchFor(
 // Schema check: exact, no heuristics.
 
 export function schemaMatch(value: unknown, field: TargetFieldSchema): ExtractionSchemaMatch {
+  // An enum that declares no values has nothing to be outside of; it is
+  // checked as a string.
+  if (field.type === "enum" && !field.enumValues?.length) return typeof value === "string" ? "ok" : "type-mismatch";
   if (valueMatches(value, field)) {
     return field.type === "date" && !isIsoDate(value as string) ? "format-invalid" : "ok";
   }
@@ -74,8 +77,10 @@ function isCalendarDate(year: number, month: number, day: number): boolean {
 
 // ---------------------------------------------------------------------------
 // Value-in-excerpt check: containment on token boundaries after a fixed,
-// per-type normalization. A value or excerpt the normalizer cannot read is
-// "not-evaluated", never "mismatch".
+// per-type normalization. "match" means the value was found in the excerpt,
+// not that the excerpt supports it. Anything uncertain (a form the normalizer
+// cannot read, a difference only in punctuation or sign, a negation before the
+// value) is "not-evaluated": never "match", and never "mismatch".
 
 export function valueInExcerpt(value: unknown, field: TargetFieldSchema, excerpt: string): ExtractionValueInExcerpt {
   // Only an explicit value is meant to appear in the source; an inferred or
@@ -90,24 +95,85 @@ export function valueInExcerpt(value: unknown, field: TargetFieldSchema, excerpt
   }
 }
 
-/** Case-, whitespace- and punctuation-folded word tokens. */
-function wordTokens(text: string): string[] {
-  return text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+/** NFKC, lower case, a Unicode minus as `-`, and `n't` as the word `not`. */
+function prepare(text: string): string {
+  return text.normalize("NFKC").toLowerCase().replace(/−/g, "-").replace(/n['’]t(?![\p{L}\p{N}])/gu, " not");
 }
 
-function containsSequence(haystack: string[], needle: string[]): boolean {
-  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
-    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
-    return true;
+/** Case-, whitespace- and punctuation-folded word tokens. */
+function wordTokens(text: string): string[] {
+  return prepare(text).match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+}
+
+/**
+ * Words joined by single spaces, keeping the punctuation that can change
+ * meaning: `+ - # %` attached to a word or digit, and `. ,` between two of
+ * them (`1.5`, `1,5`). Other punctuation and whitespace fold to a space, so
+ * `"Status: Open."` reads `status open`.
+ */
+function meaningfulText(text: string): string {
+  const t = prepare(text);
+  const alnum = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{M}\p{N}]/u.test(ch);
+  let out = "";
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (alnum(ch)) out += ch;
+    else if ("+-#%".includes(ch) && (alnum(t[i - 1]) || alnum(t[i + 1]) || "+-#%".includes(t[i - 1] ?? "") || "+-#%".includes(t[i + 1] ?? ""))) out += ch;
+    else if (".,".includes(ch) && alnum(t[i - 1]) && alnum(t[i + 1])) out += ch;
+    else out += " ";
+  }
+  return out.replace(/\s+/g, " ").trim();
+}
+
+/** Whether `needle` occurs in `haystack` bounded by the ends or a space on each side. */
+function containsBounded(haystack: string, needle: string): boolean {
+  for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + 1)) {
+    const before = i === 0 || haystack[i - 1] === " ";
+    const after = i + needle.length === haystack.length || haystack[i + needle.length] === " ";
+    if (before && after) return true;
   }
   return false;
 }
 
-/** `"303.555.1234"` matches `"(303) 555-1234"`; `"open"` matches `"Status: Open"`. */
+/** Start indices of `needle` as a contiguous run of `haystack`. */
+function occurrences(haystack: string[], needle: string[]): number[] {
+  const found: number[] = [];
+  outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
+    found.push(i);
+  }
+  return found;
+}
+
+const NEGATION_CUES = new Set(["not", "no", "never", "without", "cannot", "nor"]);
+/** How many tokens before a value are searched for a negation cue. */
+const NEGATION_WINDOW = 3;
+
+function negatedAt(tokens: string[], index: number): boolean {
+  for (let k = Math.max(0, index - NEGATION_WINDOW); k < index; k++) if (NEGATION_CUES.has(tokens[k])) return true;
+  return false;
+}
+
+/**
+ * A value of only digits and phone-style separators, with at least seven
+ * digits, compares by its digit groups alone (`"303.555.1234"` matches
+ * `"(303) 555-1234"`).
+ */
+function isDigitGroupIdentifier(value: string): boolean {
+  return /^[\d\s().\-/]+$/.test(value) && (value.match(/\d/g) ?? []).length >= 7;
+}
+
+/** `"open"` matches `"Status: Open"`; `"A+"` against `"Grade: A-"` is not-evaluated. */
 function textInExcerpt(value: string, excerpt: string): ExtractionValueInExcerpt {
-  const needle = wordTokens(value);
-  if (needle.length === 0) return "not-evaluated";
-  return containsSequence(wordTokens(excerpt), needle) ? "match" : "mismatch";
+  const words = wordTokens(value);
+  if (words.length === 0) return "not-evaluated";
+  const excerptWords = wordTokens(excerpt);
+  const wordHits = occurrences(excerptWords, words);
+  if (wordHits.length === 0) return "mismatch";
+  if (wordHits.some((index) => negatedAt(excerptWords, index))) return "not-evaluated";
+  if (containsBounded(meaningfulText(excerpt), meaningfulText(value)) || isDigitGroupIdentifier(value)) return "match";
+  // The words are there but punctuation or sign differs (`-5` vs `5`, `C++` vs `C#`).
+  return "not-evaluated";
 }
 
 /**
@@ -115,29 +181,56 @@ function textInExcerpt(value: string, excerpt: string): ExtractionValueInExcerpt
  * comma thousands separators and a point decimal. It may not touch a letter
  * or digit on either side, so `3` is not read out of `2023`.
  */
-const NUMBER_IN_TEXT = /(?<![\p{L}\p{N}.,])([-−])?(?:[$€£¥₹]\s?)?([-−])?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![\p{L}\p{N}]|[.,]\d)/gu;
+const NUMBER_IN_TEXT = /(?<![\p{L}\p{N}.,])(-)?(?:[$€£¥₹]\s?)?(-)?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(?![\p{L}\p{N}]|[.,]\d)/gu;
+/** Dates and times written with digits, masked before numbers are read (`6` is not read out of `2026-06-09`). */
+const DIGIT_DATE_OR_TIME = /\d+(?:[-/]\d+){2,}|\d+(?::\d+)+/g;
+/** A scale word after a number (`$4.2 million`). */
+const SCALE_AFTER = /^\s*(?:thousand|million|billion|trillion|bn|mn)(?![\p{L}\p{N}])/iu;
 
 function numberInExcerpt(value: number, excerpt: string): ExtractionValueInExcerpt {
-  const found: number[] = [];
-  for (const m of excerpt.normalize("NFKC").matchAll(NUMBER_IN_TEXT)) {
+  let text = excerpt.normalize("NFKC").replace(/−/g, "-");
+  let uncertain = false;
+  text = text.replace(DIGIT_DATE_OR_TIME, (run) => { uncertain = true; return " ".repeat(run.length); });
+  const clean: number[] = [];
+  for (const m of text.matchAll(NUMBER_IN_TEXT)) {
+    const start = m.index ?? 0;
+    const end = start + m[0].length;
+    const after = text.slice(end);
+    // Readable but written at another scale or sign convention: `45%`,
+    // accounting `(5)`, `$4.2 million`. Neither a match nor a mismatch.
+    if (after.startsWith("%") || (text[start - 1] === "(" && after.startsWith(")")) || SCALE_AFTER.test(after)) {
+      uncertain = true;
+      continue;
+    }
     const negative = m[1] !== undefined || m[2] !== undefined;
     const magnitude = Number(`${m[3].replace(/,/g, "")}${m[4] === undefined ? "" : `.${m[4]}`}`);
-    found.push(negative ? -magnitude : magnitude);
+    clean.push(negative ? -magnitude : magnitude);
   }
-  // No written number (e.g. "forty-five"): nothing this normalizer can compare.
-  if (found.length === 0) return "not-evaluated";
-  return found.includes(value) ? "match" : "mismatch";
+  if (clean.includes(value)) return "match";
+  // No plainly written number (e.g. "forty-five"), or only uncertain ones.
+  if (uncertain || clean.length === 0) return "not-evaluated";
+  return "mismatch";
 }
 
 const TRUE_WORDS = new Set(["yes", "true"]);
 const FALSE_WORDS = new Set(["no", "false"]);
 
+/**
+ * `match` only when the excerpt has the value's word, un-negated, and no word
+ * of the other polarity; `mismatch` only when it has the other polarity's word,
+ * un-negated, and none of the value's. Anything else (`"Yes, no refunds"`,
+ * `"This is not true"`) is not-evaluated.
+ */
 function booleanInExcerpt(value: boolean, excerpt: string): ExtractionValueInExcerpt {
   const tokens = wordTokens(excerpt);
   const same = value ? TRUE_WORDS : FALSE_WORDS;
   const opposite = value ? FALSE_WORDS : TRUE_WORDS;
-  if (tokens.some((token) => same.has(token))) return "match";
-  return tokens.some((token) => opposite.has(token)) ? "mismatch" : "not-evaluated";
+  const sameAt = tokens.flatMap((token, index) => (same.has(token) ? [index] : []));
+  const oppositeAt = tokens.flatMap((token, index) => (opposite.has(token) ? [index] : []));
+  const negated = (indices: number[]) => indices.some((index) => negatedAt(tokens, index));
+  if (sameAt.length > 0 && oppositeAt.length === 0 && !negated(sameAt)) return "match";
+  if (oppositeAt.length > 0 && sameAt.length === 0 && !negated(oppositeAt)) return "mismatch";
+  return "not-evaluated";
 }
 
 const MONTHS: Record<string, number> = {

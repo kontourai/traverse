@@ -67,7 +67,16 @@ keys when the object is present, requires `checkerVersion` to be a stable
 identity, checks `schema` against `ok`/`type-mismatch`/`enum-mismatch`/
 `format-invalid` and `valueInExcerpt` against `match`/`mismatch`/
 `not-evaluated`/`not-applicable`, requires `tokenBoundary` to be a boolean
-when present, and rejects other keys. It is a set of facts, not a trust
+when present, and rejects other keys. `schema` and `valueInExcerpt` are pure
+functions of the proposal's `candidateValue`, `valueType`, `enumValues`,
+`inferenceType` and excerpt, so the validator recomputes both and rejects a
+record that disagrees (for example `match` on an `inferred` or `array` field,
+or `schema: "ok"` on a string declared `number`). A proposal with
+`evidenceMatch` must therefore carry `valueType`, and `checkerVersion` must be
+the version this Traverse release computes (`evidence-match-v2`); a reader
+cannot check rules it does not know. `tokenBoundary` depends on the prepared
+text around the excerpt, which the envelope does not carry, so only its type
+is checked. It is a set of facts, not a trust
 state. Prepared artifact resolution can be attached as a text-free
 typed state (`available`, `unavailable`, `storage-error`, `identity-mismatch`,
 `digest-mismatch`, or `invalid-artifact`).
@@ -179,8 +188,8 @@ reads exactly as before. The validator is fail-closed, so a reader that
 predates a key rejects an envelope carrying it with an explicit
 unexpected-property error rather than dropping the key or misreading it. For
 `evidenceMatch`: `@kontourai/traverse` 2.0.0 and earlier, and
-`@kontourai/survey` 3.x and earlier, reject it; `@kontourai/survey` 4.0.0 and
-5.0.0 accept it with the same key set and enums. Because `extract()` sets it on
+`@kontourai/survey` 3.x and earlier, reject it; `@kontourai/survey` 4.0.0,
+5.0.0 and 6.0.0 accept it with the same key set and enums. Because `extract()` sets it on
 every proposal, an envelope with at least one proposal from this version no
 longer imports into those older readers; a producer must upgrade its readers
 first. The format version stays 1 because no existing field changed meaning.

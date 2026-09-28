@@ -98,7 +98,7 @@ not Traverse's job, and no Traverse confidence is derived from them.
 
 ```ts
 evidenceMatch: {
-  checkerVersion: "evidence-match-v1";
+  checkerVersion: "evidence-match-v2";
   schema: "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
   valueInExcerpt: "match" | "mismatch" | "not-evaluated" | "not-applicable";
   tokenBoundary?: boolean;
@@ -110,22 +110,47 @@ evidenceMatch: {
   `enumValues` is `enum-mismatch`; a `date` string that is not an ISO-8601
   calendar date in extended format (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`,
   optionally `THH:MM[:SS[.fff]]` and `Z` or `±HH:MM`, each component
-  range-checked) is `format-invalid`.
+  range-checked) is `format-invalid`. An `enum` that declares no
+  `enumValues` has no set to be outside of and is checked as a string.
 - **`valueInExcerpt`** runs only for fields declared
   `inferenceType: "explicit"` with a scalar type. Inferred and unclassified
   fields, and `array`/`object` fields, are `not-applicable`: only an explicit
   value is meant to appear in the source. The rule for every type is
   containment on token boundaries after a fixed normalization; equality is
   not required, so `"open"` matches `"Status: Open"`.
-  - `string`/`enum`: NFKC, lower case, and letters/marks/digits as tokens,
-    so whitespace and punctuation fold away (`"303.555.1234"` matches
-    `"(303) 555-1234"`). The value's tokens must occur as a contiguous run of
-    the excerpt's tokens (`"open"` does not match `"Reopened"`).
+
+  **`match` means the value was found in the excerpt, not that the excerpt
+  supports it.** The checks are built so that a doubtful case is
+  `not-evaluated` rather than a false `match`:
+
+  - `string`/`enum`: NFKC and lower case. Whitespace and punctuation fold
+    away, except for punctuation that can change meaning: `+ - # %` attached
+    to a word or digit, and `. ,` between two of them. `match` needs the
+    value, with that punctuation, as a whole run of the excerpt (`"open"`
+    does not match `"Reopened"`; `"C++"` matches `"C++."`). When only the
+    words agree and that punctuation or a sign differs (`"A+"` vs
+    `"Grade: A-"`, `"C++"` vs `"C#"`, `"-5"` vs `"5"`, `"1.5"` vs `"1,5"`),
+    the result is `not-evaluated`. One exception: a value made only of
+    digits and phone-style separators (spaces, `( ) . - /`) with at least
+    seven digits compares by its digit groups, so `"303.555.1234"` matches
+    `"(303) 555-1234"`.
+  - Negation: when a cue (`not`, `no`, `never`, `without`, `cannot`, `nor`,
+    or a word ending in `n't`) is in the three words before an occurrence
+    of the value, the result is `not-evaluated` (`"open"` vs
+    `"no longer open"` or `"Not open"`).
   - `number`: written numbers in the excerpt, each optionally signed and led
     by a currency symbol, with comma thousands separators and a point
     decimal, not touching a letter or digit (`3` is not read from `2023`).
-    `match` when one equals the value.
-  - `boolean`: the words yes/true and no/false.
+    Dates and times written in digits (`2026-06-09`, `10:30`) are skipped,
+    so `6` is not read from a date. `match` when a number equals the value.
+    A number written at another scale or sign convention (`45%`, accounting
+    `(5)`, `$4.2 million`) neither matches nor mismatches: when no plainly
+    written number equals the value and one of these is present, the result
+    is `not-evaluated`.
+  - `boolean`: the words yes/true and no/false. `match` only when the
+    excerpt has the value's word, not negated, and no word of the other
+    polarity; `mismatch` only in the reverse case. `"This is not true"`,
+    `"no longer yes"` and `"Yes, no refunds"` are `not-evaluated`.
   - `date`: the value must be `YYYY-MM-DD`; the excerpt is read for
     `2026-06-09`, `June 9, 2026` and `9 June 2026` (English month names, full
     or abbreviated, optional ordinal and comma). Numeric forms like
@@ -139,13 +164,15 @@ evidenceMatch: {
   of the prepared text (the excerpt `"3"` located inside `"2023"`).
 
 Changing any rule so that some input gets a different result changes
-`checkerVersion`.
+`checkerVersion`. `evidence-match-v2` replaced `evidence-match-v1` (never
+released) to stop the false matches listed above.
 
 **Recommended consumer policy.** A `schema` result other than `ok` can block
 by default, because it is exact. `valueInExcerpt` and `tokenBoundary` are
 annotations until the value-in-excerpt check's false-mismatch rate has been
 measured on a labelled set; after that a consumer may choose to block on
-`mismatch`. `not-evaluated` and `not-applicable` say nothing about the value.
+`mismatch`. Do not read `match` as support: it says only that the value is
+written in the excerpt. `not-evaluated` and `not-applicable` say nothing about the value.
 The consumer decides what blocks; Traverse does not.
 
 The portable envelope carries `evidenceMatch` as an optional proposal key

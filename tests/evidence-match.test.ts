@@ -63,7 +63,7 @@ describe("evidenceMatch", () => {
     assert.equal(byField(result, "rating").evidenceMatch?.schema, "type-mismatch");
     // A value the number normalizer cannot read is never a mismatch.
     assert.equal(byField(result, "rating").evidenceMatch?.valueInExcerpt, "not-evaluated");
-    assert.equal(EVIDENCE_MATCH_CHECKER_VERSION, "evidence-match-v1");
+    assert.equal(EVIDENCE_MATCH_CHECKER_VERSION, "evidence-match-v2");
   });
 
   const matches: Array<[string, TargetFieldSchema["type"], unknown, string, string[]?]> = [
@@ -196,7 +196,7 @@ describe("evidenceMatch", () => {
     const text = serializePortableExtractionResult(result);
     const envelope = JSON.parse(text);
     assert.deepEqual(envelope.result.proposals[0].evidenceMatch, {
-      checkerVersion: "evidence-match-v1", schema: "ok", tokenBoundary: true, valueInExcerpt: "match",
+      checkerVersion: "evidence-match-v2", schema: "ok", tokenBoundary: true, valueInExcerpt: "match",
     });
     assert.equal(serializePortableExtractionResult(deserializePortableExtractionResult(text)), text);
 
@@ -217,5 +217,97 @@ describe("evidenceMatch", () => {
     ]) {
       assert.equal(invalid(mutate).status, "invalid", String(mutate));
     }
+  });
+});
+
+describe("evidenceMatch never reports a false match", () => {
+  const cases: Array<[string, TargetFieldSchema, unknown, string, string]> = [
+    // Punctuation and sign that change meaning are not folded.
+    ["enum A+ vs Grade: A-", { path: "f", type: "enum", enumValues: ["A+", "A-"], inferenceType: "explicit" }, "A+", "Grade: A-", "not-evaluated"],
+    ["C++ vs C#", { path: "f", type: "string", inferenceType: "explicit" }, "C++", "Written in C#", "not-evaluated"],
+    ["string -5 vs 5", { path: "f", type: "string", inferenceType: "explicit" }, "-5", "Offset 5", "not-evaluated"],
+    ["string 5 vs -5", { path: "f", type: "string", inferenceType: "explicit" }, "5", "Offset -5", "not-evaluated"],
+    ["1.5 vs 1,5", { path: "f", type: "string", inferenceType: "explicit" }, "1.5", "Ratio 1,5", "not-evaluated"],
+    ["C++ vs C++", { path: "f", type: "string", inferenceType: "explicit" }, "C++", "Written in C++.", "match"],
+    // A negation before the value.
+    ["boolean true vs This is not true", { path: "f", type: "boolean", inferenceType: "explicit" }, true, "This is not true", "not-evaluated"],
+    ["boolean true vs no longer yes", { path: "f", type: "boolean", inferenceType: "explicit" }, true, "no longer yes", "not-evaluated"],
+    ["boolean true vs Yes, no refunds", { path: "f", type: "boolean", inferenceType: "explicit" }, true, "Yes, no refunds", "not-evaluated"],
+    ["boolean false vs Yes, no refunds", { path: "f", type: "boolean", inferenceType: "explicit" }, false, "Yes, no refunds", "not-evaluated"],
+    ["boolean true vs isn't true", { path: "f", type: "boolean", inferenceType: "explicit" }, true, "It isn't true", "not-evaluated"],
+    ["enum open vs no longer open", { path: "f", type: "enum", enumValues: ["open", "closed"], inferenceType: "explicit" }, "open", "no longer open", "not-evaluated"],
+    ["enum open vs Not open", { path: "f", type: "enum", enumValues: ["open", "closed"], inferenceType: "explicit" }, "open", "Not open", "not-evaluated"],
+    // Numbers written at another scale or inside a date.
+    ["4.2 vs $4.2 million", { path: "f", type: "number", inferenceType: "explicit" }, 4.2, "Budget $4.2 million", "not-evaluated"],
+    ["4200000 vs $4.2 million", { path: "f", type: "number", inferenceType: "explicit" }, 4200000, "Budget $4.2 million", "not-evaluated"],
+    ["6 vs 2026-06-09", { path: "f", type: "number", inferenceType: "explicit" }, 6, "Opens 2026-06-09", "not-evaluated"],
+    ["-6 vs 2026-06-09", { path: "f", type: "number", inferenceType: "explicit" }, -6, "Opens 2026-06-09", "not-evaluated"],
+    ["-5 vs (5)", { path: "f", type: "number", inferenceType: "explicit" }, -5, "Net (5)", "not-evaluated"],
+    ["0.45 vs 45%", { path: "f", type: "number", inferenceType: "explicit" }, 0.45, "Rate 45%", "not-evaluated"],
+    ["45 vs 45%", { path: "f", type: "number", inferenceType: "explicit" }, 45, "Rate 45%", "not-evaluated"],
+  ];
+  for (const [name, field, value, excerpt, expected] of cases) {
+    it(name, async () => {
+      const result = await run(`x ${excerpt} y`, [field], [{ fieldPath: "f", candidateValue: value, excerpt }]);
+      assert.equal(byField(result, "f").evidenceMatch?.valueInExcerpt, expected);
+    });
+  }
+
+  it("checks an enum that declares no values as a string, not as an enum mismatch", async () => {
+    const result = await run("Tier: gold", [{ path: "f", type: "enum" }, { path: "g", type: "enum", enumValues: [] }], [
+      { fieldPath: "f", candidateValue: "gold", excerpt: "Tier: gold" },
+      { fieldPath: "g", candidateValue: "gold", excerpt: "Tier: gold" },
+    ]);
+    assert.equal(byField(result, "f").evidenceMatch?.schema, "ok");
+    assert.equal(byField(result, "g").evidenceMatch?.schema, "ok");
+  });
+});
+
+describe("the envelope validator recomputes evidenceMatch", () => {
+  async function envelopeWith(field: TargetFieldSchema, value: unknown, excerpt: string): Promise<Record<string, any>> {
+    const result = await run(`x ${excerpt} y`, [field], [{ fieldPath: field.path, candidateValue: value, excerpt }]);
+    return JSON.parse(serializePortableExtractionResult(result));
+  }
+  const status = (envelope: Record<string, any>) => validatePortableExtractionResultEnvelope(envelope).status;
+
+  it("rejects match on an inferred field", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "number", inferenceType: "inferred" }, 45, "Fee: $45");
+    assert.equal(status(envelope), "valid");
+    envelope.result.proposals[0].evidenceMatch.valueInExcerpt = "match";
+    assert.equal(status(envelope), "invalid");
+  });
+
+  it("rejects match on an array field", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "array", inferenceType: "explicit" }, ["a"], "Tags: a");
+    envelope.result.proposals[0].evidenceMatch.valueInExcerpt = "match";
+    assert.equal(status(envelope), "invalid");
+  });
+
+  it("rejects a string tagged schema ok as a number", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "number" }, "forty-five", "Fee: forty-five");
+    assert.equal(envelope.result.proposals[0].evidenceMatch.schema, "type-mismatch");
+    envelope.result.proposals[0].evidenceMatch.schema = "ok";
+    assert.equal(status(envelope), "invalid");
+  });
+
+  it("rejects a valueInExcerpt that the excerpt does not give", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "number", inferenceType: "explicit" }, 999, "Price: $10 per session.");
+    assert.equal(envelope.result.proposals[0].evidenceMatch.valueInExcerpt, "mismatch");
+    envelope.result.proposals[0].evidenceMatch.valueInExcerpt = "match";
+    assert.equal(status(envelope), "invalid");
+  });
+
+  it("accepts only the known checkerVersion", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "number" }, 45, "Fee: $45");
+    envelope.result.proposals[0].evidenceMatch.checkerVersion = "evidence-match-v1";
+    assert.equal(status(envelope), "invalid");
+    envelope.result.proposals[0].evidenceMatch.checkerVersion = "evidence-match-v9";
+    assert.equal(status(envelope), "invalid");
+  });
+
+  it("rejects evidenceMatch without valueType", async () => {
+    const envelope = await envelopeWith({ path: "f", type: "number" }, 45, "Fee: $45");
+    delete envelope.result.proposals[0].valueType;
+    assert.equal(status(envelope), "invalid");
   });
 });

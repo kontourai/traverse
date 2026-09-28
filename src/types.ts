@@ -241,7 +241,7 @@ export type ExtractionValueInExcerpt = "match" | "mismatch" | "not-evaluated" | 
  * rule and a recommended consumer policy.
  */
 export interface ExtractionEvidenceMatch {
-  /** Names the rules that produced this record, e.g. `"evidence-match-v1"`. */
+  /** Names the rules that produced this record, e.g. `"evidence-match-v2"`. */
   checkerVersion: string;
   /**
    * `ok`, or why not: `type-mismatch` (wrong JSON type for the declared
@@ -251,9 +251,11 @@ export interface ExtractionEvidenceMatch {
    */
   schema: ExtractionSchemaMatch;
   /**
-   * `match`/`mismatch` when the value was compared with the excerpt;
-   * `not-evaluated` when the value or the excerpt could not be normalized for
-   * comparison; `not-applicable` when the field is not declared
+   * `match`/`mismatch` when the value was compared with the excerpt (`match`
+   * means the value is written there, not that the excerpt supports it);
+   * `not-evaluated` when the comparison was doubtful (an unreadable form, a
+   * difference only in meaningful punctuation or sign, a negation, another
+   * numeric scale); `not-applicable` when the field is not declared
    * `inferenceType: "explicit"` or is an `array`/`object`.
    */
   valueInExcerpt: ExtractionValueInExcerpt;

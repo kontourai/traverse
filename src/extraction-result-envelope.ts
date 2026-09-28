@@ -35,6 +35,7 @@ import type {
   TargetFieldSchema,
 } from "./types.js";
 import { validatePdfLayout } from "./content-prep.js";
+import { EVIDENCE_MATCH_CHECKER_VERSION, schemaMatch, valueInExcerpt } from "./evidence-match.js";
 
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT = "traverse-extraction-result";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION = 1;
@@ -512,7 +513,7 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
   const excerpt = nonEmptyString(provenance.excerpt, `${path}.provenance.excerpt`);
   if (locator.end - locator.start !== excerpt.length) fail(`${path}.provenance.locator length does not match excerpt UTF-16 length`);
   const occurrence = validateOccurrence(provenance.occurrence, `${path}.provenance.occurrence`, locator);
-  return {
+  const proposal: PortableExtractionProposal = {
     fieldPath: nonEmptyString(value.fieldPath, `${path}.fieldPath`),
     candidateValue: value.candidateValue,
     ...(value.confidence === undefined ? {} : { confidence: finiteNumber(value.confidence, `${path}.confidence`, 0, 1) }),
@@ -525,6 +526,35 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
     ...(value.producedBy === undefined ? {} : { producedBy: validateProducedBy(value.producedBy, `${path}.producedBy`) }),
     ...(value.evidenceMatch === undefined ? {} : { evidenceMatch: validateEvidenceMatch(value.evidenceMatch, `${path}.evidenceMatch`) }),
   };
+  if (proposal.evidenceMatch) checkEvidenceMatchConsistency(proposal, `${path}.evidenceMatch`);
+  return proposal;
+}
+
+/**
+ * `evidenceMatch` is a pure function of the proposal's value, declared type,
+ * enum values, inference type and excerpt, all carried on the proposal, so the
+ * validator recomputes it and rejects a record that disagrees. `tokenBoundary`
+ * needs the prepared text around the excerpt, which the envelope does not
+ * carry, so only its type is checked.
+ */
+function checkEvidenceMatchConsistency(proposal: PortableExtractionProposal, path: string): void {
+  const match = proposal.evidenceMatch!;
+  if (match.checkerVersion !== EVIDENCE_MATCH_CHECKER_VERSION) {
+    fail(`${path}.checkerVersion must be ${EVIDENCE_MATCH_CHECKER_VERSION}`);
+  }
+  if (proposal.valueType === undefined) fail(`${path} requires the proposal's valueType`);
+  const field: TargetFieldSchema = {
+    path: proposal.fieldPath,
+    type: proposal.valueType,
+    ...(proposal.enumValues !== undefined ? { enumValues: proposal.enumValues } : {}),
+    ...(proposal.inferenceType !== undefined ? { inferenceType: proposal.inferenceType } : {}),
+  };
+  const schema = schemaMatch(proposal.candidateValue, field);
+  if (match.schema !== schema) fail(`${path}.schema is ${match.schema} but the proposal's value and valueType give ${schema}`);
+  const inExcerpt = valueInExcerpt(proposal.candidateValue, field, proposal.provenance.excerpt);
+  if (match.valueInExcerpt !== inExcerpt) {
+    fail(`${path}.valueInExcerpt is ${match.valueInExcerpt} but the proposal's value and excerpt give ${inExcerpt}`);
+  }
 }
 
 function validateEvidenceMatch(input: unknown, path: string): ExtractionEvidenceMatch {
