@@ -78,13 +78,15 @@ export const MARKDOWN_NOISE_ELEMENTS = [
  * Noise elements that hold page text. Unlike scripts or styles, removing one
  * can drop content, so each removal is reported (see {@link pruneMarkdownNoise}).
  */
-const TEXT_CHROME_ELEMENTS = new Set(["NAV", "HEADER", "FOOTER", "ASIDE", "FORM"]);
+const TEXT_CHROME_ELEMENTS = new Set(["NAV", "HEADER", "FOOTER", "ASIDE", "FORM", "NOSCRIPT"]);
 /**
- * Of those, the ones that are page chrome only at page level: inside an
- * `article` or `main` they belong to that content (an article's header holds
- * its title, date or salary), so they are kept there. `nav` stays chrome.
+ * Of those, the ones that belong to an `article` when they sit inside one (an
+ * article's header holds its title, date or salary). Anywhere else, including
+ * inside `main` outside any article, they are page chrome (breadcrumbs,
+ * related-item footers, newsletter asides). `nav`, `form` and `noscript` are
+ * always removed.
  */
-const CONTENT_SCOPED_CHROME = new Set(["HEADER", "FOOTER", "ASIDE", "FORM"]);
+const ARTICLE_SCOPED_CHROME = new Set(["HEADER", "FOOTER", "ASIDE"]);
 /** Set on a content-scoped element pruning kept, so later Turndown passes over a detached copy keep it too. */
 const KEPT_ATTRIBUTE = "data-traverse-kept";
 
@@ -96,7 +98,15 @@ interface PruneNode {
   getAttribute?(name: string): string | null;
 }
 
-/** True when an ancestor is `article`, `main`, or `role="main"`: landmarks there are scoped to content. */
+/** True when an ancestor is an `article`. */
+function insideArticle(node: PruneNode): boolean {
+  for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+    if (parent.nodeName.toUpperCase() === "ARTICLE") return true;
+  }
+  return false;
+}
+
+/** True when an ancestor is `article`, `main`, or `role="main"`: landmark roles there are scoped to content. */
 export function insideContentScope(node: PruneNode): boolean {
   for (let parent = node.parentNode; parent; parent = parent.parentNode) {
     const name = parent.nodeName.toUpperCase();
@@ -107,8 +117,8 @@ export function insideContentScope(node: PruneNode): boolean {
 
 /**
  * Remove {@link MARKDOWN_NOISE_ELEMENTS} from a parsed document, in place.
- * `header`/`footer`/`aside`/`form` inside `article`/`main` are kept (and
- * marked, so {@link createTurndownService} keeps them in a detached copy).
+ * `header`/`footer`/`aside` inside an `article` are kept (and marked, so
+ * {@link createTurndownService} keeps them in a detached copy).
  * Returns the collapsed text of every text-bearing element removed, so the
  * caller can name it: page text is never dropped silently.
  */
@@ -119,7 +129,7 @@ export function pruneMarkdownNoise(document: { querySelectorAll(selector: string
       const el = found as PruneNode & { isConnected: boolean; remove(): void; setAttribute(name: string, value: string): void };
       if (!el.isConnected) continue; // inside an element already removed and reported
       const name = el.nodeName.toUpperCase();
-      if (CONTENT_SCOPED_CHROME.has(name) && insideContentScope(el)) {
+      if (ARTICLE_SCOPED_CHROME.has(name) && insideArticle(el)) {
         el.setAttribute(KEPT_ATTRIBUTE, "");
         continue;
       }
@@ -313,14 +323,14 @@ export function createTurndownService(): TurndownService {
     emDelimiter: "*",
   });
   // Same rule as pruneMarkdownNoise, for input Turndown parses itself (a
-  // bodyless fragment) or a card converted on its own: a content-scoped
-  // element that pruning kept, or that sits inside article/main, survives.
+  // bodyless fragment) or a card converted on its own: an article-scoped
+  // element that pruning kept, or that sits inside an article, survives.
   const noise = new Set(MARKDOWN_NOISE_ELEMENTS.map((tag) => tag.toUpperCase()));
   td.remove((node) => {
     const name = node.nodeName.toUpperCase();
     if (!noise.has(name)) return false;
-    if (!CONTENT_SCOPED_CHROME.has(name)) return true;
-    return !node.hasAttribute(KEPT_ATTRIBUTE) && !insideContentScope(node as unknown as PruneNode);
+    if (!ARTICLE_SCOPED_CHROME.has(name)) return true;
+    return !node.hasAttribute(KEPT_ATTRIBUTE) && !insideArticle(node as unknown as PruneNode);
   });
   return td;
 }

@@ -25,6 +25,16 @@ const taskSpec = createExtractionTaskSpec({
   examples: [{ content: "Alpine", proposals: [{ fieldPath: "title", candidateValue: "Alpine", excerpt: "Alpine" }] }],
 });
 
+/** Each bundled adapter answering with `payload` as its tool input, optionally stopped at the output cap. */
+function adaptersWith(payload: unknown, capped = false): Array<[string, ExtractionProvider]> {
+  return [
+    ["anthropic", createAnthropicExtractionProvider({ client: fakeAnthropicClient(fakeAnthropicMessage("submit_extraction_proposals", payload, capped ? { stopReason: "max_tokens" } : {})) })],
+    ["openai", createOpenAIExtractionProvider({ client: { async create() { return { model: "openai-test", choices: [{ finish_reason: capped ? "length" : "tool_calls", message: { tool_calls: [{ function: { name: "submit_extraction_proposals", arguments: JSON.stringify(payload) } }] } }], usage: { total_tokens: 11 } }; } } })],
+    ["gemini", createGeminiExtractionProvider({ client: { async generateContent() { return { modelVersion: "gemini-test", functionCalls: [{ name: "submit_extraction_proposals", args: payload }], usageMetadata: { totalTokenCount: 11 }, ...(capped ? { candidates: [{ finishReason: "MAX_TOKENS" }] } : {}) }; } } as never })],
+    ["relay", createRelayExtractionProvider({ runtime: new FakeModelRuntime([{ provider: "fixture", model: "relay-test", outputText: "", toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: payload }], usage: { totalTokens: 11 }, latencyMs: 0, stopReason: capped ? "max_tokens" : "tool_use" }]) })],
+  ];
+}
+
 function adapters(payload: unknown = rawProposals): Array<[string, ExtractionProvider]> {
   const rawProposals = payload;
   return [
@@ -101,6 +111,59 @@ describe("bundled provider conformance", () => {
       assert.deepEqual(result.proposals.map((p) => p.candidateValue), ["Alpine"]);
       assert.ok(!("confidence" in result.proposals[0]));
       assert.equal(result.warnings, undefined);
+    });
+  }
+
+  // A tool call whose input is unusable must not read as a complete answer.
+  const unusablePayloads: Array<[string, unknown]> = [
+    ["proposals is not an array", { proposals: "garbage" }],
+    ["no proposals key", {}],
+    ["null proposals", { proposals: null }],
+    ["every item malformed", { proposals: [7, { junk: 1 }] }],
+  ];
+  for (const [what, payload] of unusablePayloads) {
+    for (const [label, provider] of adaptersWith(payload)) {
+      it(`${label}: an unusable tool call (${what}) is unread/provider-failure`, async () => {
+        const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+        assert.equal(result.error, undefined);
+        const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+        assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
+        assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 13, status: "unread", reason: "provider-failure" }]);
+        assert.ok(envelope.result.warningClassifications?.some((w) => w.code === "unusable-answer"), JSON.stringify(result.warnings));
+      });
+    }
+  }
+
+  for (const [label, provider] of adaptersWith({ proposals: [] })) {
+    it(`${label}: a valid empty proposals array is a complete answer`, async () => {
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+      assert.deepEqual(envelope.result.outcome, { status: "success" });
+      assert.equal(result.warnings, undefined);
+    });
+  }
+
+  for (const [label, provider] of adaptersWith({ proposals: [7, { fieldPath: "title", value: "Alpine", excerpt: "Alpine" }] })) {
+    it(`${label}: some malformed items are a proposal-normalization drop, not a lost chunk`, async () => {
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      assert.equal(result.proposals.length, 1);
+      const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+      assert.deepEqual(envelope.result.outcome, { status: "success" });
+      assert.deepEqual(envelope.result.warningClassifications, [{ category: "normalization", code: "proposal-normalization" }]);
+    });
+  }
+
+  for (const [label, provider] of adaptersWith({ proposals: [] }, true)) {
+    it(`${label}: sets truncated at the output cap, and extract() reports partial/output-truncated`, async () => {
+      const output = await provider.extract({ content: "Title: Alpine", contentType: "text", targetSchema: schema });
+      assert.equal(output.truncated, true);
+      assert.equal(output.missingToolCall, false);
+      assert.equal(output.unusable, false);
+      const [, fresh] = adaptersWith({ proposals: [] }, true).find(([name]) => name === label)!;
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider: fresh });
+      const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+      assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "output-truncated" });
+      assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 13, status: "output-truncated" }]);
     });
   }
 

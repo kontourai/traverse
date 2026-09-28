@@ -89,7 +89,7 @@ describe("structural prep keeps content outside the card container, or names wha
   });
 });
 
-describe("markdown prep keeps header/footer/aside/form inside article/main, and names page chrome it prunes", () => {
+describe("markdown prep keeps an article's own header/footer/aside, and names all page chrome it prunes", () => {
   const chromeWarnings = (warnings: string[] = []) => warnings.filter((w) => w.startsWith("markdown prep pruned "));
   const articlePage = `<!DOCTYPE html><html><body><header><p>Site banner text</p></header><article><header><h1>Engineer</h1><p>Salary $180k–$220k</p></header><p>Body text about the role.</p><footer><p>Posted 2026-09-01</p></footer></article></body></html>`;
 
@@ -102,18 +102,35 @@ describe("markdown prep keeps header/footer/aside/form inside article/main, and 
     assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 1 page-chrome element (16 chars): "Site banner text"']);
   });
 
-  for (const tag of ["header", "footer", "aside", "form"]) {
-    it(`keeps a <${tag}> inside <main>`, () => {
-      const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><${tag}><p>Fee $40 per class</p></${tag}><p>Main body.</p></main></body></html>`, "html");
+  for (const tag of ["header", "footer", "aside"]) {
+    it(`keeps a <${tag}> inside <article>`, () => {
+      const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><article><${tag}><p>Fee $40 per class</p></${tag}><p>Main body.</p></article></main></body></html>`, "html");
       assert.ok(r.fullText.includes("Fee $40 per class"), r.fullText);
       assert.deepEqual(chromeWarnings(r.warnings), []);
     });
+
+    it(`removes and names a <${tag}> inside <main> but outside any article`, () => {
+      const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><${tag}><p>Related $99 offer</p></${tag}><p>Main body.</p></main></body></html>`, "html");
+      assert.ok(!r.fullText.includes("Related $99 offer"), r.fullText);
+      assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 1 page-chrome element (17 chars): "Related $99 offer"']);
+    });
   }
 
-  it("keeps a header inside a card that sits in <main>, although each card is converted on its own", () => {
+  it("removes and names a <form> even inside an article", () => {
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><article><p>Role body.</p><form><p>Subscribe for alerts</p><button>Go</button></form></article></body></html>`, "html");
+    assert.ok(!r.fullText.includes("Subscribe for alerts"), r.fullText);
+    assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 1 page-chrome element (22 chars): "Subscribe for alertsGo"']);
+  });
+
+  it("names noscript text it removes", () => {
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><noscript>Enable scripts to see prices</noscript><p>Body.</p></body></html>`, "html");
+    assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 1 page-chrome element (28 chars): "Enable scripts to see prices"']);
+  });
+
+  it("keeps a header inside a card whose article is outside the card, although each card is converted on its own", () => {
     const cardsWithHeaders = Array.from({ length: 4 }, (_, i) =>
       `<div class="card"><header><h3>Role ${i + 1}</h3><p>Pay $${i + 1}00</p></header><p>Details ${i + 1}.</p></div>`).join("");
-    const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><section>${cardsWithHeaders}</section></main></body></html>`, "html");
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><article><section>${cardsWithHeaders}</section></article></body></html>`, "html");
     assert.equal(r.structural, true);
     for (let i = 1; i <= 4; i++) assert.ok(r.fullText.includes(`Pay $${i}00`), r.fullText);
   });
@@ -136,9 +153,21 @@ describe("markdown prep keeps header/footer/aside/form inside article/main, and 
     assert.ok(htmlToMarkdown(articlePage).includes("Salary $180k–$220k"));
   });
 
-  it("a bodyless fragment converted by Turndown directly keeps an article's header", () => {
+  it("a bodyless fragment converted by Turndown directly keeps an article's header only", () => {
     assert.ok(htmlToMarkdown(`<article><header><p>Salary $90k</p></header><p>Role.</p></article>`).includes("Salary $90k"));
+    assert.ok(!htmlToMarkdown(`<main><header><p>Breadcrumbs</p></header><p>Role.</p></main>`).includes("Breadcrumbs"));
     assert.ok(!htmlToMarkdown(`<header><p>Site banner</p></header><p>Role.</p>`).includes("Site banner"));
+  });
+
+  it("a realistic job page keeps the article and names the in-main chrome it drops", () => {
+    const article = `<h1>Senior Engineer</h1><p>Salary $180k–$220k. Remote.</p>` + "<p>Role body paragraph.</p>".repeat(5);
+    const related = `<footer><h3>Related jobs</h3><ul>${Array.from({ length: 10 }, (_, i) => `<li><a href="/j${i}">Job ${i} — $${100 + i}k</a></li>`).join("")}</ul></footer>`;
+    const page = `<html><body><main><header><p>Breadcrumbs: Home / Jobs</p></header><form><p>We use cookies.</p><button>Accept</button></form>${article}<aside><p>Newsletter signup</p></aside>${related}</main></body></html>`;
+    const prepared = prepareContent(page, "html", 1_000_000);
+    const alone = prepareContent(`<html><body><main>${article}</main></body></html>`, "html", 1_000_000);
+    assert.equal(prepared.text, alone.text, "only the article's own text is left");
+    const [warning] = chromeWarnings(prepared.warnings);
+    assert.match(warning, /^markdown prep pruned 4 page-chrome elements \(\d+ chars\): "Breadcrumbs: Home \/ Jobs", "Related jobsJob 0 — \$100k.*…", "Newsletter signup", "We use cookies\.Accept"$/);
   });
 
   it("classifies the chrome warning on the envelope as navigation-pruned", async () => {

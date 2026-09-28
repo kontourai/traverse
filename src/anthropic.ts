@@ -312,12 +312,17 @@ export function parseProposals(
   rawToolInput: unknown,
   extractorName: string,
   contentType: ContentType,
-): { proposals: ExtractionProposal[]; warnings: string[] } {
+): { proposals: ExtractionProposal[]; warnings: string[]; unusable: boolean } {
   const warnings: string[] = [];
 
-  if (!isRecord(rawToolInput)) return { proposals: [], warnings };
-  const rawProposals = rawToolInput["proposals"];
-  if (!isArray(rawProposals)) return { proposals: [], warnings };
+  // A missing tool call (undefined) is the caller's missingToolCall signal;
+  // a tool call whose input holds no proposals array is an unusable answer.
+  if (rawToolInput === undefined) return { proposals: [], warnings, unusable: false };
+  const rawProposals = isRecord(rawToolInput) ? rawToolInput["proposals"] : undefined;
+  if (!isArray(rawProposals)) {
+    warnings.push("provider tool call had no usable proposals array");
+    return { proposals: [], warnings, unusable: true };
+  }
 
   const results: ExtractionProposal[] = [];
   rawProposals.forEach((item, index) => {
@@ -361,7 +366,9 @@ export function parseProposals(
       ...(occurrenceHint === undefined ? {} : { occurrenceHint }),
     });
   });
-  return { proposals: results, warnings };
+  // Every item malformed leaves nothing answered; some malformed is a
+  // per-proposal drop, reported like any other normalization drop.
+  return { proposals: results, warnings, unusable: rawProposals.length > 0 && results.length === 0 };
 }
 
 /** Build the domain-owned prompt shared by direct-SDK and Relay adapters. */
@@ -448,7 +455,7 @@ export function createAnthropicExtractionProvider(
       });
 
       const toolInput = extractToolUseInput(message, TOOL_NAME);
-      const { proposals, warnings } = parseProposals(toolInput, name, input.contentType);
+      const { proposals, warnings, unusable } = parseProposals(toolInput, name, input.contentType);
       if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
 
       if (message.stop_reason === "max_tokens") {
@@ -466,6 +473,7 @@ export function createAnthropicExtractionProvider(
         ...(warnings.length > 0 ? { warnings } : {}),
         truncated: message.stop_reason === "max_tokens",
         missingToolCall: toolInput === undefined,
+        unusable,
       };
     },
   };

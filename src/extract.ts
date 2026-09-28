@@ -136,6 +136,8 @@ const MISSING_TOOL_CALL_ADAPTER_WARNING = /^provider returned no extraction (?:t
 /** Written (located on the chunk) when a typed signal reports a loss the adapter did not warn about. */
 const OUTPUT_TRUNCATED_WARNING = "response truncated at maxTokens; proposals may be incomplete";
 const MISSING_TOOL_CALL_WARNING = "provider returned no extraction tool call";
+/** Written (located on the chunk) whenever an answer is recorded as unusable. */
+const UNUSABLE_ANSWER_WARNING = "provider answer unusable; the chunk is recorded as not read";
 
 /** The partial reason a dispatched chunk's loss reports when no early stop applies. */
 function lossPartialReason(entry: ExtractionCoverageEntry): ExtractionPartialReason | undefined {
@@ -536,7 +538,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         warnings.push(`${chunkLabel} provider call failed: ${failure.message} (chars:${chunks[i].start}-${sentEnd} not read)`);
         continue;
       }
-      const output = outcome.output as ProviderExtractionOutput;
+      // A provider that resolves with something other than an output object
+      // answered nothing usable for this chunk; the other chunks still count.
+      const outputIsObject = typeof outcome.output === "object" && outcome.output !== null;
+      const output = (outputIsObject ? outcome.output : { proposals: undefined, raw: undefined }) as ProviderExtractionOutput;
       chunksSucceeded++;
       // Adapter warnings that mean the answer for this chunk is incomplete are
       // located here, since only the core knows which chunk a call served.
@@ -575,12 +580,12 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const producedBy = producedByFor(output, outcome.requestDigest);
       // An answer core cannot use (no proposals array, or normalization threw)
       // leaves the chunk unanswered, like a failed call.
-      let unusableAnswer = false;
+      let unusableAnswer = !outputIsObject || output.unusable === true;
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings, unusable } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
         );
-        unusableAnswer = unusable;
+        if (unusable) unusableAnswer = true;
         warnings.push(...normalizationWarnings);
         // Each proposal is attributed to the call that served its own chunk,
         // so a run that fell back to another model part-way stays attributable.
@@ -592,6 +597,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           `chunk ${i + 1}/${chunks.length} normalization failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+      if (unusableAnswer && !missingToolCall) warnings.push(located(UNUSABLE_ANSWER_WARNING));
       // No tool call means nothing was answered, whatever stopped the model.
       sent(missingToolCall
         ? { status: "unread", reason: "missing-tool-call" }

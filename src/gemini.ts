@@ -62,6 +62,7 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
         ...(warnings.length ? { warnings } : {}),
         truncated,
         missingToolCall: !call,
+        unusable: parsed.unusable,
       };
     },
   };

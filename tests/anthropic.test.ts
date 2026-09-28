@@ -155,6 +155,9 @@ describe("createAnthropicExtractionProvider", () => {
     });
     assert.equal(out.proposals.length, 1);
     assert.ok(out.warnings?.includes("response truncated at maxTokens; proposals may be incomplete"));
+    assert.equal(out.truncated, true, "the typed signal decides in extract(); the warning is only a fallback");
+    assert.equal(out.missingToolCall, false);
+    assert.equal(out.unusable, false);
   });
 
   it("defaults the model to claude-sonnet-4-6 and reflects it in provider.name", () => {
@@ -234,9 +237,17 @@ describe("buildExtractionTool / parseProposals (units)", () => {
   });
 
   it("returns empty proposals/warnings for non-record / missing proposals input", () => {
-    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [] });
-    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), { proposals: [], warnings: [] });
-    assert.deepEqual(parseProposals("string", "x", "html"), { proposals: [], warnings: [] });
+    // No tool call at all is the adapter's missingToolCall signal, not an unusable answer.
+    assert.deepEqual(parseProposals(undefined, "x", "html"), { proposals: [], warnings: [], unusable: false });
+    const unusable = { proposals: [], warnings: ["provider tool call had no usable proposals array"], unusable: true };
+    assert.deepEqual(parseProposals({ nope: 1 }, "x", "html"), unusable);
+    assert.deepEqual(parseProposals("string", "x", "html"), unusable);
+    assert.deepEqual(parseProposals({ proposals: null }, "x", "html"), unusable);
+    // A valid empty array is a usable answer: nothing found.
+    assert.deepEqual(parseProposals({ proposals: [] }, "x", "html"), { proposals: [], warnings: [], unusable: false });
+    // Every item malformed is unusable; some malformed is not.
+    assert.equal(parseProposals({ proposals: [7, { junk: 1 }] }, "x", "html").unusable, true);
+    assert.equal(parseProposals({ proposals: [7, { fieldPath: "title", value: "t", excerpt: "t" }] }, "x", "html").unusable, false);
   });
 
   it("preserves an optional integer occurrence hint for exact resolver verification", () => {

@@ -340,8 +340,9 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   // chunk, so these codes never appear on an envelope whose outcome ignores it.
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
-  if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
-  if (/^dropped .*proposal|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider answer unusable/.test(warning)) return { category: "provider", code: "unusable-answer" };
+  if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
+  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
   if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
   if (/chunked into/.test(warning)) return { category: "content", code: "content-chunking" };
@@ -472,8 +473,11 @@ function validateResult(input: unknown): PortableExtractionResult {
   if (result.outcome.status === "success" && lost) {
     fail("result.coverage has a range that was not read or answered, but result.outcome is success");
   }
-  if (result.outcome.status === "partial" && LOSS_PARTIAL_REASONS.has(result.outcome.reason) && !lost) {
-    fail(`result.outcome.reason ${result.outcome.reason} requires a result.coverage entry that was not read or answered`);
+  // A loss reason names a dispatched chunk, so a never-dispatched range alone
+  // cannot account for it.
+  const dispatchedLoss = result.coverage?.some((entry) => entry.status !== "complete" && entry.reason !== "not-dispatched") ?? false;
+  if (result.outcome.status === "partial" && LOSS_PARTIAL_REASONS.has(result.outcome.reason) && !dispatchedLoss) {
+    fail(`result.outcome.reason ${result.outcome.reason} requires a result.coverage entry for a dispatched chunk that was not read or answered`);
   }
   return result;
 }
@@ -582,7 +586,7 @@ function validateCoverage(input: unknown, artifact: PreparedArtifact | undefined
     if (group.length === 1) continue;
     const [sent, tail] = group;
     const cutPair = group.length === 2 && tail.status === "unread" && tail.reason === "content-truncated" &&
-      sent.reason !== "content-truncated" && tail.start === sent.end;
+      sent.reason !== "content-truncated" && sent.reason !== "not-dispatched" && tail.start === sent.end;
     if (!cutPair) fail(`result.coverage has more than one entry for chunk ${chunk} that is not a sent part and its content-truncated tail`);
   }
   return entries;

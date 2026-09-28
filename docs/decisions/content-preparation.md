@@ -127,11 +127,13 @@ with the total character count), classified on the envelope as
 `preparation`/`navigation-pruned`.
 
 The element-name pruning before it follows the same rule for all Markdown
-prep, structural or whole-page: `header`, `footer`, `aside` and `form` inside
-`article`, `main` or `role="main"` belong to that content and are kept (and
-Turndown keeps them too, even when a card is converted on its own), while
-`nav` and page-level `header`/`footer`/`aside`/`form` are removed and quoted in
-a `markdown prep pruned …` warning with the same bound and classification.
+prep, structural or whole-page: `header`, `footer` and `aside` inside an
+`article` belong to that article and are kept (and Turndown keeps them too,
+even when a card is converted on its own). Everywhere else, including inside
+`main` outside any article, they are page chrome (breadcrumbs, related-item
+footers, newsletter asides) and are removed, as are every `nav`, `form` and
+`noscript`; each removal is quoted in a `markdown prep pruned …` warning with
+the same bound and classification.
 Scripts, styles and other elements without page text are removed without a
 warning. Markdown prep therefore never drops page text silently; the legacy
 `prep: "text"` regex strip is unchanged.

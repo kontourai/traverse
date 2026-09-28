@@ -128,6 +128,29 @@ describe("partial outcome and coverage for chunk losses", () => {
     assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "provider-failure" });
   });
 
+  for (const [label, value] of [["undefined", undefined], ["null", null], ["a string", "nope"]] as const) {
+    it(`a provider resolving with ${label} for one chunk loses only that chunk`, async () => {
+      const provider: ExtractionProvider = {
+        name: "p",
+        async extract(input) { return (input.chunkIndex === 1 ? value : empty) as never; },
+      };
+      const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+      assert.equal(result.error, undefined);
+      const envelope = envelopeOf(result);
+      assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
+      assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "provider-failure" });
+      assert.ok(result.warnings?.includes("chunk 2/3 (chars:11800-23800): provider answer unusable; the chunk is recorded as not read"));
+    });
+  }
+
+  it("unusable: true from a custom provider records the chunk as not read", async () => {
+    const provider: ExtractionProvider = { name: "p", async extract() { return { ...empty, unusable: true }; } };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
+    const envelope = envelopeOf(result);
+    assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
+    assert.deepEqual(envelope.result.warningClassifications, [{ category: "provider", code: "unusable-answer" }]);
+  });
+
   it("the first loss in prepared-text order is the reason when several chunks lose text", async () => {
     // Chunks 1 and 2 are cut at dispatch, and chunk 2's call also fails: the
     // cut tail of chunk 1 comes first.
@@ -299,8 +322,13 @@ describe("portable envelope coverage validation", () => {
     ["a loss reason with every entry complete", (c) => {
       c[1].status = "complete";
       delete c[1].reason;
-    }, /requires a result\.coverage entry that was not read or answered/],
-    ["a loss reason with no coverage", (_c, e) => { delete e.result.coverage; }, /requires a result\.coverage entry that was not read or answered/],
+    }, /requires a result\.coverage entry for a dispatched chunk/],
+    ["a loss reason with no coverage", (_c, e) => { delete e.result.coverage; }, /requires a result\.coverage entry for a dispatched chunk/],
+    ["a loss reason whose only lost range was never dispatched", (c) => { c[1].reason = "not-dispatched"; }, /requires a result\.coverage entry for a dispatched chunk/],
+    ["a content-truncated tail after a never-dispatched range", (c) => {
+      c[0].status = "unread"; c[0].reason = "not-dispatched"; c[0].end = 11800;
+      c[1].chunk = 1; c[1].reason = "content-truncated";
+    }, /more than one entry for chunk 1/],
     ["two entries for one chunk", (c) => { c[2].chunk = 2; }, /more than one entry for chunk 2/],
     ["a content-truncated tail that does not start where the sent part ends", (c) => {
       c[1].chunk = 1;

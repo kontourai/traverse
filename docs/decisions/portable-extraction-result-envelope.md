@@ -92,8 +92,13 @@ Entries are ordered by `start` and may overlap (adjacent chunks share
 `chunkOverlap`). An `unread` entry covers exactly the unread span, so a chunk
 cut at `maxContentChars` has a `complete` (or other) entry for the sent part and
 an `unread`/`content-truncated` entry for the tail. `reason` is present exactly
-on `unread` entries. An answer core cannot use (no proposals array, or
-normalization threw) is `unread`/`provider-failure`, like a failed call.
+on `unread` entries. An answer core cannot use (a tool call with no proposals
+array or only malformed items, a `proposals` value that is not an array, an
+output that is not an object, or normalization that threw) is
+`unread`/`provider-failure`, like a failed call, with a located
+`provider answer unusable` warning (code `unusable-answer`). Some malformed
+items beside usable ones are per-proposal drops (`proposal-normalization`),
+not a lost chunk.
 
 Coverage describes the prepared text only. Structural chunking drops a whole
 outside-text segment beyond `maxChunks` before the prepared text is built, so
@@ -107,7 +112,9 @@ The validator requires `result.preparedArtifact`,
 per chunk except a sent part followed by its `unread`/`content-truncated` tail
 starting where the sent part ends. It rejects a non-`complete` entry on a
 `success` outcome, and a loss reason (`provider-failure`, `content-truncated`,
-`output-truncated`) without a non-`complete` entry.
+`output-truncated`) without a non-`complete` entry for a dispatched chunk (one
+whose reason is not `not-dispatched`). A never-dispatched range cannot have a
+`content-truncated` tail.
 
 The `output-truncated` and `missing-tool-call` warning codes are given only to
 the chunk-located warning `extract()` writes when it records that loss, so they

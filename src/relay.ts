@@ -139,6 +139,7 @@ function relayOutput(
     ...(warnings.length === 0 ? {} : { warnings }),
     truncated,
     missingToolCall: toolInput === undefined,
+    unusable: parsed.unusable,
   };
 }
 

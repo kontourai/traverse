@@ -385,9 +385,10 @@ navigation landmarks and link-dense blocks such as `div` navbars and
 mega-menus. A landmark inside `article`/`main` is kept, `tel:`/`mailto:`/`sms:`
 links do not count as navigation, and every block the pass removes is quoted
 in a warning (`structural prep pruned …`). The first chrome pass follows the
-same rule for Markdown prep (structural or not): `header`, `footer`, `aside`
-and `form` inside `article`/`main` are kept, and every `nav`, `header`,
-`footer`, `aside` or `form` it removes is quoted in a `markdown prep pruned …`
+same rule for Markdown prep (structural or not): `header`, `footer` and `aside`
+inside an `article` are the article's own and are kept; everywhere else,
+including inside `main`, they are removed, as are every `nav`, `form` and
+`noscript`, and each removal is quoted in a `markdown prep pruned …`
 warning. So Markdown prep never drops page text silently; the legacy
 `prep: "text"` regex strip is unchanged. Short outside text rides along with the first or last card chunk;
 longer outside text gets its own chunks, which are dispatched after every card
@@ -439,13 +440,14 @@ and any per-chunk provider failure. A provider error on **one** chunk is a
 warning and the other chunks still run; only if **every** chunk's call fails
 does `result.error` get set. `result.coverage` records which prepared-text
 range each chunk read and answered, and any loss (a failed call, an answer
-core cannot use, a cut at `maxContentChars`, an output cap, a missing tool
+core cannot use (no proposals array, every tool item malformed, or no output
+object), a cut at `maxContentChars`, an output cap, a missing tool
 call, a chunk never dispatched) also sets `result.partial`. Coverage describes
 the prepared text only: a structural segment that `maxChunks` dropped whole
 never enters the prepared text, so only `partial.reason: "max-chunks"` (and its
-warning) records that loss. A provider signals an output cap or a missing tool
-call with `ProviderExtractionOutput.truncated` / `missingToolCall` (the bundled
-adapters set both); a provider that sets neither is judged by a warning that
+warning) records that loss. A provider signals an output cap, a missing tool
+call or an unusable answer with `ProviderExtractionOutput.truncated` /
+`missingToolCall` / `unusable` (the bundled adapters set all three); a provider that sets neither is judged by a warning that
 starts with `response truncated at maxTokens` or `provider returned no
 extraction tool call`. Coverage ranges of adjacent chunks may
 overlap by `chunkOverlap`.

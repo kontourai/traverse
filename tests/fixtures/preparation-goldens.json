@@ -25,6 +25,11 @@
       "preparationMode": "text",
       "preparationVersion": "3",
       "digest": "99387bfdeff246ba05eb188a6f6ae8e01396fae7df5b9c80d5543b40a396fae8"
+    },
+    "html-chrome": {
+      "preparationMode": "markdown",
+      "preparationVersion": "3+linkedom@0.18.13+turndown@7.2.4",
+      "digest": "9767c8ec0f1cc2313dbaa2b41a40c59127f070ec6db8d5e8db789a358393af76"
     }
   }
 }

@@ -495,6 +495,14 @@ export interface ProviderExtractionOutput {
    * call"` (or `function call`). The bundled adapters always set it.
    */
   missingToolCall?: boolean;
+  /**
+   * `true` when the provider answered but the answer is unusable: the tool
+   * call held no proposals array, or every tool item was malformed. The chunk
+   * is then recorded as not read (`unread`/`provider-failure`). The bundled
+   * adapters always set it; `extract()` also detects a `proposals` value that
+   * is not an array, or an output that is not an object.
+   */
+  unusable?: boolean;
 }
 
 /** One positional result from a provider-native physical batch operation. */

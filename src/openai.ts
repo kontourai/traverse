@@ -82,6 +82,7 @@ export function createOpenAIExtractionProvider(opts: OpenAIAdapterOptions = {}):
         truncated,
         // Unparseable arguments leave nothing answered, like a missing call.
         missingToolCall: rawInput === undefined,
+        unusable: parsed.unusable,
       };
     },
   };
