@@ -98,7 +98,7 @@ not Traverse's job, and no Traverse confidence is derived from them.
 
 ```ts
 evidenceMatch: {
-  checkerVersion: "evidence-match-v3";
+  checkerVersion: "evidence-match-v4";
   schema: "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
   valueInExcerpt: "match" | "mismatch" | "not-evaluated" | "not-applicable";
   tokenBoundary?: boolean;
@@ -139,15 +139,17 @@ evidenceMatch: {
     (`not`, `no`, `never`, `without`, `cannot`, `nor`, or a word ending in
     `n't`) is in the three words before an occurrence of the value, the
     result is `not-evaluated` (`"open"` vs `"no longer open"`, `5` vs
-    `"not 5"`). `No.` or `No` directly before a digit is read as the
-    abbreviation for number, not as the word no (`"Ticket No. 5"`). Dates
-    are not checked for negation.
+    `"not 5"`). `No.` or `No:` directly before a digit is read as the
+    abbreviation for number, not as the word no (`"Ticket No. 5"`); plain
+    `no` before a digit stays a negation (`3` vs
+    `"There are no 3-bedroom units"`). Dates are not checked for negation.
   - `number`: written numbers in the excerpt, each optionally signed and led
     by a currency symbol, with comma thousands separators and a point
     decimal, not touching a letter or digit (`3` is not read from `2023`).
     Dates, times and fractions written in digits (`2026-06-09`, `10:30`,
     `1/2`) are skipped, so `6` is not read from a date, and a number is
-    `not-evaluated` rather than `match` when only such a form contains it. `match` when a number equals the value.
+    `not-evaluated` rather than `match` when only such a form contains it.
+    `match` when a number equals the value.
     A number written at another scale or sign convention (`45%`, accounting
     `(5)`, `$4.2 million`) neither matches nor mismatches: when no plainly
     written number equals the value and one of these is present, the result
@@ -177,11 +179,15 @@ still appear where the excerpt does not support the value:
 - exclusion wording (`"excludes C"` matches `"C"`);
 - enum members that differ only in case (`"Open"` and `"open"` fold together);
 - a number in a different currency (`45` matches `"€45"` when the value
-  meant dollars).
+  meant dollars);
+- digit groups read with different separators (`"1.234.567"` matches
+  `"Total 1,234.567"`);
+- a sign on the excerpt side of a phone-style value: the sign check covers
+  only the value (`"303-555-1234"` matches `"-303-555-1234"`).
 
 Changing any rule so that some input gets a different result changes
-`checkerVersion`, released or not. `evidence-match-v1` and
-`evidence-match-v2` were never released; `evidence-match-v3` is the first
+`checkerVersion`, released or not. `evidence-match-v1` to
+`evidence-match-v3` were never released; `evidence-match-v4` is the first
 released version.
 
 **Recommended consumer policy.** A `schema` result other than `ok` can block

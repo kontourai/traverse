@@ -244,7 +244,7 @@ Every proposal `extract()` returns carries deterministic facts about its value:
 // schema: { path: "price", type: "number", inferenceType: "explicit" }
 // proposal: { fieldPath: "price", candidateValue: 999,
 //             provenance: { excerpt: "Price: $10 per session.", ... },
-//             evidenceMatch: { checkerVersion: "evidence-match-v3", schema: "ok",
+//             evidenceMatch: { checkerVersion: "evidence-match-v4", schema: "ok",
 //                              valueInExcerpt: "mismatch", tokenBoundary: true }, ... }
 ```
 

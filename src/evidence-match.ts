@@ -15,7 +15,7 @@ import type {
 } from "./types.js";
 
 /** Changes whenever a rule below changes what it reports for some input. */
-export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v3";
+export const EVIDENCE_MATCH_CHECKER_VERSION = "evidence-match-v4";
 
 /**
  * Annotate a proposal. `start`/`end` are the excerpt's UTF-16 offsets in
@@ -95,12 +95,12 @@ export function valueInExcerpt(value: unknown, field: TargetFieldSchema, excerpt
   }
 }
 
-/** NFKC, lower case, a Unicode minus as `-`, `n't` as the word `not`, and `No.` before a digit as `number`. */
+/** NFKC, lower case, a Unicode minus as `-`, `n't` as the word `not`, and `No.` or `No:` before a digit as `number`. */
 function prepare(text: string): string {
   return text.normalize("NFKC").toLowerCase().replace(/\u2212/g, "-")
     .replace(/n['\u2019]t(?![\p{L}\p{N}])/gu, " not")
-    // "No. 5" / "No 5" abbreviates "number"; it is not the word no.
-    .replace(/(?<![\p{L}\p{N}])no\.?\s*(?=\d)/gu, " number ");
+    // "No. 5" / "No: 5" abbreviates "number"; plain "no 5" stays a negation.
+    .replace(/(?<![\p{L}\p{N}])no[.:]\s*(?=\d)/gu, " number ");
 }
 
 /** Case-, whitespace- and punctuation-folded word tokens. */
