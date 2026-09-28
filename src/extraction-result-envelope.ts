@@ -21,6 +21,7 @@ import {
 } from "./prepared-artifact.js";
 import type {
   ExtractionPartial,
+  ExtractionModelSource,
   ExtractionProposal,
   ExtractionProviderFailure,
   ExtractionResult,
@@ -38,7 +39,9 @@ export interface PortableExtractionSource {
   snapshotRef?: string;
 }
 
-export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint"> {
+export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint" | "producedBy"> {
+  /** Carried only when the in-process `producedBy` names its `modelSource`. */
+  producedBy?: PortableExtractionProducedBy;
   provenance: {
     excerpt: string;
     locator: string;
@@ -47,11 +50,20 @@ export interface PortableExtractionProposal extends Omit<ExtractionProposal, "oc
   };
 }
 
+/** Which model produced one proposal; every key is required on the wire. */
+export interface PortableExtractionProducedBy {
+  model: string;
+  modelSource: ExtractionModelSource;
+  /** Content-free digest of the provider request (`sha256:<hex>`). */
+  requestDigest: string;
+}
+
 /**
  * Provider classification without non-portable native or message diagnostics.
- * `code` also stays in-process until envelope importers accept the key.
+ * `code` is the upstream error code, informational only (`kind` stays
+ * authoritative), and is omitted when longer than 128 characters.
  */
-export type PortableExtractionProviderFailure = Omit<ExtractionProviderFailure, "native" | "message" | "code">;
+export type PortableExtractionProviderFailure = Omit<ExtractionProviderFailure, "native" | "message">;
 
 /** Default-safe provider audit fields. Raw response content is never included. */
 export interface PortableRawProviderResponse {
@@ -134,6 +146,9 @@ const VALUE_TYPES: ReadonlySet<TargetFieldSchema["type"]> = new Set(["string", "
 const INFERENCE_TYPES = new Set(["explicit", "inferred"]);
 const PARTIAL_REASONS = new Set(["cancelled", "max-provider-calls", "max-total-tokens", "max-chunks"]);
 const FAILURE_KINDS = new Set(["authentication", "rate-limit", "timeout", "invalid-request", "unavailable", "unknown"]);
+const MODEL_SOURCES = new Set(["provider-reported", "configured"]);
+/** Envelope importers cap a portable failure code at this length. */
+const MAX_PORTABLE_FAILURE_CODE_LENGTH = 128;
 const ARTIFACT_REASONS = new Set<PreparedArtifactInvalidReason>([
   "not-an-object", "invalid-format", "invalid-version", "invalid-digest", "invalid-ref",
   "invalid-preparation-mode", "invalid-preparation-version", "invalid-content-length",
@@ -256,11 +271,17 @@ function portableProposal(proposal: ExtractionProposal): PortableExtractionPropo
     ...(proposal.inferenceType !== undefined ? { inferenceType: proposal.inferenceType } : {}),
     ...(proposal.valueType !== undefined ? { valueType: proposal.valueType } : {}),
     ...(proposal.enumValues !== undefined ? { enumValues: proposal.enumValues } : {}),
+    ...(proposal.producedBy?.modelSource !== undefined
+      ? { producedBy: { model: proposal.producedBy.model, modelSource: proposal.producedBy.modelSource, requestDigest: proposal.producedBy.requestDigest } }
+      : {}),
   };
 }
 
 function portableFailure(failure: ExtractionProviderFailure): PortableExtractionProviderFailure {
-  return { provider: failure.provider, kind: failure.kind, retryable: failure.retryable };
+  return {
+    provider: failure.provider, kind: failure.kind, retryable: failure.retryable,
+    ...(failure.code !== undefined && failure.code.length <= MAX_PORTABLE_FAILURE_CODE_LENGTH ? { code: failure.code } : {}),
+  };
 }
 
 function classifyOutcome(result: ExtractionResult): PortableExtractionOutcome {
@@ -417,7 +438,7 @@ function validateResult(input: unknown): PortableExtractionResult {
 
 function validateProposal(input: unknown, path: string, artifact: PreparedArtifact | undefined): PortableExtractionProposal {
   const value = record(input, path);
-  exactKeys(value, ["fieldPath", "candidateValue", "confidence", "provenance", "extractor"], ["pathIndices", "inferenceType", "valueType", "enumValues"], path);
+  exactKeys(value, ["fieldPath", "candidateValue", "confidence", "provenance", "extractor"], ["pathIndices", "inferenceType", "valueType", "enumValues", "producedBy"], path);
   const provenance = record(value.provenance, `${path}.provenance`);
   exactKeys(provenance, ["excerpt", "locator", "occurrence"], [], `${path}.provenance`);
   const locator = validateLocator(provenance.locator, `${path}.provenance.locator`);
@@ -435,6 +456,17 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
     ...(value.inferenceType === undefined ? {} : { inferenceType: enumValue(value.inferenceType, INFERENCE_TYPES, `${path}.inferenceType`) as "explicit" | "inferred" }),
     ...(value.valueType === undefined ? {} : { valueType: enumValue(value.valueType, VALUE_TYPES, `${path}.valueType`) as TargetFieldSchema["type"] }),
     ...(value.enumValues === undefined ? {} : { enumValues: strings(value.enumValues, `${path}.enumValues`) }),
+    ...(value.producedBy === undefined ? {} : { producedBy: validateProducedBy(value.producedBy, `${path}.producedBy`) }),
+  };
+}
+
+function validateProducedBy(input: unknown, path: string): PortableExtractionProducedBy {
+  const value = record(input, path);
+  exactKeys(value, ["model", "modelSource", "requestDigest"], [], path);
+  return {
+    model: stableIdentity(value.model, `${path}.model`),
+    modelSource: enumValue(value.modelSource, MODEL_SOURCES, `${path}.modelSource`) as ExtractionModelSource,
+    requestDigest: digest(value.requestDigest, `${path}.requestDigest`),
   };
 }
 
@@ -511,11 +543,15 @@ function validateWarning(input: unknown, index: number): PortableExtractionWarni
 function validateFailure(input: unknown, index: number): PortableExtractionProviderFailure {
   const path = `result.providerFailures[${index}]`;
   const value = record(input, path);
-  exactKeys(value, ["provider", "kind", "retryable"], [], path);
+  exactKeys(value, ["provider", "kind", "retryable"], ["code"], path);
+  if (value.code !== undefined && stableIdentity(value.code, `${path}.code`).length > MAX_PORTABLE_FAILURE_CODE_LENGTH) {
+    fail(`${path}.code must be at most ${MAX_PORTABLE_FAILURE_CODE_LENGTH} characters`);
+  }
   return {
     provider: stableIdentity(value.provider, `${path}.provider`),
     kind: enumValue(value.kind, FAILURE_KINDS, `${path}.kind`) as PortableExtractionProviderFailure["kind"],
     retryable: boolean(value.retryable, `${path}.retryable`),
+    ...(value.code === undefined ? {} : { code: value.code as string }),
   };
 }
 

@@ -207,6 +207,36 @@ export interface ExtractionProposal {
    * itself drop a proposal whose `candidateValue` falls outside this set.
    */
   enumValues?: string[];
+  /**
+   * Which model produced this proposal, set by `extract()` from the output of
+   * the provider call that served this proposal's own chunk. Present only when
+   * that call reported a model that is a credential-free stable identity.
+   * Provider-supplied values on a proposal are ignored. In a multi-chunk run
+   * each chunk may be served by a different model (for example after a routed
+   * fallback), so this, not `ExtractionResult.raw.model`, attributes a value.
+   */
+  producedBy?: ExtractionProducedBy;
+}
+
+/** Where a model identity came from. */
+export type ExtractionModelSource = "provider-reported" | "configured";
+
+/** The model that served one proposal's provider call. */
+export interface ExtractionProducedBy {
+  /** The served model when `modelSource` is `provider-reported`, otherwise the configured model. */
+  model: string;
+  /**
+   * Absent when the provider did not say where `model` came from (for example
+   * a Relay runtime that predates `modelSource`). The portable envelope
+   * carries `producedBy` only when this is present.
+   */
+  modelSource?: ExtractionModelSource;
+  /**
+   * Content-free `sha256:<hex>` digest of the provider request that produced
+   * the proposal: canonical JSON (the task-digest canonicalization) of its
+   * `content`, `contentType`, `targetSchema`, `fieldHints` and `taskSpec`.
+   */
+  requestDigest: string;
 }
 
 /**
@@ -243,6 +273,8 @@ export interface EmbeddedState {
 export interface RawProviderResponse {
   response: string;
   model: string;
+  /** Whether `model` was reported by the provider or is the configured model id. */
+  modelSource?: ExtractionModelSource;
   tokensUsed?: number;
 }
 
@@ -267,7 +299,11 @@ export interface ExtractionResult {
    * without depending on a fetch implementation.
    */
   sourceRef?: string;
-  /** raw provider response — kept for audit. */
+  /**
+   * raw provider response — kept for audit. In a multi-chunk run this is the
+   * last successful chunk's response, so `raw.model` names that chunk's model
+   * only; each proposal's `producedBy` names the model for its own value.
+   */
   raw: RawProviderResponse;
   extractedAt: string;
   /** never throws for provider/parse failure — populated instead. */
@@ -421,8 +457,8 @@ export interface ExtractionProviderFailure {
    * The upstream error's own `code`, exactly as raised (e.g. an authorization
    * ledger's `AUTHORIZATION_PERSISTENCE_FAILED`), so a caller can tell a budget
    * or ledger stop from a provider failure without guessing from `kind`.
-   * Present only when the code is a credential-free stable identity.
-   * In-process only for now: the portable envelope does not carry it yet.
+   * Present only when the code is a credential-free stable identity. The
+   * portable envelope carries it when it is at most 128 characters.
    */
   code?: string;
   message: string;
@@ -439,6 +475,10 @@ export interface ProviderExtractionInput {
   taskSpec?: ExtractionTaskSpec;
   /** Lets a provider cooperatively stop an already-dispatched request. */
   signal?: AbortSignal;
+  /** Zero-based index of the chunk this request carries, for correlation only. */
+  chunkIndex?: number;
+  /** The `ExtractionResult.runId` this request belongs to, for correlation only. */
+  runId?: string;
 }
 
 /**

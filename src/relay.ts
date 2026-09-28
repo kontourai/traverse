@@ -103,6 +103,12 @@ function prepareRelayInvocation(
       tools: [{ name: tool.name, description: tool.description, inputSchema }],
       toolChoice: { type: "tool", name: tool.name },
       maxOutputTokens: maxTokens ?? 2048,
+      ...(input.chunkIndex !== undefined || input.runId !== undefined
+        ? { metadata: {
+          ...(input.chunkIndex !== undefined ? { chunkIndex: String(input.chunkIndex) } : {}),
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
+        } }
+        : {}),
     },
   };
 }
@@ -120,11 +126,15 @@ function relayOutput(
   if (result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens") {
     warnings.push("response truncated at maxTokens; proposals may be incomplete");
   }
+  // Read as unknown: `modelSource` is optional in Relay's contract and
+  // absent from runtimes that predate it, so only the two known values pass.
+  const modelSource: unknown = (result as { modelSource?: unknown }).modelSource;
   return {
     proposals: parsed.proposals,
     raw: {
       response: toolInput === undefined ? "" : JSON.stringify(toolInput),
       model: result.model,
+      ...(modelSource === "provider-reported" || modelSource === "configured" ? { modelSource } : {}),
       ...(result.usage.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }),
     },
     ...(warnings.length === 0 ? {} : { warnings }),

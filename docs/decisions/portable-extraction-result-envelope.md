@@ -9,6 +9,10 @@ evidence:
     ref: src/extraction-result-envelope.ts
   - kind: doc
     ref: tests/portable-envelope.test.ts
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/169
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/166
 ---
 
 # Portable extraction-result envelope
@@ -37,8 +41,17 @@ completion. Warning text becomes deterministic category/code records. Retained
 provider, model, failure-provider, and proposal-extractor identities use a
 strict credential-free grammar.
 Provider failure diagnostics remain in-process only: the portable shape keeps
-the provider, class, and retryability without serializing a message or arbitrary
-exception object. Prepared artifact resolution can be attached as a text-free
+the provider, class, and retryability, plus the upstream error `code` when it is
+a credential-free stable identity of at most 128 characters, without
+serializing a message or arbitrary exception object. `kind` stays
+authoritative; `code` is informational.
+A proposal may carry `producedBy: { model, modelSource, requestDigest }`: the
+model that served that proposal's own provider call, whether that identity was
+`provider-reported` or `configured`, and a content-free `sha256:` digest of the
+request. All three keys are required when `producedBy` is present; a proposal
+whose provider did not say where its model identity came from carries no
+`producedBy`. `result.model` keeps its meaning (the last successful chunk's
+model), so in a multi-chunk run `producedBy.model` is the per-value model. Prepared artifact resolution can be attached as a text-free
 typed state (`available`, `unavailable`, `storage-error`, `identity-mismatch`,
 `digest-mismatch`, or `invalid-artifact`).
 Resolution states carry requested/canonical reference evidence rather than a

@@ -120,7 +120,7 @@ describe("bundled provider conformance", () => {
     });
   }
 
-  it("keeps the upstream error code exactly as raised on the in-process failure", async () => {
+  it("keeps the upstream error code exactly as raised, in process and on the portable failure", async () => {
     const native = Object.assign(new Error("authorization ledger refused"), { code: "AUTHORIZATION_PERSISTENCE_FAILED" });
     const failure = normalizeProviderFailure(adapters()[0][1], native);
     assert.deepEqual(
@@ -134,9 +134,25 @@ describe("bundled provider conformance", () => {
     };
     const result = await extract({ content: "Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
     assert.equal(result.providerFailures?.[0].code, "AUTHORIZATION_PERSISTENCE_FAILED");
-    // Until envelope importers accept the key, the portable failure omits it.
+    // Original casing, not the lower-cased copy used for classification.
     const portable = JSON.parse(serializePortableExtractionResult(result));
-    assert.deepEqual(portable.result.providerFailures, [{ provider: "ledger-backed", kind: "unknown", retryable: false }]);
+    assert.deepEqual(portable.result.providerFailures, [{ provider: "ledger-backed", kind: "unknown", retryable: false, code: "AUTHORIZATION_PERSISTENCE_FAILED" }]);
+  });
+
+  it("omits a portable failure code longer than importers accept, keeping it in process", async () => {
+    const accepted = "C".repeat(128);
+    const tooLong = "C".repeat(129);
+    for (const [code, portableCode] of [[accepted, accepted], [tooLong, undefined]] as const) {
+      const provider: ExtractionProvider = {
+        name: "ledger-backed",
+        capabilities: EXTRACTION_CONFORMANCE_CAPABILITIES,
+        async extract() { throw Object.assign(new Error("failed"), { code }); },
+      };
+      const result = await extract({ content: "Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      assert.equal(result.providerFailures?.[0].code, code);
+      const portable = JSON.parse(serializePortableExtractionResult(result));
+      assert.equal(portable.result.providerFailures[0].code, portableCode, `length ${code.length}`);
+    }
   });
 
   it("omits a code that is not a credential-free stable identity", () => {

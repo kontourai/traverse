@@ -22,6 +22,7 @@ export {
 export type {
   PortableExtractionSource,
   PortableExtractionProposal,
+  PortableExtractionProducedBy,
   PortableExtractionProviderFailure,
   PortableRawProviderResponse,
   PortableExtractionOutcome,
@@ -115,6 +116,8 @@ export type {
   ExtractionTaskSpec,
   ExtractionProvenance,
   ExtractionProposal,
+  ExtractionProducedBy,
+  ExtractionModelSource,
   EmbeddedState,
   RawProviderResponse,
   ExtractionResult,
