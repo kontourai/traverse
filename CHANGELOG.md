@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/kontourai/traverse/compare/v1.0.0...v2.0.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* `ExtractionProposal.confidence` is now optional (`number | undefined`), and a portable envelope proposal may omit `confidence`. The envelope accepts three new partial reasons and an optional `result.coverage` array, emitted on partial outcomes. Readers with a closed key set and reason list, such as @kontourai/survey 4.0.0 `importExtractionEnvelope`, reject envelopes that use either (they keep importing complete runs whose proposals carry confidence). No released Survey importer accepts them yet. Dedup no longer prefers the higher confidence. Prepared-artifact preparationVersion is now 3.
+
+### Features
+
+* typed partial reasons and coverage for chunk losses, optional confidence, named structural pruning ([#182](https://github.com/kontourai/traverse/issues/182)) ([3bea6e8](https://github.com/kontourai/traverse/commit/3bea6e8b58836044f25e11ac287ca29ef7eaf90e))
+
 ## [1.0.0](https://github.com/kontourai/traverse/compare/v0.25.1...v1.0.0) (2026-09-28)
 
 
