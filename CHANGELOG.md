@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.0.0](https://github.com/kontourai/traverse/compare/v0.25.1...v1.0.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* record the model that served each proposal, carry the failure code on the envelope ([#181](https://github.com/kontourai/traverse/issues/181))
+* prepared text, digests, and artifact refs change for HTML pages with content outside a detected card container; the default preparationVersion changes from "1" for every mode; direct Anthropic and OpenAI adapters no longer retry by default (pass maxRetries to opt in).
+
+### Features
+
+* record the model that served each proposal, carry the failure code on the envelope ([#181](https://github.com/kontourai/traverse/issues/181)) ([6da89bb](https://github.com/kontourai/traverse/commit/6da89bbe870d55cd2c21c4a1bf564d6e57610560))
+
+
+### Fixes
+
+* **adapters:** pass out-of-range confidence through to the core clamp ([#160](https://github.com/kontourai/traverse/issues/160)) ([1a07e52](https://github.com/kontourai/traverse/commit/1a07e5257a58b14b741d7f22fd4efa80ba218927)), closes [#154](https://github.com/kontourai/traverse/issues/154)
+* **conformance:** stop classifying authorization-ledger codes as authentication ([#159](https://github.com/kontourai/traverse/issues/159)) ([6239af7](https://github.com/kontourai/traverse/commit/6239af7415b682dc2a941d63408a1a24f0a657e7)), closes [#157](https://github.com/kontourai/traverse/issues/157)
+* **extract:** drop proposals the portable envelope cannot carry ([#163](https://github.com/kontourai/traverse/issues/163)) ([1a867fd](https://github.com/kontourai/traverse/commit/1a867fd3c391d88c3ccd8325ae30525ea78f56c2))
+* **extract:** name the chunk and range of every silent chunk loss ([#162](https://github.com/kontourai/traverse/issues/162)) ([73552a5](https://github.com/kontourai/traverse/commit/73552a53f021ec06a2a7d7415cd3958e3ab9cb1c)), closes [#152](https://github.com/kontourai/traverse/issues/152)
+* keep structural HTML content, derive preparationVersion, stop hidden SDK retries ([#178](https://github.com/kontourai/traverse/issues/178)) ([d2f6724](https://github.com/kontourai/traverse/commit/d2f6724d1b768e80d51941173457cf113d8b7108))
+* **task:** make task and example digests independent of the host locale ([#161](https://github.com/kontourai/traverse/issues/161)) ([a95032c](https://github.com/kontourai/traverse/commit/a95032c1cb860c3b03d7adea886dc895da7bea43)), closes [#155](https://github.com/kontourai/traverse/issues/155)
+
+
+### Performance
+
+* **extract:** enumerate each excerpt over the full text once per run ([#158](https://github.com/kontourai/traverse/issues/158)) ([ec336d4](https://github.com/kontourai/traverse/commit/ec336d4f9a6cd50d12d93e2f15bd332b1e5cf5b1)), closes [#156](https://github.com/kontourai/traverse/issues/156)
+
 ## [0.25.1](https://github.com/kontourai/traverse/compare/v0.25.0...v0.25.1) (2026-07-29)
 
 
