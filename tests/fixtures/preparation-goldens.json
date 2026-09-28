@@ -1,29 +1,29 @@
 {
-  "baseVersion": "2",
+  "baseVersion": "3",
   "cases": {
     "html-listing": {
       "preparationMode": "markdown",
-      "preparationVersion": "2+linkedom@0.18.13+turndown@7.2.4",
+      "preparationVersion": "3+linkedom@0.18.13+turndown@7.2.4",
       "digest": "1e142fd5d568584cb1f2a624d5897d1eb6443d32fd079f286f3b1836153b5fa4"
     },
     "html-detail": {
       "preparationMode": "markdown",
-      "preparationVersion": "2+linkedom@0.18.13+turndown@7.2.4",
+      "preparationVersion": "3+linkedom@0.18.13+turndown@7.2.4",
       "digest": "123450f3c6ff208baa80fdfae213ff54a5b76b5d05ee699442727dc4bf6d71d5"
     },
     "html-as-text": {
       "preparationMode": "text",
-      "preparationVersion": "2",
+      "preparationVersion": "3",
       "digest": "e840d6d39eb6200b94b778b6185460365d0d189229fd59fbefbb84b72f81b611"
     },
     "transcript": {
       "preparationMode": "transcript",
-      "preparationVersion": "2",
+      "preparationVersion": "3",
       "digest": "e3a4f070b60fdf7790a7eb53a39e1b2eed6cc446b3bcae1fbddf0a59afda727c"
     },
     "text": {
       "preparationMode": "text",
-      "preparationVersion": "2",
+      "preparationVersion": "3",
       "digest": "99387bfdeff246ba05eb188a6f6ae8e01396fae7df5b9c80d5543b40a396fae8"
     }
   }

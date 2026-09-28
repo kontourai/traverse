@@ -184,7 +184,7 @@ export function buildRelayExtractionSchema(targetSchema: TargetFieldSchema[]): J
           properties: {
             fieldPath: { type: "string", enum: targetSchema.map((field) => field.path), description: "Exact target field path." },
             value: valueSchema,
-            confidence: { type: "number", description: "Confidence 0.0-1.0." },
+            confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
             excerpt: { type: "string", description: "Verbatim source span the value came from." },
             locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
             occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }

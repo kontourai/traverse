@@ -219,7 +219,7 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
       "For EACH field you can find in the content, return one proposal with:",
       "  - fieldPath: the exact target field path from the list below,",
       "  - value: the extracted value (typed per the field),",
-      "  - confidence: 0.0-1.0,",
+      "  - confidence: optional self-reported 0.0-1.0,",
       "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
       "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",
       "Only propose fields you can ground in a verbatim excerpt. Omit fields you cannot find.",
@@ -237,7 +237,7 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
             properties: {
               fieldPath: { type: "string", description: "Exact target field path." },
               value: { description: "The extracted value (string, number, boolean, array, or object)." },
-              confidence: { type: "number", description: "Confidence 0.0-1.0." },
+              confidence: { type: "number", description: "Optional self-reported confidence 0.0-1.0." },
               excerpt: { type: "string", description: "Verbatim source span the value came from." },
               locator: {
                 type: "string",
@@ -249,7 +249,7 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
                 description: "Optional 1-based occurrence of the exact repeated excerpt.",
               },
             },
-            required: ["fieldPath", "value", "confidence", "excerpt"],
+            required: ["fieldPath", "value", "excerpt"],
           },
         },
       },
@@ -298,12 +298,12 @@ interface RawProposalItem {
 
 /**
  * Parse the tool output into ExtractionProposal[]. Malformed items — missing
- * fieldPath, missing/blank excerpt (no provenance), missing `value`, or a
- * missing/non-numeric confidence — are dropped, never silently accepted; each
- * drop is reported in `warnings` (never silent). A finite out-of-range
- * confidence is passed through unchanged: `extract()` clamps it into `0..1`
- * with a warning. A missing confidence is still dropped because the portable
- * envelope requires one. A missing locator is
+ * fieldPath, missing/blank excerpt (no provenance), or missing `value` — are
+ * dropped, never silently accepted; each drop is reported in `warnings`.
+ * Confidence is an optional self-report and never drops an item: missing or
+ * `null` is omitted silently, a non-numeric value is omitted with a warning,
+ * and a finite out-of-range value is passed through unchanged for `extract()`
+ * to clamp into `0..1` with a warning. A missing locator is
  * synthesized deterministically as "<contentType>:field:<fieldPath>" — a
  * provisional value only; `extract()`'s normalization overwrites it once the
  * excerpt is verified against the prepared content (see src/extract.ts).
@@ -332,16 +332,19 @@ export function parseProposals(
     const confidence = finiteNumber(raw.confidence);
     const hasValue = "value" in raw;
 
-    if (!fieldPath || !excerpt || confidence === undefined || !hasValue) {
+    if (!fieldPath || !excerpt || !hasValue) {
       const reasons: string[] = [];
       if (!fieldPath) reasons.push("missing fieldPath");
       if (!excerpt) reasons.push("missing/blank excerpt");
-      if (confidence === undefined) reasons.push("missing/non-numeric confidence");
       if (!hasValue) reasons.push("missing value");
       warnings.push(
         `dropped malformed tool item at index ${index}${fieldPath ? ` (fieldPath "${fieldPath}")` : ""}: ${reasons.join(", ")}`,
       );
       return;
+    }
+
+    if (confidence === undefined && raw.confidence !== undefined && raw.confidence !== null) {
+      warnings.push(`omitted non-numeric confidence on tool item at index ${index} (fieldPath "${fieldPath}")`);
     }
 
     const locator = stringOrUndefined(raw.locator) ?? `${contentType}:field:${fieldPath}`;
@@ -352,7 +355,7 @@ export function parseProposals(
     results.push({
       fieldPath,
       candidateValue: raw.value,
-      confidence,
+      ...(confidence === undefined ? {} : { confidence }),
       provenance: { excerpt, locator },
       extractor: extractorName,
       ...(occurrenceHint === undefined ? {} : { occurrenceHint }),
@@ -379,7 +382,7 @@ export function buildExtractionMessages(input: ProviderExtractionInput): { syste
     "Extract the requested target fields from the provided content.",
     "You are PROPOSING for review — never invent values, and only propose a field",
     "when you can ground it in a verbatim excerpt from the content.",
-    "Return honest confidence scores; omit fields you cannot find.",
+    "Omit fields you cannot find.",
     hintLines.length ? "\nPer-field hints:" : "",
     ...hintLines,
     ...taskLines,

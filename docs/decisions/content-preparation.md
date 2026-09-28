@@ -17,6 +17,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/33
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/167
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/179
 ---
 
 # Content preparation
@@ -116,7 +118,13 @@ second chrome pass that the element-name pruning misses: ARIA `navigation`,
 `banner`, and `contentinfo` landmarks, blocks with at least three links whose
 link text is at least half their text (div navbars, mega-menus, pagination),
 and the short label remnants those leave behind. Blocks are judged innermost
-first, so a wrapper that mixes a menu with real text keeps the text.
+first, so a wrapper that mixes a menu with real text keeps the text. A landmark
+role inside `article` or `main` (or `role="main"`) is scoped to that content and
+kept, and `tel:`/`mailto:`/`sms:` links are contact values, not navigation, so
+they never make a block link-dense. Every block the pass removes is quoted in a
+`structural prep pruned …` warning (at most five blocks, 60 characters each,
+with the total character count), classified on the envelope as
+`preparation`/`navigation-pruned`: page text is never dropped silently.
 
 What remains is a leading and a trailing segment. A segment of at most a
 quarter of `chunkSize` rides along with the first or last card batch without

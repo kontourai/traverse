@@ -135,7 +135,9 @@ describe("exact occurrence resolver", () => {
       content: "Marker; Marker", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider,
     });
     assert.equal(result.proposals.length, 1);
-    assert.equal(result.proposals[0].confidence, 0.9);
+    // The first-seen duplicate is kept; a self-reported confidence never
+    // decides which one survives.
+    assert.equal(result.proposals[0].confidence, 0.6);
     assert.ok(result.warnings?.includes("dropped 1 duplicate proposal (same field + value + source span)"));
   });
 

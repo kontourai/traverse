@@ -113,7 +113,7 @@ This makes a changed preparation implementation visibly produce a new identity.
 Unless the caller supplies one, `preparationVersion` is Traverse's preparation
 base version (`PREPARED_ARTIFACT_PREPARATION_VERSION`), and for HTML Markdown
 preparation it also names the installed `linkedom` and `turndown` versions, e.g.
-`2+linkedom@0.18.13+turndown@7.2.4`. The library versions are read through
+`3+linkedom@0.18.13+turndown@7.2.4`. The library versions are read through
 static JSON imports, and a version that cannot be resolved throws rather than
 producing a shared placeholder. `preparationVersionFor(mode)` returns the same
 value before preparing, for keying a cache.
@@ -154,7 +154,14 @@ model and usage counters, source/snapshot and prepared-artifact identity, exact
 locator/occurrence metadata, task/example digests, partial state, and typed
 provider/artifact failures. A typed `outcome` distinguishes empty success,
 partial work, invalid configuration/task, preparation, provider, and unexpected
-failure; warning strings become non-sensitive category/code records. Provider,
+failure; warning strings become non-sensitive category/code records. A run that
+did not read and answer all of its prepared text is never a `success`: a failed
+chunk, a chunk cut at `maxContentChars`, an answer stopped at the output cap,
+or a missing tool call makes it `partial` (`provider-failure`,
+`content-truncated`, `output-truncated`), and a partial envelope carries
+`result.coverage`, one `{ chunk, start, end, status, reason? }` entry per
+prepared-text range. A run that read everything serializes without
+`coverage`, exactly as before. Provider,
 model, failure-provider, and proposal-extractor identities use a strict,
 credential-free grammar. Canonical key ordering makes a validated
 deserialize/re-serialize byte-stable.
@@ -299,9 +306,9 @@ normalizes proposals. A proposal survives only if ALL of the following hold:
   `"excerpt not found in prepared content"`; a hit derives/overwrites
   `provenance.locator` as `"chars:<start>-<end>"` — see "The provenance
   contract" above),
-- `confidence` is a finite number (otherwise dropped, including when missing,
-  because the portable envelope requires one) — an out-of-range value is
-  **clamped** into `0..1` (never dropped), with a warning. The bundled
+- `confidence` is **optional** and never drops a proposal: missing or `null`
+  is omitted silently, a non-numeric value is omitted with a warning, and an
+  out-of-range number is **clamped** into `0..1` with a warning. The bundled
   adapters pass finite out-of-range values through to this clamp.
 
 `result.warnings` merges BOTH of the above normalization notes AND any
@@ -309,11 +316,14 @@ normalizes proposals. A proposal survives only if ALL of the following hold:
 malformed-tool-item or maxTokens-truncation notes) — nothing either stage
 notices is silent.
 
-`confidence` is a provider-local signal, not cross-provider provenance.
-Traverse preserves it beside the stable `extractor` identity and does not
-pretend that `0.8` from two different models means the same thing. Consumers
-calibrate or route those scores from reviewed outcomes in their review layer;
-Traverse never converts confidence into truth or acceptance.
+`confidence` is an optional provider self-report, not a calibrated
+probability and not cross-provider provenance. Traverse carries it, when the
+provider reported one, beside the stable `extractor` identity and does not
+pretend that `0.8` from two different models means the same thing. Calibrated
+confidence comes from a downstream calibrator that learns from reviewed
+outcomes; Traverse never converts confidence into truth or acceptance, and
+cross-chunk dedup keeps the first-seen duplicate rather than the one reporting
+the higher score.
 
 ### Indexed field paths against array schemas
 
@@ -372,7 +382,10 @@ boundaries **on card boundaries** so a card is never split. Page text outside
 the card container (a title, an intro, a detail page's own paragraphs beside a
 short repeated list) is kept too, after a second chrome pass that removes ARIA
 navigation landmarks and link-dense blocks such as `div` navbars and
-mega-menus. Short outside text rides along with the first or last card chunk;
+mega-menus. A landmark inside `article`/`main` is kept, `tel:`/`mailto:`/`sms:`
+links do not count as navigation, and every block the pass removes is quoted
+in a warning (`structural prep pruned …`), so page text is never dropped
+silently. Short outside text rides along with the first or last card chunk;
 longer outside text gets its own chunks, which are dispatched after every card
 chunk, so `maxChunks`, `maxProviderCalls`, and `maxTotalTokens` reach the cards
 first. Outside text left out by `maxChunks` is named in a warning. When no
@@ -419,8 +432,12 @@ These bound CONTENT (how much is prepared/chunked). To bound provider SPEND
 `result.warnings` aggregates per-run chunking notes: the chunk count and
 detection mode, cards detected, any `maxChunks` truncation, dropped duplicates,
 and any per-chunk provider failure. A provider error on **one** chunk is a
-warning and the other chunks still run (partial results); only if **every**
-chunk's call fails does `result.error` get set.
+warning and the other chunks still run; only if **every** chunk's call fails
+does `result.error` get set. `result.coverage` records which prepared-text
+range each chunk read and answered, and any loss (a failed call, a cut at
+`maxContentChars`, an output cap, a missing tool call, a chunk never
+dispatched) also sets `result.partial`. Coverage ranges of adjacent chunks may
+overlap by `chunkOverlap`.
 
 > Why not `@mozilla/readability`? It extracts the one main article and strips
 > repeated sibling blocks as boilerplate — which is exactly what listing cards
@@ -479,7 +496,8 @@ spent," not "never cross this number."
 
 **Typed partial progress.** A call ceiling, token ceiling, or an aborted
 `signal` sets `result.partial` with a machine-readable reason plus completed
-and undispatched chunk counts. Already-dispatched calls are allowed to finish
+and undispatched chunk counts. An early stop keeps its own reason even when a
+dispatched chunk was also lost; `result.coverage` lists every range. Already-dispatched calls are allowed to finish
 and their normalized proposals remain in the result; cancellation never
 silently looks like a complete extraction.
 
@@ -606,8 +624,9 @@ const result = await extract({
 The adapter builds a forced tool-use schema **dynamically** from your
 `targetSchema` and instructs the model to return a verbatim `excerpt` per field
 — that is how provenance gets populated. Tool output is parsed defensively:
-malformed items (no excerpt, missing or non-numeric confidence, missing field,
-missing value) are dropped, never silently accepted — each drop is reported in
+malformed items (no excerpt, missing field, missing value) are dropped, never
+silently accepted (a missing or `null` confidence is not malformed: the field
+is simply omitted) — each drop is reported in
 `ProviderExtractionOutput.warnings`, which `extract()` merges into
 `result.warnings`. The adapter also warns (rather than staying silent) when
 the model's response is truncated: `stop_reason === "max_tokens"` adds

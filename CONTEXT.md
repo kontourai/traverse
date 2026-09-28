@@ -52,7 +52,8 @@ test).
   every adapter. Callers can still inject legacy custom providers without a
   capability declaration.
 - **Extraction Proposal** (`ExtractionProposal`): one proposed field value with
-  a `confidence` in `0..1`, an `extractor` identity string, and required
+  an optional provider self-reported `confidence` in `0..1` (never a
+  calibrated probability), an `extractor` identity string, and required
   `provenance` (`excerpt` and `locator`). This is the whole identity of the
   package — a proposal without provenance is not something Traverse emits.
   Carries `inferenceType` through from the matched `TargetFieldSchema` entry
@@ -76,7 +77,8 @@ test).
   Traverse's versioned, canonical JSON-safe projection of a complete result.
   It retains provider/run/model/usage identity, source and prepared-artifact
   identity, exact locator/occurrence records, field metadata, task digests, and
-  typed outcome, warning classification, partial/provider/artifact states. Its
+  typed outcome, warning classification, partial/provider/artifact states, and
+  (on a partial outcome) per-chunk prepared-text coverage. Its
   artifact resolution projection binds a requested reference to the canonical
   result-artifact reference without embedding a second contradictory artifact.
   The default projection omits prepared

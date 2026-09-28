@@ -6,6 +6,7 @@ import {
   extract,
   EXTRACTION_CONFORMANCE_CAPABILITIES,
   normalizeProviderFailure,
+  deserializePortableExtractionResult,
   serializePortableExtractionResult,
 } from "../src/index.js";
 import type { ExtractionProvider, TargetFieldSchema } from "../src/index.js";
@@ -79,11 +80,27 @@ describe("bundled provider conformance", () => {
   }
 
   for (const [label, provider] of adapters({ proposals: [{ fieldPath: "title", value: "Alpine", excerpt: "Alpine" }] })) {
-    it(`${label} still drops a proposal with no confidence, with a warning`, async () => {
+    it(`${label} keeps a grounded proposal with no confidence and serializes it without the field`, async () => {
       const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
       assert.equal(result.error, undefined);
-      assert.deepEqual(result.proposals, []);
-      assert.deepEqual(result.warnings, ['dropped malformed tool item at index 0 (fieldPath "title"): missing/non-numeric confidence']);
+      assert.deepEqual(result.proposals.map((p) => p.candidateValue), ["Alpine"]);
+      assert.ok(!("confidence" in result.proposals[0]), "no confidence is invented");
+      assert.equal(result.warnings, undefined, "a missing self-report is not a defect");
+      const envelope = deserializePortableExtractionResult(serializePortableExtractionResult(result));
+      assert.equal(envelope.result.proposals.length, 1);
+      assert.ok(!("confidence" in envelope.result.proposals[0]));
+    });
+  }
+
+  // Relay's strict schema must list every key, so a runtime answers null when
+  // it has no confidence to report; every adapter treats null as absent.
+  for (const [label, provider] of adapters({ proposals: [{ fieldPath: "title", value: "Alpine", confidence: null, excerpt: "Alpine", locator: null, occurrenceHint: null }] })) {
+    it(`${label} treats a null confidence as absent, with no warning`, async () => {
+      const result = await extract({ content: "Title: Alpine", contentType: "text", sourceRef: "fixture", targetSchema: schema, provider });
+      assert.equal(result.error, undefined);
+      assert.deepEqual(result.proposals.map((p) => p.candidateValue), ["Alpine"]);
+      assert.ok(!("confidence" in result.proposals[0]));
+      assert.equal(result.warnings, undefined);
     });
   }
 

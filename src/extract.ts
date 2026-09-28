@@ -26,7 +26,10 @@
  *
  * Per-chunk provider errors are recorded as warnings and the other chunks still
  * run (partial results survive); only if EVERY chunk's call fails does
- * `extract()` surface a `result.error`.
+ * `extract()` surface a `result.error`. `result.coverage` records, per chunk,
+ * which prepared-text range was read and answered, and any range that was not
+ * (a failed call, a cut at `maxContentChars`, an output cap, a missing tool
+ * call, or a chunk never dispatched) also makes the run `partial`.
  *
  * Normalization discipline (proposals-only, ADR 0001 §4). A proposal survives
  * normalization only if ALL of the following hold — anything else is dropped
@@ -65,13 +68,12 @@
  *    prepared text — regardless of any locator a provider/adapter supplied
  *    (only `extract()` holds the prepared text needed to verify one, so it is
  *    the sole owner of the final `locator` value),
- *  - `confidence` MUST be a finite number; a non-finite (or missing)
- *    confidence drops the item (also before occurrence resolution, and
- *    because the portable envelope requires one); `-0` is normalized to `0`,
- *    at any depth for `candidateValue` too. An in-range value passes through;
- *    an out-of-range value is CLAMPED into `0..1` (never dropped) with a
- *    warning. The bundled adapters pass finite out-of-range values through to
- *    this clamp rather than dropping them.
+ *  - `confidence` is an OPTIONAL provider self-report and never drops a
+ *    proposal. Missing or `null` is omitted silently; a non-finite or
+ *    non-numeric value is omitted with a warning. `-0` is normalized to `0`
+ *    (at any depth for `candidateValue` too). An in-range value passes
+ *    through; an out-of-range value is CLAMPED into `0..1` with a warning. The
+ *    bundled adapters pass finite out-of-range values through to this clamp.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
@@ -95,6 +97,8 @@ import type {
   ExtractionProviderFailure,
   ExtractionResult,
   ExtractionPartial,
+  ExtractionPartialReason,
+  ExtractionCoverageEntry,
   ExtractionProducedBy,
   PdfLayout,
   ProviderExtractionInput,
@@ -125,8 +129,21 @@ const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
 
-/** Adapter warnings meaning a chunk's answer is incomplete: an output cap was hit or no tool call came back. */
-const CHUNK_LOSS_ADAPTER_WARNING = /^response truncated at maxTokens|^provider returned no extraction (?:tool|function) call/;
+/** Adapter warning meaning a chunk's answer stopped at the output cap. */
+const OUTPUT_TRUNCATED_ADAPTER_WARNING = /^response truncated at maxTokens/;
+/** Adapter warning meaning no extraction tool call came back for a chunk. */
+const MISSING_TOOL_CALL_ADAPTER_WARNING = /^provider returned no extraction (?:tool|function) call/;
+
+/** The partial reason a dispatched chunk's loss reports when no early stop applies. */
+function lossPartialReason(entry: ExtractionCoverageEntry): ExtractionPartialReason | undefined {
+  if (entry.status === "output-truncated") return "output-truncated";
+  if (entry.status !== "unread") return undefined;
+  switch (entry.reason) {
+    case "provider-failure": case "missing-tool-call": return "provider-failure";
+    case "content-truncated": return "content-truncated";
+    default: return undefined;
+  }
+}
 
 interface ChunkDispatch {
   index: number;
@@ -473,6 +490,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       }
     }
     const collected: ExtractionProposal[] = [];
+    const coverage: ExtractionCoverageEntry[] = [];
     let lastRaw: RawProviderResponse = EMPTY_RAW;
     const providerErrors: string[] = [];
     const providerFailures: ExtractionProviderFailure[] = [];
@@ -487,7 +505,10 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // exact locator derivation.
     for (let i = 0; i < outcomes.length; i++) {
       const outcome = outcomes[i];
-      if (!outcome) continue;
+      if (!outcome) {
+        coverage.push({ chunk: i + 1, start: chunks[i].start, end: chunks[i].end, status: "unread", reason: "not-dispatched" });
+        continue;
+      }
       // Every loss below names the chunk and the prepared-text range it left
       // unread (or not fully answered). Each call carries every target field,
       // so the range applies to all of them.
@@ -497,8 +518,15 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         warnings.push(
           `${chunkLabel} content truncated at maxContentChars (${maxChars}): chars:${sentEnd}-${chunks[i].end} not sent to the provider`,
         );
+        coverage.push({ chunk: i + 1, start: sentEnd, end: chunks[i].end, status: "unread", reason: "content-truncated" });
       }
+      // The part that was sent: [chunk start, sentEnd). Empty only when
+      // maxContentChars is 0, in which case the tail entry covers the chunk.
+      const sent = (entry: Pick<ExtractionCoverageEntry, "status" | "reason">) => {
+        if (sentEnd > chunks[i].start) coverage.push({ chunk: i + 1, start: chunks[i].start, end: sentEnd, ...entry });
+      };
       if (outcome.error !== undefined) {
+        sent({ status: "unread", reason: "provider-failure" });
         const failure = normalizeProviderFailure(input.provider, outcome.error);
         providerFailures.push(failure);
         providerErrors.push(failure.message);
@@ -509,11 +537,18 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       chunksSucceeded++;
       // Adapter warnings that mean the answer for this chunk is incomplete are
       // located here, since only the core knows which chunk a call served.
+      const missingToolCall = output.warnings?.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning)) ?? false;
+      const outputTruncated = output.warnings?.some((warning) => OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning)) ?? false;
       if (output.warnings) {
-        warnings.push(...output.warnings.map((warning) => CHUNK_LOSS_ADAPTER_WARNING.test(warning)
-          ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
-          : warning));
+        warnings.push(...output.warnings.map((warning) =>
+          MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning) || OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning)
+            ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
+            : warning));
       }
+      // No tool call means nothing was answered, whatever stopped the model.
+      sent(missingToolCall
+        ? { status: "unread", reason: "missing-tool-call" }
+        : { status: outputTruncated ? "output-truncated" : "complete" });
       if (output.raw) {
         lastRaw = output.raw;
         // raw.model becomes the envelope's model identity. Omit one the
@@ -540,6 +575,13 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       }
     }
 
+    // Chunks cut by maxChunks whose text is still in the prepared artifact
+    // continue the chunk numbering; they were never dispatched.
+    prepared.cappedChunks?.forEach((chunk, k) => {
+      coverage.push({ chunk: chunks.length + k + 1, start: chunk.start, end: chunk.end, status: "unread", reason: "not-dispatched" });
+    });
+    coverage.sort((a, b) => a.start - b.start || a.end - b.end);
+
     // Every chunk's provider call failed -> surface as a fatal error. This
     // preserves the single-shot contract: a 1-chunk page whose only provider
     // call throws is an error, not an empty success.
@@ -558,6 +600,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         providerCalls,
         totalTokensUsed,
         ...(partial ? { partial } : {}),
+        coverage,
         ...(providerFailures.length ? { providerFailures } : {}),
       };
       if (prepared.embedded) failed.embedded = prepared.embedded;
@@ -599,10 +642,18 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         partial = { ...partial, remainingChunks: partial.remainingChunks + prepared.truncatedChunks };
       }
     }
+    // A dispatched chunk that was not fully read or answered makes the run
+    // partial too. An early stop above keeps its own reason; otherwise the
+    // first loss in prepared-text order is reported, and coverage has the rest.
+    if (!partial) {
+      const reason = coverage.map(lossPartialReason).find((candidate) => candidate !== undefined);
+      if (reason) partial = { reason, completedChunks: chunks.length, remainingChunks: 0 };
+    }
 
     const result: ExtractionResult = {
       proposals, raw: lastRaw, extractedAt, sourceRef, provider, runId, providerCalls, totalTokensUsed,
       ...(partial ? { partial } : {}),
+      coverage,
       ...(input.taskSpec ? { taskDigest: input.taskSpec.digest, exampleDigests: input.taskSpec.examples?.map((example) => example.digest) ?? [] } : {}),
       ...(providerFailures.length ? { providerFailures } : {}),
     };
@@ -651,10 +702,10 @@ function producedByFor(output: ProviderExtractionOutput, requestDigest: string):
  * `pathIndices` + canonical value + `locator` (which encodes the
  * `chars:<start>-<end>` offset into `fullText`). This collapses the true
  * duplicates chunking creates while preserving same-span/different-value and
- * same-value/different-span proposals. Keeps the highest confidence on a
- * collision (the first-seen on a tie), whole: the kept proposal's `producedBy`
- * names the call that produced that confidence. First-seen key order is
- * preserved.
+ * same-value/different-span proposals. Keeps the first-seen proposal in chunk
+ * order, whole, regardless of any self-reported confidence, so the kept
+ * proposal's `extractor`, `producedBy` and metadata are deterministic.
+ * First-seen key order is preserved.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
@@ -675,7 +726,6 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
       order.push(key);
     } else {
       dropped++;
-      if (proposal.confidence > existing.confidence) byKey.set(key, proposal);
     }
   }
 
@@ -770,10 +820,15 @@ function normalizeChunkProposals(
       warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
       continue;
     }
-    const rawConfidence = candidate.confidence;
-    if (typeof rawConfidence !== "number" || !Number.isFinite(rawConfidence)) {
-      warnings.push(`dropped proposal for "${effectiveFieldPath}": non-numeric confidence`);
-      continue;
+    // Confidence is an optional provider self-report. Missing (or null) is
+    // omitted silently; a value that is not a finite number is omitted with a
+    // warning. Neither drops the proposal.
+    const rawConfidence: unknown = (candidate as { confidence?: unknown }).confidence;
+    let reportedConfidence: number | undefined;
+    if (typeof rawConfidence === "number" && Number.isFinite(rawConfidence)) {
+      reportedConfidence = rawConfidence;
+    } else if (rawConfidence !== undefined && rawConfidence !== null) {
+      warnings.push(`omitted non-numeric confidence for "${effectiveFieldPath}"`);
     }
 
     // Provenance contract enforcement begins with the exact chunk text the
@@ -799,16 +854,19 @@ function normalizeChunkProposals(
     }
     const locator = `chars:${occurrence.selected.start}-${occurrence.selected.end}`;
 
-    let confidence = Object.is(rawConfidence, -0) ? 0 : rawConfidence;
-    if (confidence < 0 || confidence > 1) {
-      confidence = Math.max(0, Math.min(1, confidence));
-      warnings.push(`clamped out-of-range confidence for "${effectiveFieldPath}" to ${confidence}`);
+    let confidence = reportedConfidence;
+    if (confidence !== undefined) {
+      if (Object.is(confidence, -0)) confidence = 0;
+      if (confidence < 0 || confidence > 1) {
+        confidence = Math.max(0, Math.min(1, confidence));
+        warnings.push(`clamped out-of-range confidence for "${effectiveFieldPath}" to ${confidence}`);
+      }
     }
 
     const proposal: ExtractionProposal = {
       fieldPath: effectiveFieldPath,
       candidateValue,
-      confidence,
+      ...(confidence === undefined ? {} : { confidence }),
       provenance: { excerpt, locator, occurrence },
       extractor,
     };

@@ -17,7 +17,7 @@ export const PREPARED_ARTIFACT_VERSION = 1;
  * that can alter prepared text for the same input; the pinned digests in
  * tests/preparation-version.test.ts fail until it is bumped.
  */
-export const PREPARED_ARTIFACT_PREPARATION_VERSION = "2";
+export const PREPARED_ARTIFACT_PREPARATION_VERSION = "3";
 
 export type PreparedArtifactPreparationMode = "text" | "markdown" | "transcript" | "pdf-text" | "image-ocr";
 

@@ -76,6 +76,13 @@ export interface PreparedChunks {
   cardCount: number;
   /** chunks dropped by the `maxChunks` cap (0 when none). */
   truncatedChunks: number;
+  /**
+   * The chunks dropped by the `maxChunks` cap whose text is still part of
+   * `fullText`, in order, so their ranges can be reported as not read. A
+   * structural segment none of whose chunks survived the cap is left out of
+   * `fullText` entirely and has no entry here.
+   */
+  cappedChunks?: Chunk[];
   warnings: string[];
   /** The preparation actually used, including markdown's fail-closed text fallback. */
   effectivePrepMode: "text" | "markdown" | "transcript";
@@ -145,8 +152,11 @@ function windowResult(
   warnings: string[],
   effectivePrepMode: PreparedChunks["effectivePrepMode"],
 ): PreparedChunks {
-  const { chunks, truncatedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
-  return { fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings, effectivePrepMode };
+  const { chunks, truncatedChunks, cappedChunks } = windowChunks(fullText, chunkSize, overlap, maxChunks);
+  return {
+    fullText, chunks, structural: false, cardCount: 0, truncatedChunks, warnings, effectivePrepMode,
+    ...(cappedChunks.length > 0 ? { cappedChunks } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,10 +168,10 @@ function windowChunks(
   chunkSize: number,
   overlap: number,
   maxChunks: number,
-): { chunks: Chunk[]; truncatedChunks: number } {
-  if (fullText.length === 0) return { chunks: [], truncatedChunks: 0 };
+): { chunks: Chunk[]; truncatedChunks: number; cappedChunks: Chunk[] } {
+  if (fullText.length === 0) return { chunks: [], truncatedChunks: 0, cappedChunks: [] };
   if (fullText.length <= chunkSize) {
-    return { chunks: [{ text: fullText, start: 0, end: fullText.length }], truncatedChunks: 0 };
+    return { chunks: [{ text: fullText, start: 0, end: fullText.length }], truncatedChunks: 0, cappedChunks: [] };
   }
   const step = Math.max(1, chunkSize - overlap);
   const chunks: Chunk[] = [];
@@ -173,9 +183,9 @@ function windowChunks(
   return capChunks(chunks, maxChunks);
 }
 
-function capChunks(chunks: Chunk[], maxChunks: number): { chunks: Chunk[]; truncatedChunks: number } {
-  if (chunks.length <= maxChunks) return { chunks, truncatedChunks: 0 };
-  return { chunks: chunks.slice(0, maxChunks), truncatedChunks: chunks.length - maxChunks };
+function capChunks(chunks: Chunk[], maxChunks: number): { chunks: Chunk[]; truncatedChunks: number; cappedChunks: Chunk[] } {
+  if (chunks.length <= maxChunks) return { chunks, truncatedChunks: 0, cappedChunks: [] };
+  return { chunks: chunks.slice(0, maxChunks), truncatedChunks: chunks.length - maxChunks, cappedChunks: chunks.slice(maxChunks) };
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +267,7 @@ function assembleSegments(
   chunkSize: number,
   overlap: number,
   maxChunks: number,
-): { chunks: Chunk[]; fullText: string; truncatedChunks: number; warnings: string[] } {
+): { chunks: Chunk[]; fullText: string; truncatedChunks: number; cappedChunks: Chunk[]; warnings: string[] } {
   const parts = segments
     .filter((segment) => segment.text.length > 0)
     .map((segment) => ({
@@ -293,6 +303,15 @@ function assembleSegments(
     }
   }
 
+  // Capped chunks of a segment that is still in fullText keep a real range.
+  const cappedChunks: Chunk[] = [];
+  for (const part of parts) {
+    if (part.kept === 0) continue;
+    for (const chunk of part.local.slice(part.kept)) {
+      cappedChunks.push({ text: chunk.text, start: part.offset + chunk.start, end: part.offset + chunk.end });
+    }
+  }
+
   const warnings: string[] = [];
   let droppedChunks = 0;
   let droppedChars = 0;
@@ -308,7 +327,7 @@ function assembleSegments(
     );
   }
   const total = parts.reduce((n, part) => n + part.local.length, 0);
-  return { chunks, fullText: pieces.join(CHUNK_SEPARATOR), truncatedChunks: total - chunks.length, warnings };
+  return { chunks, fullText: pieces.join(CHUNK_SEPARATOR), truncatedChunks: total - chunks.length, cappedChunks, warnings };
 }
 
 /** Alphanumeric so Turndown never escapes it; lengthened until the page lacks it. */
@@ -338,17 +357,41 @@ const CHROME_ROLES = new Set(["navigation", "banner", "contentinfo"]);
  */
 const CHROME_REMNANT_MAX_CHARS = 32;
 
+/** Elements whose descendants' landmark roles are scoped to content, not page chrome. */
+const CONTENT_SCOPES = new Set(["ARTICLE", "MAIN"]);
+/** Links that carry a contact value rather than navigate. */
+const CONTACT_HREF = /^\s*(?:tel|mailto|sms):/i;
+/** At most this many pruned blocks are quoted in the warning, each cut to... */
+const PRUNED_QUOTE_MAX_BLOCKS = 5;
+/** ...this many characters. */
+const PRUNED_QUOTE_MAX_CHARS = 60;
+
+function insideContentScope(el: El): boolean {
+  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+    if (CONTENT_SCOPES.has(parent.tagName.toUpperCase()) || parent.getAttribute("role")?.toLowerCase() === "main") return true;
+  }
+  return false;
+}
+
 /**
  * Remove chrome that the element-name pruning misses from the page text
  * outside the container: ARIA navigation landmarks and link-dense blocks
  * (div-based navbars, mega-menus, pagination and link farms), plus the short
  * label remnants those leave behind. Innermost blocks are judged first, so a
  * wrapper that mixes a menu with real text keeps the text once the menu is gone.
+ *
+ * A landmark role inside `article`/`main` is scoped to that content and kept,
+ * and contact links (`tel:`, `mailto:`, `sms:`) are values, not navigation, so
+ * they never make a block link-dense. Returns the text of every block it
+ * removed, so the caller can say what was pruned; nothing is dropped silently.
  */
-function pruneOutsideChrome(body: El, marker: string): void {
+function pruneOutsideChrome(body: El, marker: string): string[] {
+  const pruned: string[] = [];
   const lostChrome = new Set<El>();
   const remove = (el: El) => {
     for (let parent = el.parentElement; parent; parent = parent.parentElement) lostChrome.add(parent);
+    const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (text.length > 0) pruned.push(text);
     el.remove();
   };
   const compact = (el: El) => (el.textContent ?? "").replace(/\s+/g, "");
@@ -356,7 +399,7 @@ function pruneOutsideChrome(body: El, marker: string): void {
   for (const el of elements) {
     if (!body.contains(el) || (el.textContent ?? "").includes(marker)) continue;
     const role = el.getAttribute("role")?.toLowerCase();
-    if (role && CHROME_ROLES.has(role)) {
+    if (role && CHROME_ROLES.has(role) && !insideContentScope(el)) {
       remove(el);
       continue;
     }
@@ -366,11 +409,24 @@ function pruneOutsideChrome(body: El, marker: string): void {
       continue;
     }
     if (text.length === 0) continue;
-    const links = [...(el as unknown as Doc).querySelectorAll("a")];
+    const links = [...(el as unknown as Doc).querySelectorAll("a")]
+      .filter((a) => !CONTACT_HREF.test(a.getAttribute("href") ?? ""));
     if (links.length < LINK_DENSE_MIN_LINKS) continue;
     const linkText = links.reduce((n, a) => n + compact(a).length, 0);
     if (linkText / text.length >= LINK_DENSE_MIN_SHARE) remove(el);
   }
+  return pruned;
+}
+
+/** The warning naming the navigation-like text pruned outside the card container. */
+function prunedWarning(pruned: string[]): string | undefined {
+  if (pruned.length === 0) return undefined;
+  const chars = pruned.reduce((n, text) => n + text.length, 0);
+  const quoted = pruned.slice(0, PRUNED_QUOTE_MAX_BLOCKS).map((text) =>
+    JSON.stringify(text.length > PRUNED_QUOTE_MAX_CHARS ? `${text.slice(0, PRUNED_QUOTE_MAX_CHARS)}…` : text));
+  const more = pruned.length > PRUNED_QUOTE_MAX_BLOCKS ? `, and ${pruned.length - PRUNED_QUOTE_MAX_BLOCKS} more` : "";
+  return `structural prep pruned ${pruned.length} navigation-like block${pruned.length === 1 ? "" : "s"} ` +
+    `outside the card container (${chars} chars): ${quoted.join(", ")}${more}`;
 }
 
 /**
@@ -384,8 +440,8 @@ function outsideContainer(
   doc: Doc,
   html: string,
   td: ReturnType<typeof createTurndownService>,
-): { leading: string; trailing: string } | undefined {
-  if (!doc.body || group.container === doc.body) return { leading: "", trailing: "" };
+): { leading: string; trailing: string; pruned: string[] } | undefined {
+  if (!doc.body || group.container === doc.body) return { leading: "", trailing: "", pruned: [] };
   const marker = containerMarker(html);
   const placeholder = doc.createElement("p");
   placeholder.textContent = marker;
@@ -395,11 +451,11 @@ function outsideContainer(
 
   const copy = parseHTML(`<!DOCTYPE html><html><body>${bodyHtml}</body></html>`).document as unknown as Doc;
   if (!copy.body) return undefined;
-  pruneOutsideChrome(copy.body, marker);
+  const pruned = pruneOutsideChrome(copy.body, marker);
   const md = collapseMarkdown(td.turndown(copy.body.innerHTML), SAFETY_CAP);
   const at = md.indexOf(marker);
   if (at < 0 || md.indexOf(marker, at + 1) >= 0) return undefined;
-  return { leading: md.slice(0, at).trim(), trailing: md.slice(at + marker.length).trim() };
+  return { leading: md.slice(0, at).trim(), trailing: md.slice(at + marker.length).trim(), pruned };
 }
 
 function buildStructuralChunks(
@@ -409,7 +465,7 @@ function buildStructuralChunks(
   chunkSize: number,
   overlap: number,
   maxChunks: number,
-): { fullText: string; chunks: Chunk[]; truncatedChunks: number; cardCount: number; warnings: string[] } | undefined {
+): { fullText: string; chunks: Chunk[]; truncatedChunks: number; cappedChunks: Chunk[]; cardCount: number; warnings: string[] } | undefined {
   const td = createTurndownService();
   const children = [...group.container.children];
 
@@ -466,7 +522,12 @@ function buildStructuralChunks(
   }
 
   const assembled = assembleSegments(segments, chunkSize, overlap, maxChunks);
-  return { ...assembled, cardCount: group.cards.length };
+  const pruneNote = prunedWarning(outside.pruned);
+  return {
+    ...assembled,
+    warnings: pruneNote === undefined ? assembled.warnings : [pruneNote, ...assembled.warnings],
+    cardCount: group.cards.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +604,7 @@ export function prepareAndChunk(
           structural: true,
           cardCount: built.cardCount,
           truncatedChunks: built.truncatedChunks,
+          ...(built.cappedChunks.length > 0 ? { cappedChunks: built.cappedChunks } : {}),
           warnings,
           effectivePrepMode: "markdown",
         };
