@@ -457,6 +457,7 @@ export function createAnthropicExtractionProvider(
         raw: {
           response: toolInput === undefined ? "" : JSON.stringify(toolInput),
           model: message.model || model,
+          modelSource: message.model ? "provider-reported" : "configured",
           tokensUsed: message.usage.input_tokens + message.usage.output_tokens,
         },
         ...(warnings.length > 0 ? { warnings } : {}),

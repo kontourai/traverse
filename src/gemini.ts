@@ -57,7 +57,7 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
       if (response.candidates?.some((candidate) => candidate.finishReason === "MAX_TOKENS")) warnings.push("response truncated at maxTokens; proposals may be incomplete");
       return {
         proposals: parsed.proposals,
-        raw: { response: call?.args === undefined ? "" : JSON.stringify(call.args), model: response.modelVersion ?? model, tokensUsed: response.usageMetadata?.totalTokenCount ?? ((response.usageMetadata?.promptTokenCount ?? 0) + (response.usageMetadata?.candidatesTokenCount ?? 0)) },
+        raw: { response: call?.args === undefined ? "" : JSON.stringify(call.args), model: response.modelVersion ?? model, modelSource: response.modelVersion ? "provider-reported" : "configured", tokensUsed: response.usageMetadata?.totalTokenCount ?? ((response.usageMetadata?.promptTokenCount ?? 0) + (response.usageMetadata?.candidatesTokenCount ?? 0)) },
         ...(warnings.length ? { warnings } : {}),
       };
     },

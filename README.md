@@ -635,7 +635,18 @@ a provider call. Provider failures expose normalized retryability while keeping
 the original native diagnostic on `ExtractionResult.providerFailures`. When the
 upstream error carries a credential-free `code` (for example an authorization
 ledger's `AUTHORIZATION_PERSISTENCE_FAILED`), the failure keeps it as `code`,
-exactly as raised. The portable envelope does not carry `code` yet.
+exactly as raised. The portable envelope carries it too when it is at most 128
+characters.
+
+Each proposal records the model that served its own provider call as
+`producedBy: { model, modelSource, requestDigest }`, so a run whose chunks were
+served by different models (for example after a routed fallback) stays
+attributable per value; `result.raw.model` names the last chunk's model only.
+`modelSource` is `provider-reported` when the provider response named the model
+and `configured` when the adapter fell back to the configured id; a Relay
+runtime that does not report `modelSource` leaves it unset, and such a proposal
+carries no `producedBy` in the portable envelope. Relay requests carry
+`metadata: { chunkIndex, runId }` for correlation with a router's receipts.
 
 The Anthropic and OpenAI adapters build their SDK clients with `maxRetries: 0`
 by default, so one counted provider call is exactly one provider request and

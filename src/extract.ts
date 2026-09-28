@@ -80,14 +80,14 @@
  */
 
 import { prepareAndChunk } from "./chunk.js";
-import { checkExtractionTaskSpec } from "./task.js";
+import { canonicalTaskJson, checkExtractionTaskSpec } from "./task.js";
 import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
 import { isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
   ExtractInput,
@@ -95,6 +95,7 @@ import type {
   ExtractionProviderFailure,
   ExtractionResult,
   ExtractionPartial,
+  ExtractionProducedBy,
   PdfLayout,
   ProviderExtractionInput,
   ProviderExtractionOutput,
@@ -133,8 +134,21 @@ interface ChunkDispatch {
 }
 
 interface ChunkOutcome extends ChunkDispatch {
+  /** Digest of the request this chunk was sent as; see `ExtractionProducedBy.requestDigest`. */
+  requestDigest: string;
   output?: ProviderExtractionOutput;
   error?: unknown;
+}
+
+/**
+ * Content-free digest of one provider request. Correlation-only fields
+ * (`signal`, `chunkIndex`, `runId`) are excluded, so the digest names what was
+ * asked, not when.
+ */
+function providerRequestDigest(request: ProviderExtractionInput): string {
+  const { content, contentType, targetSchema, fieldHints, taskSpec } = request;
+  const canonical = canonicalTaskJson({ content, contentType, targetSchema, fieldHints, taskSpec });
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
 function isImageContentType(contentType: ExtractInput["contentType"]): boolean {
@@ -158,6 +172,7 @@ async function dispatchBoundedWaves(
   input: ExtractInput,
   chunks: PreparedChunks["chunks"],
   maxChars: number,
+  runId: string,
 ): Promise<BoundedDispatchResult> {
   const outcomes: Array<ChunkOutcome | undefined> = new Array(chunks.length);
   const warnings: string[] = [];
@@ -231,14 +246,17 @@ async function dispatchBoundedWaves(
     // including one extractBatch() operation for a multi-input group.
     providerCalls += wave.length;
     const waveOutcomes = await Promise.all(wave.map(async (group): Promise<ChunkOutcome[]> => {
-      const requests: ProviderExtractionInput[] = group.map(({ content }) => ({
+      const requests: ProviderExtractionInput[] = group.map(({ index, content }) => ({
         content,
         contentType: input.contentType,
         targetSchema: input.targetSchema,
         fieldHints: input.fieldHints,
         ...(input.taskSpec ? { taskSpec: input.taskSpec } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
+        chunkIndex: index,
+        runId,
       }));
+      const digests = requests.map(providerRequestDigest);
       try {
         const batchOutcomes = group.length > 1 && input.provider.extractBatch
           ? await input.provider.extractBatch(requests)
@@ -249,11 +267,11 @@ async function dispatchBoundedWaves(
         return group.map((dispatch, index) => {
           const outcome = batchOutcomes[index];
           return outcome.status === "fulfilled"
-            ? { ...dispatch, output: outcome.value }
-            : { ...dispatch, error: outcome.reason };
+            ? { ...dispatch, requestDigest: digests[index], output: outcome.value }
+            : { ...dispatch, requestDigest: digests[index], error: outcome.reason };
         });
       } catch (error) {
-        return group.map((dispatch) => ({ ...dispatch, error }));
+        return group.map((dispatch, index) => ({ ...dispatch, requestDigest: digests[index], error }));
       }
     }));
     for (const group of waveOutcomes) {
@@ -459,7 +477,7 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     const providerErrors: string[] = [];
     const providerFailures: ExtractionProviderFailure[] = [];
     let chunksSucceeded = 0;
-    const dispatched = await dispatchBoundedWaves(input, chunks, maxChars);
+    const dispatched = await dispatchBoundedWaves(input, chunks, maxChars, runId);
     warnings.push(...dispatched.warnings);
     const { outcomes, providerCalls, totalTokensUsed } = dispatched;
     let partial = dispatched.partial;
@@ -505,11 +523,15 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           lastRaw = { ...lastRaw, model: "" };
         }
       }
+      const producedBy = producedByFor(output, outcome.requestDigest);
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
         );
         warnings.push(...normalizationWarnings);
+        // Each proposal is attributed to the call that served its own chunk,
+        // so a run that fell back to another model part-way stays attributable.
+        if (producedBy) for (const proposal of chunkProposals) proposal.producedBy = { ...producedBy };
         collected.push(...chunkProposals);
       } catch (err) {
         warnings.push(
@@ -608,13 +630,31 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
 }
 
 /**
+ * The served-model record for one chunk's call, or undefined when the call
+ * reported no model the envelope could carry. An unrecognized `modelSource`
+ * is dropped rather than guessed.
+ */
+function producedByFor(output: ProviderExtractionOutput, requestDigest: string): ExtractionProducedBy | undefined {
+  const model = output.raw?.model;
+  if (!isPortableStableIdentity(model)) return undefined;
+  const modelSource = output.raw.modelSource;
+  return {
+    model,
+    ...(modelSource === "provider-reported" || modelSource === "configured" ? { modelSource } : {}),
+    requestDigest,
+  };
+}
+
+/**
  * Cross-chunk dedup. A duplicate is the SAME field extracted from the SAME
  * verified source span AND the same candidate value — i.e. `fieldPath` +
  * `pathIndices` + canonical value + `locator` (which encodes the
  * `chars:<start>-<end>` offset into `fullText`). This collapses the true
  * duplicates chunking creates while preserving same-span/different-value and
  * same-value/different-span proposals. Keeps the highest confidence on a
- * collision; first-seen key order is preserved.
+ * collision (the first-seen on a tie), whole: the kept proposal's `producedBy`
+ * names the call that produced that confidence. First-seen key order is
+ * preserved.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
