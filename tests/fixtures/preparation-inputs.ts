@@ -17,14 +17,16 @@ export const detailHtml = `<!DOCTYPE html><html><body><h1>Riverside Clinic</h1><
 <section><ul><li>Parking available</li><li>Wheelchair accessible</li><li>Open weekends</li></ul></section>
 </main></body></html>`;
 
-// Page chrome inside and outside an article: the article's own header and
-// footer are kept; a header, aside and form inside main but outside the
-// article, a noscript, and the page nav/footer are removed.
+// Page chrome inside and outside an article: the article's own header,
+// footer and aside are kept; a form (even in the article), a header and aside
+// inside main but outside the article, a noscript, and the page nav/footer
+// are removed.
 export const chromeHtml = `<!DOCTYPE html><html><body><nav><a href="/">Home</a></nav><main>
 <header><p>Breadcrumbs: Home / Roles</p></header>
 <form><p>Accept cookies</p><button>OK</button></form>
 <article><header><h1>Field Technician</h1><p>Pay: $31 per hour</p></header>
-<p>Full-time role at the north depot.</p><footer><p>Posted 2026-09-01</p></footer></article>
+<p>Full-time role at the north depot.</p><aside><p>Shift: nights</p></aside>
+<form><p>Apply now</p></form><footer><p>Posted 2026-09-01</p></footer></article>
 <aside><p>Related roles: $28 per hour</p></aside><noscript>Enable scripts</noscript>
 </main><footer>Site footer</footer></body></html>`;
 

@@ -580,7 +580,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       const producedBy = producedByFor(output, outcome.requestDigest);
       // An answer core cannot use (no proposals array, or normalization threw)
       // leaves the chunk unanswered, like a failed call.
-      let unusableAnswer = !outputIsObject || output.unusable === true;
+      // A non-object output has no proposals array, so normalization below
+      // records it as unusable.
+      let unusableAnswer = output.unusable === true;
       try {
         const { proposals: chunkProposals, warnings: normalizationWarnings, unusable } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,

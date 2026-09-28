@@ -29,7 +29,7 @@
     "html-chrome": {
       "preparationMode": "markdown",
       "preparationVersion": "3+linkedom@0.18.13+turndown@7.2.4",
-      "digest": "9767c8ec0f1cc2313dbaa2b41a40c59127f070ec6db8d5e8db789a358393af76"
+      "digest": "3841a779e748d2d858e38265d7ef4fc765ece397ae6ec9083e9c78ccaba14e0e"
     }
   }
 }
