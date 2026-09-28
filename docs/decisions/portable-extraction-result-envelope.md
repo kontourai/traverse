@@ -17,6 +17,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/164
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/165
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/183
 ---
 
 # Portable extraction-result envelope
@@ -108,6 +110,30 @@ call throws: `provider`/`provider-failure` if any call threw, otherwise
 it `partial`, as before.) `partial.completedChunks` keeps its 1.0.0 meaning:
 dispatched chunks whose provider work finished, answered or not; coverage says
 which were answered.
+
+Two combinations follow from those rules and are stated here so an
+envelope-only reader can recognise them:
+
+- **Early stop and nothing answered.** When a stop (`cancelled`,
+  `max-provider-calls`, `max-total-tokens`) coincides with every dispatched
+  chunk being unanswered, the in-process result sets `error`, but the envelope
+  reports `partial` with the stop's reason and no failure, because an early
+  stop wins. The envelope says nothing was answered only through coverage:
+  every dispatched range is `unread` (`provider-failure` or
+  `missing-tool-call`), the undispatched rest is `unread`/`not-dispatched`,
+  and the warning codes include `chunk-provider-failure`, `missing-tool-call`
+  or `unusable-answer`.
+  A reader that needs "was anything answered" should check coverage for a
+  `complete` or `output-truncated` entry rather than rely on the outcome.
+- **`maxChunks` truncation and nothing answered.** `max-chunks` is not an
+  early stop (the capped chunks were never going to be dispatched), so the
+  run is `failure` with `provider`/`provider-failure` or
+  `provider`/`no-usable-answer`. The in-process result's `coverage` lists the
+  capped chunks' ranges (when their text is in the prepared artifact) as
+  `unread`/`not-dispatched`. The envelope does not: the serializer emits
+  coverage only on a `partial` outcome and a failure has no `partial` reason,
+  so an envelope-only reader learns that nothing was answered but not that
+  the run was also capped.
 
 Coverage describes the prepared text only. Structural chunking drops a whole
 outside-text segment beyond `maxChunks` before the prepared text is built, so
