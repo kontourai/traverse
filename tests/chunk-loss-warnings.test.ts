@@ -119,7 +119,7 @@ describe("chunk-loss warnings", () => {
     assert.equal(result.warnings, undefined);
   });
 
-  it("an envelope carrying every chunk-loss code is a partial outcome, and the current Survey importer refuses it rather than reading success", async () => {
+  it("an envelope carrying every chunk-loss code is a partial outcome, and Survey imports it as partial with its coverage", async () => {
     let n = 0;
     const provider: ExtractionProvider = {
       name: "p",
@@ -147,16 +147,17 @@ describe("chunk-loss warnings", () => {
     const envelope = deserializePortableExtractionResult(serialized);
     assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "content-truncated" });
     assert.deepEqual(envelope.result.warningClassifications?.map((w) => w.code), found);
-    // The Survey importer this suite pins predates the loss reasons and
-    // `coverage`, so it refuses the envelope (fail closed) instead of
-    // importing a lossy run as a success. When the dev dependency moves to a
-    // Survey release that reads them, turn this into a round trip.
-    assert.throws(() => importExtractionEnvelope(serialized, {
+    // The pinned Survey importer reads the loss reasons and coverage, so a
+    // lossy run imports as partial, never as a success.
+    const imported = importExtractionEnvelope(serialized, {
       sourceKind: "uploaded-document",
       claimTarget: () => ({
         subjectType: "fixture", subjectId: "fixture-1", facet: "fixture", claimType: "field-value",
         fieldOrBehavior: "fee", impactLevel: "low",
       }),
-    }), /result\.coverage is unexpected/);
+    });
+    const importedResult = imported.record.spec.envelope.result;
+    assert.deepEqual(importedResult.outcome, { status: "partial", reason: "content-truncated" });
+    assert.deepEqual(importedResult.coverage, envelope.result.coverage);
   });
 });

@@ -94,7 +94,7 @@
     "@anthropic-ai/sdk": "^0.116.0",
     "@kontourai/flow-agents": "5.10.0",
     "@kontourai/relay": "^0.6.0",
-    "@kontourai/survey": "^3.0.0",
+    "@kontourai/survey": "^6.0.0",
     "@types/node": "^26.1.2",
     "@types/turndown": "^5.0.6",
     "openai": "^6.49.0",
