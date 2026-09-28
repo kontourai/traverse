@@ -139,6 +139,22 @@ const MISSING_TOOL_CALL_WARNING = "provider returned no extraction tool call";
 /** Written (located on the chunk) whenever an answer is recorded as unusable. */
 const UNUSABLE_ANSWER_WARNING = "provider answer unusable; the chunk is recorded as not read";
 
+/**
+ * Longest provider error text copied into `result.error` or a chunk warning.
+ * A provider message can be long and can echo request details; the full text
+ * stays on `result.providerFailures[].message` and `.native`.
+ */
+const MAX_PROVIDER_ERROR_CHARS = 500;
+
+/** `message`, cut to `MAX_PROVIDER_ERROR_CHARS` without splitting a surrogate pair, noting its full length. */
+function boundedProviderError(message: string): string {
+  if (message.length <= MAX_PROVIDER_ERROR_CHARS) return message;
+  let end = MAX_PROVIDER_ERROR_CHARS;
+  const last = message.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${message.slice(0, end)}… (${message.length} chars)`;
+}
+
 /** The partial reason a dispatched chunk's loss reports when no early stop applies. */
 function lossPartialReason(entry: ExtractionCoverageEntry): ExtractionPartialReason | undefined {
   if (entry.status === "output-truncated") return "output-truncated";
@@ -538,8 +554,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         sent({ status: "unread", reason: "provider-failure" });
         const failure = normalizeProviderFailure(input.provider, outcome.error);
         providerFailures.push(failure);
-        providerErrors.push(failure.message);
-        warnings.push(`${chunkLabel} provider call failed: ${failure.message} (chars:${chunks[i].start}-${sentEnd} not read)`);
+        const errorText = boundedProviderError(failure.message);
+        providerErrors.push(errorText);
+        warnings.push(`${chunkLabel} provider call failed: ${errorText} (chars:${chunks[i].start}-${sentEnd} not read)`);
         continue;
       }
       // A provider that resolves with something other than an output object

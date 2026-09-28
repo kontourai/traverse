@@ -308,7 +308,11 @@ export interface ExtractionResult {
    */
   raw: RawProviderResponse;
   extractedAt: string;
-  /** never throws for provider/parse failure — populated instead. */
+  /**
+   * never throws for provider/parse failure — populated instead. Provider
+   * error text copied here (and into chunk warnings) is cut to 500 characters;
+   * `providerFailures[].message` keeps it whole.
+   */
   error?: string;
   /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */
   warnings?: string[];
