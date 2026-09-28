@@ -251,6 +251,7 @@ describe("evidenceMatch never reports a false match", () => {
     ["number 5 vs never 5", { path: "f", type: "number", inferenceType: "explicit" }, 5, "never 5", "not-evaluated"],
     ["number 5 vs Ticket No. 5", { path: "f", type: "number", inferenceType: "explicit" }, 5, "Ticket No. 5", "match"],
     ["string -1234567 vs 1234567", { path: "f", type: "string", inferenceType: "explicit" }, "-1234567", "Account 1234567", "not-evaluated"],
+    ["string -303.555.1234 vs (303) 555-1234", { path: "f", type: "string", inferenceType: "explicit" }, "-303.555.1234", "(303) 555-1234", "not-evaluated"],
     ["string 1234567.89 vs 1234567,89", { path: "f", type: "string", inferenceType: "explicit" }, "1234567.89", "Total 1234567,89", "not-evaluated"],
     ["boolean false vs Ticket No. 5", { path: "f", type: "boolean", inferenceType: "explicit" }, false, "Ticket No. 5", "not-evaluated"],
     ["number 1 vs 1/2 cup", { path: "f", type: "number", inferenceType: "explicit" }, 1, "1/2 cup", "not-evaluated"],
