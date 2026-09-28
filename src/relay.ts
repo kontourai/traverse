@@ -123,9 +123,8 @@ function relayOutput(
   const parsed = parseProposals(toolInput, providerName, contentType);
   const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
   if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
-  if (result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens") {
-    warnings.push("response truncated at maxTokens; proposals may be incomplete");
-  }
+  const truncated = result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens";
+  if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
   // Read as unknown: `modelSource` is optional in Relay's contract and
   // absent from runtimes that predate it, so only the two known values pass.
   const modelSource: unknown = (result as { modelSource?: unknown }).modelSource;
@@ -138,6 +137,8 @@ function relayOutput(
       ...(result.usage.totalTokens === undefined ? {} : { tokensUsed: result.usage.totalTokens }),
     },
     ...(warnings.length === 0 ? {} : { warnings }),
+    truncated,
+    missingToolCall: toolInput === undefined,
   };
 }
 

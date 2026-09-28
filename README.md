@@ -384,8 +384,12 @@ short repeated list) is kept too, after a second chrome pass that removes ARIA
 navigation landmarks and link-dense blocks such as `div` navbars and
 mega-menus. A landmark inside `article`/`main` is kept, `tel:`/`mailto:`/`sms:`
 links do not count as navigation, and every block the pass removes is quoted
-in a warning (`structural prep pruned …`), so page text is never dropped
-silently. Short outside text rides along with the first or last card chunk;
+in a warning (`structural prep pruned …`). The first chrome pass follows the
+same rule for Markdown prep (structural or not): `header`, `footer`, `aside`
+and `form` inside `article`/`main` are kept, and every `nav`, `header`,
+`footer`, `aside` or `form` it removes is quoted in a `markdown prep pruned …`
+warning. So Markdown prep never drops page text silently; the legacy
+`prep: "text"` regex strip is unchanged. Short outside text rides along with the first or last card chunk;
 longer outside text gets its own chunks, which are dispatched after every card
 chunk, so `maxChunks`, `maxProviderCalls`, and `maxTotalTokens` reach the cards
 first. Outside text left out by `maxChunks` is named in a warning. When no
@@ -434,9 +438,16 @@ detection mode, cards detected, any `maxChunks` truncation, dropped duplicates,
 and any per-chunk provider failure. A provider error on **one** chunk is a
 warning and the other chunks still run; only if **every** chunk's call fails
 does `result.error` get set. `result.coverage` records which prepared-text
-range each chunk read and answered, and any loss (a failed call, a cut at
-`maxContentChars`, an output cap, a missing tool call, a chunk never
-dispatched) also sets `result.partial`. Coverage ranges of adjacent chunks may
+range each chunk read and answered, and any loss (a failed call, an answer
+core cannot use, a cut at `maxContentChars`, an output cap, a missing tool
+call, a chunk never dispatched) also sets `result.partial`. Coverage describes
+the prepared text only: a structural segment that `maxChunks` dropped whole
+never enters the prepared text, so only `partial.reason: "max-chunks"` (and its
+warning) records that loss. A provider signals an output cap or a missing tool
+call with `ProviderExtractionOutput.truncated` / `missingToolCall` (the bundled
+adapters set both); a provider that sets neither is judged by a warning that
+starts with `response truncated at maxTokens` or `provider returned no
+extraction tool call`. Coverage ranges of adjacent chunks may
 overlap by `chunkOverlap`.
 
 > Why not `@mozilla/readability`? It extracts the one main article and strips

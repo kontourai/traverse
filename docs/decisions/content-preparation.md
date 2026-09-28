@@ -124,7 +124,17 @@ kept, and `tel:`/`mailto:`/`sms:` links are contact values, not navigation, so
 they never make a block link-dense. Every block the pass removes is quoted in a
 `structural prep pruned …` warning (at most five blocks, 60 characters each,
 with the total character count), classified on the envelope as
-`preparation`/`navigation-pruned`: page text is never dropped silently.
+`preparation`/`navigation-pruned`.
+
+The element-name pruning before it follows the same rule for all Markdown
+prep, structural or whole-page: `header`, `footer`, `aside` and `form` inside
+`article`, `main` or `role="main"` belong to that content and are kept (and
+Turndown keeps them too, even when a card is converted on its own), while
+`nav` and page-level `header`/`footer`/`aside`/`form` are removed and quoted in
+a `markdown prep pruned …` warning with the same bound and classification.
+Scripts, styles and other elements without page text are removed without a
+warning. Markdown prep therefore never drops page text silently; the legacy
+`prep: "text"` regex strip is unchanged.
 
 What remains is a leading and a trailing segment. A segment of at most a
 quarter of `chunkSize` rides along with the first or last card batch without

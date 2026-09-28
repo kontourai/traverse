@@ -129,10 +129,13 @@ const DEFAULT_MAX_CONTENT_CHARS = 32_000;
 
 const EMPTY_RAW: RawProviderResponse = { response: "", model: "" };
 
-/** Adapter warning meaning a chunk's answer stopped at the output cap. */
+/** Fallback: adapter warning meaning a chunk's answer stopped at the output cap. */
 const OUTPUT_TRUNCATED_ADAPTER_WARNING = /^response truncated at maxTokens/;
-/** Adapter warning meaning no extraction tool call came back for a chunk. */
+/** Fallback: adapter warning meaning no extraction tool call came back for a chunk. */
 const MISSING_TOOL_CALL_ADAPTER_WARNING = /^provider returned no extraction (?:tool|function) call/;
+/** Written (located on the chunk) when a typed signal reports a loss the adapter did not warn about. */
+const OUTPUT_TRUNCATED_WARNING = "response truncated at maxTokens; proposals may be incomplete";
+const MISSING_TOOL_CALL_WARNING = "provider returned no extraction tool call";
 
 /** The partial reason a dispatched chunk's loss reports when no early stop applies. */
 function lossPartialReason(entry: ExtractionCoverageEntry): ExtractionPartialReason | undefined {
@@ -537,18 +540,29 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       chunksSucceeded++;
       // Adapter warnings that mean the answer for this chunk is incomplete are
       // located here, since only the core knows which chunk a call served.
-      const missingToolCall = output.warnings?.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning)) ?? false;
-      const outputTruncated = output.warnings?.some((warning) => OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning)) ?? false;
-      if (output.warnings) {
-        warnings.push(...output.warnings.map((warning) =>
-          MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning) || OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning)
-            ? `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`
-            : warning));
+      // The adapter's typed signal decides; a warning prefix is only the
+      // fallback for providers that do not set it. Whatever decides, the
+      // located warning below is written exactly when the loss is recorded,
+      // so the envelope's warning codes and its outcome always agree.
+      const adapterWarnings = output.warnings ?? [];
+      const missingToolCall = typeof output.missingToolCall === "boolean"
+        ? output.missingToolCall
+        : adapterWarnings.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning));
+      const outputTruncated = typeof output.truncated === "boolean"
+        ? output.truncated
+        : adapterWarnings.some((warning) => OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning));
+      const located = (warning: string) => `${chunkLabel} (chars:${chunks[i].start}-${sentEnd}): ${warning}`;
+      warnings.push(...adapterWarnings.map((warning) =>
+        (missingToolCall && MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning)) ||
+        (outputTruncated && OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning))
+          ? located(warning)
+          : warning));
+      if (missingToolCall && !adapterWarnings.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning))) {
+        warnings.push(located(MISSING_TOOL_CALL_WARNING));
       }
-      // No tool call means nothing was answered, whatever stopped the model.
-      sent(missingToolCall
-        ? { status: "unread", reason: "missing-tool-call" }
-        : { status: outputTruncated ? "output-truncated" : "complete" });
+      if (outputTruncated && !adapterWarnings.some((warning) => OUTPUT_TRUNCATED_ADAPTER_WARNING.test(warning))) {
+        warnings.push(located(OUTPUT_TRUNCATED_WARNING));
+      }
       if (output.raw) {
         lastRaw = output.raw;
         // raw.model becomes the envelope's model identity. Omit one the
@@ -559,20 +573,31 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         }
       }
       const producedBy = producedByFor(output, outcome.requestDigest);
+      // An answer core cannot use (no proposals array, or normalization threw)
+      // leaves the chunk unanswered, like a failed call.
+      let unusableAnswer = false;
       try {
-        const { proposals: chunkProposals, warnings: normalizationWarnings } = normalizeChunkProposals(
+        const { proposals: chunkProposals, warnings: normalizationWarnings, unusable } = normalizeChunkProposals(
           output.proposals, input, outcome.content, chunks[i].start, fullText, occurrenceResolver,
         );
+        unusableAnswer = unusable;
         warnings.push(...normalizationWarnings);
         // Each proposal is attributed to the call that served its own chunk,
         // so a run that fell back to another model part-way stays attributable.
         if (producedBy) for (const proposal of chunkProposals) proposal.producedBy = { ...producedBy };
         collected.push(...chunkProposals);
       } catch (err) {
+        unusableAnswer = true;
         warnings.push(
           `chunk ${i + 1}/${chunks.length} normalization failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+      // No tool call means nothing was answered, whatever stopped the model.
+      sent(missingToolCall
+        ? { status: "unread", reason: "missing-tool-call" }
+        : unusableAnswer
+          ? { status: "unread", reason: "provider-failure" }
+          : { status: outputTruncated ? "output-truncated" : "complete" });
     }
 
     // Chunks cut by maxChunks whose text is still in the prepared artifact
@@ -745,13 +770,13 @@ function normalizeChunkProposals(
   chunkStart: number,
   fullText: string,
   occurrenceResolver: ExactOccurrenceResolver,
-): { proposals: ExtractionProposal[]; warnings: string[] } {
+): { proposals: ExtractionProposal[]; warnings: string[]; unusable: boolean } {
   const warnings: string[] = [];
   const proposals: ExtractionProposal[] = [];
 
   if (!Array.isArray(raw)) {
     warnings.push("provider returned no proposals array");
-    return { proposals, warnings };
+    return { proposals, warnings, unusable: true };
   }
 
   const schemaByPath = new Map(input.targetSchema.map((f) => [f.path, f] as const));
@@ -878,7 +903,7 @@ function normalizeChunkProposals(
     proposals.push(proposal);
   }
 
-  return { proposals, warnings };
+  return { proposals, warnings, unusable: false };
 }
 
 /** A stable identity for source-ordered allocation and true-duplicate folding. */

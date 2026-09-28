@@ -74,6 +74,84 @@ export const MARKDOWN_NOISE_ELEMENTS = [
   "head",
 ];
 
+/**
+ * Noise elements that hold page text. Unlike scripts or styles, removing one
+ * can drop content, so each removal is reported (see {@link pruneMarkdownNoise}).
+ */
+const TEXT_CHROME_ELEMENTS = new Set(["NAV", "HEADER", "FOOTER", "ASIDE", "FORM"]);
+/**
+ * Of those, the ones that are page chrome only at page level: inside an
+ * `article` or `main` they belong to that content (an article's header holds
+ * its title, date or salary), so they are kept there. `nav` stays chrome.
+ */
+const CONTENT_SCOPED_CHROME = new Set(["HEADER", "FOOTER", "ASIDE", "FORM"]);
+/** Set on a content-scoped element pruning kept, so later Turndown passes over a detached copy keep it too. */
+const KEPT_ATTRIBUTE = "data-traverse-kept";
+
+/** Minimal DOM view shared by the pruning helpers (linkedom and Turndown nodes). */
+interface PruneNode {
+  nodeName: string;
+  parentNode: PruneNode | null;
+  textContent: string | null;
+  getAttribute?(name: string): string | null;
+}
+
+/** True when an ancestor is `article`, `main`, or `role="main"`: landmarks there are scoped to content. */
+export function insideContentScope(node: PruneNode): boolean {
+  for (let parent = node.parentNode; parent; parent = parent.parentNode) {
+    const name = parent.nodeName.toUpperCase();
+    if (name === "ARTICLE" || name === "MAIN" || parent.getAttribute?.("role")?.toLowerCase() === "main") return true;
+  }
+  return false;
+}
+
+/**
+ * Remove {@link MARKDOWN_NOISE_ELEMENTS} from a parsed document, in place.
+ * `header`/`footer`/`aside`/`form` inside `article`/`main` are kept (and
+ * marked, so {@link createTurndownService} keeps them in a detached copy).
+ * Returns the collapsed text of every text-bearing element removed, so the
+ * caller can name it: page text is never dropped silently.
+ */
+export function pruneMarkdownNoise(document: { querySelectorAll(selector: string): Iterable<unknown> }): string[] {
+  const pruned: string[] = [];
+  for (const tag of MARKDOWN_NOISE_ELEMENTS) {
+    for (const found of document.querySelectorAll(tag)) {
+      const el = found as PruneNode & { isConnected: boolean; remove(): void; setAttribute(name: string, value: string): void };
+      if (!el.isConnected) continue; // inside an element already removed and reported
+      const name = el.nodeName.toUpperCase();
+      if (CONTENT_SCOPED_CHROME.has(name) && insideContentScope(el)) {
+        el.setAttribute(KEPT_ATTRIBUTE, "");
+        continue;
+      }
+      if (TEXT_CHROME_ELEMENTS.has(name)) {
+        const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+        if (text.length > 0) pruned.push(text);
+      }
+      el.remove();
+    }
+  }
+  return pruned;
+}
+
+/** At most this many pruned blocks are quoted in a pruning warning, each cut to... */
+const PRUNED_QUOTE_MAX_BLOCKS = 5;
+/** ...this many characters. */
+const PRUNED_QUOTE_MAX_CHARS = 60;
+
+/**
+ * A bounded warning naming pruned page text: the block count, total characters,
+ * and up to five quoted blocks of at most 60 characters each.
+ */
+export function prunedTextWarning(prefix: string, noun: string, pruned: string[], where = ""): string | undefined {
+  if (pruned.length === 0) return undefined;
+  const chars = pruned.reduce((n, text) => n + text.length, 0);
+  const quoted = pruned.slice(0, PRUNED_QUOTE_MAX_BLOCKS).map((text) =>
+    JSON.stringify(text.length > PRUNED_QUOTE_MAX_CHARS ? `${text.slice(0, PRUNED_QUOTE_MAX_CHARS)}…` : text));
+  const more = pruned.length > PRUNED_QUOTE_MAX_BLOCKS ? `, and ${pruned.length - PRUNED_QUOTE_MAX_BLOCKS} more` : "";
+  return `${prefix} pruned ${pruned.length} ${noun}${pruned.length === 1 ? "" : "s"}${where} ` +
+    `(${chars} chars): ${quoted.join(", ")}${more}`;
+}
+
 /** Typed content-prep error, shared with the chunker so the message is single-source. */
 export const PDF_PREP_ERROR =
   "pdf content-prep not implemented in @kontourai/traverse@0.1.0 — deferred to a later regulated-document adoption slice";
@@ -234,20 +312,28 @@ export function createTurndownService(): TurndownService {
     hr: "---",
     emDelimiter: "*",
   });
-  // MARKDOWN_NOISE_ELEMENTS holds valid element names; the cast satisfies the
-  // @types/turndown `Filter` union (keyed on HTMLElementTagNameMap, which omits
-  // e.g. "svg") without narrowing our list to HTML-only tags.
-  td.remove(MARKDOWN_NOISE_ELEMENTS as unknown as TurndownService.Filter);
+  // Same rule as pruneMarkdownNoise, for input Turndown parses itself (a
+  // bodyless fragment) or a card converted on its own: a content-scoped
+  // element that pruning kept, or that sits inside article/main, survives.
+  const noise = new Set(MARKDOWN_NOISE_ELEMENTS.map((tag) => tag.toUpperCase()));
+  td.remove((node) => {
+    const name = node.nodeName.toUpperCase();
+    if (!noise.has(name)) return false;
+    if (!CONTENT_SCOPED_CHROME.has(name)) return true;
+    return !node.hasAttribute(KEPT_ATTRIBUTE) && !insideContentScope(node as unknown as PruneNode);
+  });
   return td;
 }
 
 /** Parse HTML into a linkedom document with noise subtrees removed in place. */
 export function parseAndPrune(html: string): ReturnType<typeof parseHTML>["document"] {
+  return parseAndPruneWithNotes(html).document;
+}
+
+function parseAndPruneWithNotes(html: string): { document: ReturnType<typeof parseHTML>["document"]; pruned: string[] } {
   const { document } = parseHTML(html);
-  for (const tag of MARKDOWN_NOISE_ELEMENTS) {
-    for (const el of document.querySelectorAll(tag)) el.remove();
-  }
-  return document;
+  const pruned = pruneMarkdownNoise(document);
+  return { document, pruned };
 }
 
 /** Collapse Turndown output: drop trailing spaces, cap blank-line runs, trim, truncate. */
@@ -266,14 +352,19 @@ export function collapseMarkdown(md: string, maxChars: number = DEFAULT_MAX_CHAR
  * structure. This is the default prep for `"html"` content.
  */
 export function htmlToMarkdown(html: string, maxChars: number = DEFAULT_MAX_CHARS): string {
-  const document = parseAndPrune(html);
+  return htmlToMarkdownWithNotes(html, maxChars).text;
+}
+
+/** {@link htmlToMarkdown} plus the text of the page-chrome elements it pruned. */
+function htmlToMarkdownWithNotes(html: string, maxChars: number): { text: string; pruned: string[] } {
+  const { document, pruned } = parseAndPruneWithNotes(html);
   const td = createTurndownService();
   // linkedom only populates `body` for a well-formed document; for a bodyless
   // fragment (e.g. "<p>x</p>") it hoists the first element to documentElement and
   // leaves body empty. In that case hand the raw string to Turndown, whose own
   // parser handles fragments (and its remove() filter still prunes noise).
   const source = document.body && document.body.innerHTML.length > 0 ? document.body.innerHTML : html;
-  return collapseMarkdown(td.turndown(source), maxChars);
+  return { text: collapseMarkdown(td.turndown(source), maxChars), pruned };
 }
 
 /**
@@ -328,6 +419,7 @@ export function prepareContent(
     // shell. Truncation happens after conversion, so preparing at the larger cap
     // costs the same conversion work and leaves the returned `text` identical.
     let full: string;
+    let pruneNote: string | undefined;
     if (mode === "text") {
       full = htmlToText(content, SHELL_INSPECT_CAP);
     } else {
@@ -335,7 +427,9 @@ export function prepareContent(
       // HTML (e.g. pathological nesting overflowing the stack) degrades to the
       // regex text strip rather than propagating — mirroring prepareAndChunk.
       try {
-        full = htmlToMarkdown(content, SHELL_INSPECT_CAP);
+        const converted = htmlToMarkdownWithNotes(content, SHELL_INSPECT_CAP);
+        full = converted.text;
+        pruneNote = prunedTextWarning("markdown prep", "page-chrome element", converted.pruned);
       } catch {
         full = htmlToText(content, SHELL_INSPECT_CAP);
       }
@@ -344,7 +438,8 @@ export function prepareContent(
     // Harvest embedded state (JSON-LD / __NEXT_DATA__ / hydration) from the raw
     // HTML before scripts were stripped, and flag a JS-shell shape against the
     // FULL prepared text — both surface on the prep result. See src/embedded.ts.
-    const { embedded, warnings } = inspectHtml(content, full);
+    const { embedded, warnings: inspectWarnings } = inspectHtml(content, full);
+    const warnings = pruneNote === undefined ? inspectWarnings : [pruneNote, ...inspectWarnings];
     const result: { text: string; embedded?: EmbeddedState; warnings?: string[] } = { text };
     if (embedded) result.embedded = embedded;
     if (warnings.length > 0) result.warnings = warnings;

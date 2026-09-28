@@ -481,6 +481,20 @@ export interface ProviderExtractionOutput {
    * `ExtractionResult.warnings` alongside its own normalization warnings.
    */
   warnings?: string[];
+  /**
+   * `true` when the answer stopped at the output cap, so proposals may be
+   * missing; `false` when the adapter knows it did not. When absent,
+   * `extract()` falls back to a warning that starts with
+   * `"response truncated at maxTokens"`. The bundled adapters always set it.
+   */
+  truncated?: boolean;
+  /**
+   * `true` when the provider returned no extraction tool/function call, so
+   * nothing was answered; `false` when it did. When absent, `extract()` falls
+   * back to a warning that starts with `"provider returned no extraction tool
+   * call"` (or `function call`). The bundled adapters always set it.
+   */
+  missingToolCall?: boolean;
 }
 
 /** One positional result from a provider-native physical batch operation. */

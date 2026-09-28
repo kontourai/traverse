@@ -34,11 +34,13 @@
 
 import { parseHTML } from "linkedom";
 import {
-  MARKDOWN_NOISE_ELEMENTS,
   binaryPrepError,
   collapseMarkdown,
   createTurndownService,
   htmlToText,
+  insideContentScope,
+  pruneMarkdownNoise,
+  prunedTextWarning,
   vttToText,
   PDF_PREP_ERROR,
   type PrepMode,
@@ -357,21 +359,8 @@ const CHROME_ROLES = new Set(["navigation", "banner", "contentinfo"]);
  */
 const CHROME_REMNANT_MAX_CHARS = 32;
 
-/** Elements whose descendants' landmark roles are scoped to content, not page chrome. */
-const CONTENT_SCOPES = new Set(["ARTICLE", "MAIN"]);
 /** Links that carry a contact value rather than navigate. */
 const CONTACT_HREF = /^\s*(?:tel|mailto|sms):/i;
-/** At most this many pruned blocks are quoted in the warning, each cut to... */
-const PRUNED_QUOTE_MAX_BLOCKS = 5;
-/** ...this many characters. */
-const PRUNED_QUOTE_MAX_CHARS = 60;
-
-function insideContentScope(el: El): boolean {
-  for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    if (CONTENT_SCOPES.has(parent.tagName.toUpperCase()) || parent.getAttribute("role")?.toLowerCase() === "main") return true;
-  }
-  return false;
-}
 
 /**
  * Remove chrome that the element-name pruning misses from the page text
@@ -399,7 +388,7 @@ function pruneOutsideChrome(body: El, marker: string): string[] {
   for (const el of elements) {
     if (!body.contains(el) || (el.textContent ?? "").includes(marker)) continue;
     const role = el.getAttribute("role")?.toLowerCase();
-    if (role && CHROME_ROLES.has(role) && !insideContentScope(el)) {
+    if (role && CHROME_ROLES.has(role) && !insideContentScope(el as unknown as Parameters<typeof insideContentScope>[0])) {
       remove(el);
       continue;
     }
@@ -420,13 +409,7 @@ function pruneOutsideChrome(body: El, marker: string): string[] {
 
 /** The warning naming the navigation-like text pruned outside the card container. */
 function prunedWarning(pruned: string[]): string | undefined {
-  if (pruned.length === 0) return undefined;
-  const chars = pruned.reduce((n, text) => n + text.length, 0);
-  const quoted = pruned.slice(0, PRUNED_QUOTE_MAX_BLOCKS).map((text) =>
-    JSON.stringify(text.length > PRUNED_QUOTE_MAX_CHARS ? `${text.slice(0, PRUNED_QUOTE_MAX_CHARS)}…` : text));
-  const more = pruned.length > PRUNED_QUOTE_MAX_BLOCKS ? `, and ${pruned.length - PRUNED_QUOTE_MAX_BLOCKS} more` : "";
-  return `structural prep pruned ${pruned.length} navigation-like block${pruned.length === 1 ? "" : "s"} ` +
-    `outside the card container (${chars} chars): ${quoted.join(", ")}${more}`;
+  return prunedTextWarning("structural prep", "navigation-like block", pruned, " outside the card container");
 }
 
 /**
@@ -587,9 +570,8 @@ export function prepareAndChunk(
   // html + markdown: try structural, degrade gracefully on any DOM/convert error
   try {
     const doc = parseHTML(content).document as unknown as Doc;
-    for (const tag of MARKDOWN_NOISE_ELEMENTS) {
-      for (const el of doc.querySelectorAll(tag)) el.remove();
-    }
+    const noiseNote = prunedTextWarning("markdown prep", "page-chrome element", pruneMarkdownNoise(doc));
+    if (noiseNote !== undefined) warnings.push(noiseNote);
 
     const group = findRepeatedCards(doc);
     if (group && group.cards.length >= MIN_CARDS) {

@@ -166,6 +166,8 @@ const PARTIAL_REASONS = new Set([
   "cancelled", "max-provider-calls", "max-total-tokens", "max-chunks",
   "provider-failure", "content-truncated", "output-truncated",
 ]);
+/** Partial reasons meaning a dispatched chunk was not (fully) read or answered. */
+const LOSS_PARTIAL_REASONS = new Set<string>(["provider-failure", "content-truncated", "output-truncated"]);
 const COVERAGE_STATUSES = new Set<ExtractionCoverageStatus>(["complete", "unread", "output-truncated"]);
 const COVERAGE_REASONS = new Set<ExtractionCoverageReason>(["provider-failure", "content-truncated", "missing-tool-call", "not-dispatched"]);
 const FAILURE_KINDS = new Set(["authentication", "rate-limit", "timeout", "invalid-request", "unavailable", "unknown"]);
@@ -334,11 +336,13 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   // envelope can tell a failed chunk from a truncated output or dispatch.
   if (/^chunk \d+\/\d+ provider call failed/.test(warning)) return { category: "provider", code: "chunk-provider-failure" };
   if (/^chunk \d+\/\d+ content truncated at maxContentChars/.test(warning)) return { category: "limit", code: "content-truncated-at-dispatch" };
-  if (/response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
-  if (/provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
+  // Only the located form extract() writes when it records the loss on a
+  // chunk, so these codes never appear on an envelope whose outcome ignores it.
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): response truncated at maxTokens/.test(warning)) return { category: "provider", code: "output-truncated" };
+  if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
   if (/provider call failed|^response truncated|^provider returned/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
-  if (/^structural prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
+  if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
   if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
   if (/chunked into/.test(warning)) return { category: "content", code: "content-chunking" };
   if (/js-shell|embedded-state|markdown preparation|extractor-reported|pdfLayout|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
@@ -464,8 +468,12 @@ function validateResult(input: unknown): PortableExtractionResult {
   if (result.outcome.status === "partial" && result.outcome.reason !== result.partial?.reason) {
     fail("result.outcome.reason must match result.partial.reason");
   }
-  if (result.outcome.status === "success" && result.coverage?.some((entry) => entry.status !== "complete")) {
+  const lost = result.coverage?.some((entry) => entry.status !== "complete") ?? false;
+  if (result.outcome.status === "success" && lost) {
     fail("result.coverage has a range that was not read or answered, but result.outcome is success");
+  }
+  if (result.outcome.status === "partial" && LOSS_PARTIAL_REASONS.has(result.outcome.reason) && !lost) {
+    fail(`result.outcome.reason ${result.outcome.reason} requires a result.coverage entry that was not read or answered`);
   }
   return result;
 }
@@ -565,6 +573,17 @@ function validateCoverage(input: unknown, artifact: PreparedArtifact | undefined
   // Ranges may overlap (adjacent chunks share chunkOverlap) but must be ordered.
   if (entries.some((entry, index) => index > 0 && entry.start < entries[index - 1].start)) {
     fail("result.coverage entries must be ordered by start");
+  }
+  // One entry per chunk, except a chunk cut at maxContentChars: its sent part
+  // and its unread/content-truncated tail, which starts where the sent part ends.
+  const byChunk = new Map<number, PortableExtractionCoverageEntry[]>();
+  for (const entry of entries) byChunk.set(entry.chunk, [...(byChunk.get(entry.chunk) ?? []), entry]);
+  for (const [chunk, group] of byChunk) {
+    if (group.length === 1) continue;
+    const [sent, tail] = group;
+    const cutPair = group.length === 2 && tail.status === "unread" && tail.reason === "content-truncated" &&
+      sent.reason !== "content-truncated" && tail.start === sent.end;
+    if (!cutPair) fail(`result.coverage has more than one entry for chunk ${chunk} that is not a sent part and its content-truncated tail`);
   }
   return entries;
 }

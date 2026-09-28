@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { extract, prepareAndChunk, serializePortableExtractionResult } from "../src/index.js";
+import { extract, htmlToMarkdown, prepareAndChunk, prepareContent, serializePortableExtractionResult } from "../src/index.js";
 import type { ExtractionProvider, TargetFieldSchema } from "../src/index.js";
 
 // Structural prep prunes navigation-like blocks from the page text outside the
@@ -84,6 +84,66 @@ describe("structural prep keeps content outside the card container, or names wha
       sourceRef: "s", contentType: "html", targetSchema, provider,
       content: page(`<div role="navigation">Landmark block text</div>`),
     });
+    const envelope = JSON.parse(serializePortableExtractionResult(result));
+    assert.deepEqual(envelope.result.warningClassifications, [{ category: "preparation", code: "navigation-pruned" }]);
+  });
+});
+
+describe("markdown prep keeps header/footer/aside/form inside article/main, and names page chrome it prunes", () => {
+  const chromeWarnings = (warnings: string[] = []) => warnings.filter((w) => w.startsWith("markdown prep pruned "));
+  const articlePage = `<!DOCTYPE html><html><body><header><p>Site banner text</p></header><article><header><h1>Engineer</h1><p>Salary $180k–$220k</p></header><p>Body text about the role.</p><footer><p>Posted 2026-09-01</p></footer></article></body></html>`;
+
+  it("keeps an article's header and footer on the whole-page path, and names the page header it pruned", () => {
+    const r = prepareAndChunk(articlePage, "html");
+    assert.equal(r.structural, false);
+    assert.ok(r.fullText.includes("Salary $180k–$220k"), r.fullText);
+    assert.ok(r.fullText.includes("Posted 2026-09-01"), r.fullText);
+    assert.ok(!r.fullText.includes("Site banner text"), r.fullText);
+    assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 1 page-chrome element (16 chars): "Site banner text"']);
+  });
+
+  for (const tag of ["header", "footer", "aside", "form"]) {
+    it(`keeps a <${tag}> inside <main>`, () => {
+      const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><${tag}><p>Fee $40 per class</p></${tag}><p>Main body.</p></main></body></html>`, "html");
+      assert.ok(r.fullText.includes("Fee $40 per class"), r.fullText);
+      assert.deepEqual(chromeWarnings(r.warnings), []);
+    });
+  }
+
+  it("keeps a header inside a card that sits in <main>, although each card is converted on its own", () => {
+    const cardsWithHeaders = Array.from({ length: 4 }, (_, i) =>
+      `<div class="card"><header><h3>Role ${i + 1}</h3><p>Pay $${i + 1}00</p></header><p>Details ${i + 1}.</p></div>`).join("");
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><main><section>${cardsWithHeaders}</section></main></body></html>`, "html");
+    assert.equal(r.structural, true);
+    for (let i = 1; i <= 4; i++) assert.ok(r.fullText.includes(`Pay $${i}00`), r.fullText);
+  });
+
+  it("names pruned nav, page header and footer on the structural path too", () => {
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><nav>Home Products</nav><h1>T</h1><ul class="list">${cards}</ul><footer>Copyright line</footer></body></html>`, "html");
+    assert.equal(r.structural, true);
+    assert.deepEqual(chromeWarnings(r.warnings), ['markdown prep pruned 2 page-chrome elements (27 chars): "Home Products", "Copyright line"']);
+  });
+
+  it("does not warn for scripts and styles, which hold no page text", () => {
+    const r = prepareAndChunk(`<!DOCTYPE html><html><body><script>var x = 1;</script><style>p{}</style><p>Body.</p></body></html>`, "html");
+    assert.deepEqual(chromeWarnings(r.warnings), []);
+  });
+
+  it("prepareContent and htmlToMarkdown apply the same rule", () => {
+    const prepared = prepareContent(articlePage, "html");
+    assert.ok(prepared.text?.includes("Salary $180k–$220k"), String(prepared.text));
+    assert.deepEqual(chromeWarnings(prepared.warnings), ['markdown prep pruned 1 page-chrome element (16 chars): "Site banner text"']);
+    assert.ok(htmlToMarkdown(articlePage).includes("Salary $180k–$220k"));
+  });
+
+  it("a bodyless fragment converted by Turndown directly keeps an article's header", () => {
+    assert.ok(htmlToMarkdown(`<article><header><p>Salary $90k</p></header><p>Role.</p></article>`).includes("Salary $90k"));
+    assert.ok(!htmlToMarkdown(`<header><p>Site banner</p></header><p>Role.</p>`).includes("Site banner"));
+  });
+
+  it("classifies the chrome warning on the envelope as navigation-pruned", async () => {
+    const provider: ExtractionProvider = { name: "p", async extract() { return { proposals: [], raw: { response: "", model: "m" } }; } };
+    const result = await extract({ sourceRef: "s", contentType: "html", targetSchema: [{ path: "title", type: "string" }], provider, content: articlePage });
     const envelope = JSON.parse(serializePortableExtractionResult(result));
     assert.deepEqual(envelope.result.warningClassifications, [{ category: "preparation", code: "navigation-pruned" }]);
   });

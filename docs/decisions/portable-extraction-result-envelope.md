@@ -92,9 +92,26 @@ Entries are ordered by `start` and may overlap (adjacent chunks share
 `chunkOverlap`). An `unread` entry covers exactly the unread span, so a chunk
 cut at `maxContentChars` has a `complete` (or other) entry for the sent part and
 an `unread`/`content-truncated` entry for the tail. `reason` is present exactly
-on `unread` entries. The validator requires `result.preparedArtifact`,
-`0 <= start < end <= contentLength`, ascending `start`, and rejects a
-non-`complete` entry on a `success` outcome.
+on `unread` entries. An answer core cannot use (no proposals array, or
+normalization threw) is `unread`/`provider-failure`, like a failed call.
+
+Coverage describes the prepared text only. Structural chunking drops a whole
+outside-text segment beyond `maxChunks` before the prepared text is built, so
+that text has no range: only `partial.reason: "max-chunks"` records the loss.
+Coverage of a success outcome is therefore not required to span
+`[0, contentLength)`; structural segments are also joined by two-character
+separators that no chunk covers.
+
+The validator requires `result.preparedArtifact`,
+`0 <= start < end <= contentLength`, ascending `start`, and at most one entry
+per chunk except a sent part followed by its `unread`/`content-truncated` tail
+starting where the sent part ends. It rejects a non-`complete` entry on a
+`success` outcome, and a loss reason (`provider-failure`, `content-truncated`,
+`output-truncated`) without a non-`complete` entry.
+
+The `output-truncated` and `missing-tool-call` warning codes are given only to
+the chunk-located warning `extract()` writes when it records that loss, so they
+never appear beside an outcome that ignores it.
 
 The serializer emits `coverage` only on a `partial` outcome. A run that read
 everything therefore serializes exactly as it did before coverage existed, and

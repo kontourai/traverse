@@ -100,6 +100,34 @@ describe("partial outcome and coverage for chunk losses", () => {
     assert.deepEqual(envelope.result.coverage, [{ chunk: 1, start: 0, end: 7, status: "unread", reason: "missing-tool-call" }]);
   });
 
+  it("an answer that is not a proposals array leaves the chunk unread/provider-failure", async () => {
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) {
+        return input.chunkIndex === 1 ? { proposals: "garbage" as never, raw: { response: "", model: "m" } } : empty;
+      },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+    const envelope = envelopeOf(result);
+    assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
+    assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "provider-failure" });
+  });
+
+  it("an answer whose normalization throws leaves the chunk unread/provider-failure", async () => {
+    const hostile = Object.defineProperty({}, "fieldPath", { enumerable: true, get() { throw new Error("hostile getter"); } });
+    const provider: ExtractionProvider = {
+      name: "p",
+      async extract(input) {
+        return input.chunkIndex === 1 ? { proposals: [hostile] as never, raw: { response: "", model: "m" } } : empty;
+      },
+    };
+    const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider });
+    assert.ok(result.warnings?.includes("chunk 2/3 normalization failed: hostile getter"), JSON.stringify(result.warnings));
+    const envelope = envelopeOf(result);
+    assert.deepEqual(envelope.result.outcome, { status: "partial", reason: "provider-failure" });
+    assert.deepEqual(envelope.result.coverage?.[1], { chunk: 2, start: 11800, end: 23800, status: "unread", reason: "provider-failure" });
+  });
+
   it("the first loss in prepared-text order is the reason when several chunks lose text", async () => {
     // Chunks 1 and 2 are cut at dispatch, and chunk 2's call also fails: the
     // cut tail of chunk 1 comes first.
@@ -178,6 +206,50 @@ describe("partial outcome and coverage for chunk losses", () => {
   });
 });
 
+describe("typed output-cap and missing-tool-call signals", () => {
+  const codes = (result: ExtractionResult) => (envelopeOf(result).result.warningClassifications ?? []).map((w) => w.code);
+  const withOutput = (extra: Record<string, unknown>): ExtractionProvider => ({
+    name: "p", async extract() { return { ...empty, ...extra }; },
+  });
+  const run = (provider: ExtractionProvider) => extract({ sourceRef: "s", contentType: "text", targetSchema, content: "Fee: 5.", provider });
+
+  it("a custom warning that merely contains the truncation text is neither a loss nor an output-truncated code", async () => {
+    const result = await run(withOutput({ warnings: ["my-adapter: response truncated at maxTokens; proposals may be incomplete"] }));
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "success" });
+    assert.ok(!codes(result).includes("output-truncated"), JSON.stringify(codes(result)));
+  });
+
+  it("truncated: true with no warning records the loss and writes the located warning", async () => {
+    const result = await run(withOutput({ truncated: true }));
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "partial", reason: "output-truncated" });
+    assert.deepEqual(result.warnings, ["chunk 1/1 (chars:0-7): response truncated at maxTokens; proposals may be incomplete"]);
+    assert.deepEqual(codes(result), ["output-truncated"]);
+  });
+
+  it("truncated: false overrides a matching warning, and the warning is not classified as a loss", async () => {
+    const result = await run(withOutput({ truncated: false, warnings: ["response truncated at maxTokens; proposals may be incomplete"] }));
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "success" });
+    assert.deepEqual(codes(result), ["provider-warning"]);
+  });
+
+  it("missingToolCall: true with no warning records the loss and writes the located warning", async () => {
+    const result = await run(withOutput({ missingToolCall: true }));
+    assert.deepEqual(envelopeOf(result).result.outcome, { status: "partial", reason: "provider-failure" });
+    assert.deepEqual(result.warnings, ["chunk 1/1 (chars:0-7): provider returned no extraction tool call"]);
+    assert.deepEqual(codes(result), ["missing-tool-call"]);
+  });
+
+  it("the bundled adapters set the typed signals", async () => {
+    const truncated = await relayProvider({ stopReason: "max_tokens", toolCalls: [{ id: "1", name: "submit_extraction_proposals", input: { proposals: [] } }] })
+      .extract({ content: "c", contentType: "text", targetSchema });
+    assert.equal(truncated.truncated, true);
+    assert.equal(truncated.missingToolCall, false);
+    const missing = await relayProvider({ stopReason: "end_turn", outputText: "no call" }).extract({ content: "c", contentType: "text", targetSchema });
+    assert.equal(missing.truncated, false);
+    assert.equal(missing.missingToolCall, true);
+  });
+});
+
 describe("portable envelope coverage validation", () => {
   async function partialEnvelope() {
     const result = await extract({ sourceRef: "s", contentType: "text", targetSchema, content: threeChunks, provider: failingCalls(2) });
@@ -188,6 +260,16 @@ describe("portable envelope coverage validation", () => {
     assert.equal(validation.status, "invalid");
     return (validation as { reason: string }).reason;
   }
+
+  it("accepts a chunk's sent part followed by its content-truncated tail", async () => {
+    const result = await extract({
+      sourceRef: "s", contentType: "text", targetSchema, content: "x".repeat(30000), provider: failingCalls(),
+      chunkSize: 30000, maxContentChars: 20000,
+    });
+    const envelope = JSON.parse(serializePortableExtractionResult(result));
+    assert.equal(envelope.result.coverage.length, 2);
+    assert.equal(validatePortableExtractionResultEnvelope(envelope).status, "valid");
+  });
 
   it("accepts every new partial reason", async () => {
     for (const reason of ["provider-failure", "content-truncated", "output-truncated"]) {
@@ -214,6 +296,16 @@ describe("portable envelope coverage validation", () => {
       e.result.outcome = { status: "success" };
       delete e.result.partial;
     }, /outcome is success/],
+    ["a loss reason with every entry complete", (c) => {
+      c[1].status = "complete";
+      delete c[1].reason;
+    }, /requires a result\.coverage entry that was not read or answered/],
+    ["a loss reason with no coverage", (_c, e) => { delete e.result.coverage; }, /requires a result\.coverage entry that was not read or answered/],
+    ["two entries for one chunk", (c) => { c[2].chunk = 2; }, /more than one entry for chunk 2/],
+    ["a content-truncated tail that does not start where the sent part ends", (c) => {
+      c[1].chunk = 1;
+      c[1].reason = "content-truncated";
+    }, /more than one entry for chunk 1/],
   ];
   for (const [name, mutate, expected] of cases) {
     it(`rejects ${name}`, async () => {

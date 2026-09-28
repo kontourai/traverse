@@ -464,6 +464,8 @@ export function createAnthropicExtractionProvider(
           tokensUsed: message.usage.input_tokens + message.usage.output_tokens,
         },
         ...(warnings.length > 0 ? { warnings } : {}),
+        truncated: message.stop_reason === "max_tokens",
+        missingToolCall: toolInput === undefined,
       };
     },
   };

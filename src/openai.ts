@@ -73,11 +73,15 @@ export function createOpenAIExtractionProvider(opts: OpenAIAdapterOptions = {}):
       } else warnings.push("provider returned no extraction tool call");
       const parsed = parseProposals(rawInput, name, input.contentType);
       warnings.push(...parsed.warnings);
-      if (response.choices[0]?.finish_reason === "length") warnings.push("response truncated at maxTokens; proposals may be incomplete");
+      const truncated = response.choices[0]?.finish_reason === "length";
+      if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
       return {
         proposals: parsed.proposals,
         raw: { response: call?.function.arguments ?? "", model: response.model || model, modelSource: response.model ? "provider-reported" : "configured", tokensUsed: response.usage?.total_tokens ?? ((response.usage?.prompt_tokens ?? 0) + (response.usage?.completion_tokens ?? 0)) },
         ...(warnings.length ? { warnings } : {}),
+        truncated,
+        // Unparseable arguments leave nothing answered, like a missing call.
+        missingToolCall: rawInput === undefined,
       };
     },
   };
