@@ -7,6 +7,10 @@ evidence:
     ref: docs/adr/0001-proposals-only.md
   - kind: doc
     ref: .kontourai/flow-agents/inference-type/inference-type--deliver-plan.md
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/170
+  - kind: doc
+    ref: src/evidence-match.ts
 ---
 
 # Extraction proposals
@@ -82,24 +86,132 @@ positive or negative):
    honest "offset-grounded value" vs. "derived value, excerpt-grounded only"
    badge; a caller who does not read it observes nothing different at all.
 
+## Evidence annotations (`evidenceMatch`)
+
+`extract()` sets `evidenceMatch` on every proposal it returns: deterministic,
+versioned facts computed from the proposal's own value, schema entry and
+excerpt. It is an annotation, not a verdict. No proposal is dropped, warned
+about, clamped or reordered because of it, the `[AC6]` test above is
+unchanged, and a provider-supplied `evidenceMatch` is ignored. Traverse
+computes only these deterministic checks; checking a value with a model is
+not Traverse's job, and no Traverse confidence is derived from them.
+
+```ts
+evidenceMatch: {
+  checkerVersion: "evidence-match-v4";
+  schema: "ok" | "type-mismatch" | "enum-mismatch" | "format-invalid";
+  valueInExcerpt: "match" | "mismatch" | "not-evaluated" | "not-applicable";
+  tokenBoundary?: boolean;
+}
+```
+
+- **`schema`** is exact. The value's JSON type must be the declared `type`
+  (the same predicate task examples use); an `enum` string outside
+  `enumValues` is `enum-mismatch`; a `date` string that is not an ISO-8601
+  calendar date in extended format (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`,
+  optionally `THH:MM[:SS[.fff]]` and `Z` or `±HH:MM`, each component
+  range-checked) is `format-invalid`. An `enum` that declares no
+  `enumValues` has no set to be outside of and is checked as a string.
+- **`valueInExcerpt`** runs only for fields declared
+  `inferenceType: "explicit"` with a scalar type. Inferred and unclassified
+  fields, and `array`/`object` fields, are `not-applicable`: only an explicit
+  value is meant to appear in the source. The rule for every type is
+  containment on token boundaries after a fixed normalization; equality is
+  not required, so `"open"` matches `"Status: Open"`.
+
+  **`match` means the value was found in the excerpt, not that the excerpt
+  supports it.** The checks are built so that a doubtful case is
+  `not-evaluated` rather than a false `match`:
+
+  - `string`/`enum`: NFKC and lower case. Whitespace and punctuation fold
+    away, except for punctuation that can change meaning: `+ - # %` attached
+    to a word or digit, and `. ,` between two of them. `match` needs the
+    value, with that punctuation, as a whole run of the excerpt (`"open"`
+    does not match `"Reopened"`; `"C++"` matches `"C++."`). When only the
+    words agree and that punctuation or a sign differs (`"A+"` vs
+    `"Grade: A-"`, `"C++"` vs `"C#"`, `"-5"` vs `"5"`, `"1.5"` vs `"1,5"`),
+    the result is `not-evaluated`. One exception: a phone-style value (only
+    digits, spaces and `( ) . - /`, at least seven digits in at least three
+    groups, no leading `-`) compares by its digit groups, so
+    `"303.555.1234"` matches `"(303) 555-1234"`. A signed value or one with
+    a single decimal separator (`"-1234567"`, `"1234567.89"`) does not.
+  - Negation, for string, enum, number and boolean values: when a cue
+    (`not`, `no`, `never`, `without`, `cannot`, `nor`, or a word ending in
+    `n't`) is in the three words before an occurrence of the value, the
+    result is `not-evaluated` (`"open"` vs `"no longer open"`, `5` vs
+    `"not 5"`). `No.` or `No:` directly before a digit is read as the
+    abbreviation for number, not as the word no (`"Ticket No. 5"`); plain
+    `no` before a digit stays a negation (`3` vs
+    `"There are no 3-bedroom units"`). Dates are not checked for negation.
+  - `number`: written numbers in the excerpt, each optionally signed and led
+    by a currency symbol, with comma thousands separators and a point
+    decimal, not touching a letter or digit (`3` is not read from `2023`).
+    Dates, times and fractions written in digits (`2026-06-09`, `10:30`,
+    `1/2`) are skipped, so `6` is not read from a date, and a number is
+    `not-evaluated` rather than `match` when only such a form contains it.
+    `match` when a number equals the value.
+    A number written at another scale or sign convention (`45%`, accounting
+    `(5)`, `$4.2 million`) neither matches nor mismatches: when no plainly
+    written number equals the value and one of these is present, the result
+    is `not-evaluated`.
+  - `boolean`: the words yes/true and no/false. `match` only when the
+    excerpt has the value's word, not negated, and no word of the other
+    polarity; `mismatch` only in the reverse case. `"This is not true"`,
+    `"no longer yes"` and `"Yes, no refunds"` are `not-evaluated`.
+  - `date`: the value must be `YYYY-MM-DD`; the excerpt is read for
+    `2026-06-09`, `June 9, 2026` and `9 June 2026` (English month names, full
+    or abbreviated, optional ordinal and comma). Numeric forms like
+    `06/09/2026` are ambiguous between day-first and month-first and are not
+    read.
+  - A value or excerpt the normalizer cannot read (a number written in
+    words, no yes/no word, no readable date, a value with no word
+    characters, a value of the wrong type) is `not-evaluated`, never
+    `mismatch`.
+- **`tokenBoundary`** is false when the excerpt starts or ends inside a word
+  of the prepared text (the excerpt `"3"` located inside `"2023"`).
+
+**Known false matches that remain.** The checks are lexical, so `match` can
+still appear where the excerpt does not support the value:
+
+- a negation more than three words before the value, or after it
+  (`"open, but not this week"`);
+- contrastive or hypothetical wording (`"formerly open"`, `"if open"`);
+- exclusion wording (`"excludes C"` matches `"C"`);
+- enum members that differ only in case (`"Open"` and `"open"` fold together);
+- a number in a different currency (`45` matches `"€45"` when the value
+  meant dollars);
+- digit groups read with different separators (`"1.234.567"` matches
+  `"Total 1,234.567"`);
+- a sign on the excerpt side of a phone-style value: the sign check covers
+  only the value (`"303-555-1234"` matches `"-303-555-1234"`).
+
+Changing any rule so that some input gets a different result changes
+`checkerVersion`, released or not. `evidence-match-v1` to
+`evidence-match-v3` were never released; `evidence-match-v4` is the first
+released version.
+
+**Recommended consumer policy.** A `schema` result other than `ok` can block
+by default, because it is exact. `valueInExcerpt` and `tokenBoundary` are
+annotations until the value-in-excerpt check's false-mismatch rate has been
+measured on a labelled set; after that a consumer may choose to block on
+`mismatch`. Do not read `match` as support: it says only that the value is
+written in the excerpt. `not-evaluated` and `not-applicable` say nothing about the value.
+The consumer decides what blocks; Traverse does not.
+
+The portable envelope carries `evidenceMatch` as an optional proposal key
+(see `portable-extraction-result-envelope.md`).
+
 ## Out of scope
 
 - **A stricter, `inferenceType === "explicit"`-gated "candidateValue must be
-  groundable in the excerpt" check** (opt-in via some future flag), deferred
-  as an explicit follow-up, not a silently-dropped TODO. Reasoning:
-  - Today, `candidateValue` passes through `normalizeChunkProposals`
-    completely unverified — only `provenance.excerpt` is checked against the
-    prepared text via `indexOf`. There is no existing normalization/
-    comparison utility for "does this value appear in this text," and
-    building one correctly is a much bigger, separate design problem:
-    `candidateValue` is typed per field (`"string" | "number" | "boolean" |
-    "date" | "enum" | "array" | "object"`) so a literal substring check
-    would need format-aware equivalence — number-vs-formatted-text (`45` vs
-    `"$45.00"`), date-vs-prose (`"2026-06-09"` vs `"June 9, 2026"`), and
-    whitespace/casing/punctuation folding for strings (`"(303) 555-1234"` vs
-    `"303.555.1234"`; `"123 Main St."` vs `"123 Main St"` inside a longer
-    address excerpt) — none of which today's strict, single-mechanism
-    `indexOf` excerpt check does or is designed to do.
+  groundable in the excerpt" check that drops proposals.** The annotation
+  above records the comparison without dropping anything ("Evidence
+  annotations", issue #170); a gate remains the consumer's choice. The
+  original reasons for not building a dropping check here still hold:
+  - Format-aware equivalence is heuristic. The normalizers above cover a
+    fixed set of forms and report anything else as `not-evaluated`; their
+    false-mismatch rate on real pages has not been measured, so dropping on
+    `mismatch` could remove well-grounded values.
   - The fields most likely to be tagged `"explicit"` in practice (address/
     zip/contact fields, money amounts) are exactly the ones most prone to
     formatting drift between a provider's returned value and the raw
@@ -111,10 +223,8 @@ positive or negative):
     `tests/extract.test.ts`'s `"inferenceType carry-through"` suite,
     `"[AC6] adds no new drop/warning/clamp condition..."`, which pins this
     exact no-op behavior for a reformatted phone number.)
-  - No test/spec exists yet for what "close enough" means for a stricter
-    check (locale-aware date parsing, number-format equivalence, casing/
-    whitespace folding rules) — inventing that scope inside this slice would
-    turn an additive field into a value-dropping gate with unreviewed
-    semantics.
+  - A gate needs a labelled evaluation set first; until one exists, blocking
+    on `valueInExcerpt` would turn an annotation into a value-dropping gate
+    with unmeasured error.
   - Downstream rendering of the explicit/inferred distinction in a review UI
     (e.g. Survey-side) is separate work, not attempted here.

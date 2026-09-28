@@ -20,16 +20,16 @@ importers:
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.116.0
-        version: 0.116.0(zod@4.2.0)
+        version: 0.116.0(zod@4.4.3)
       '@kontourai/flow-agents':
         specifier: 5.10.0
-        version: 5.10.0(typescript@7.0.2)(zod@4.2.0)
+        version: 5.10.0(typescript@7.0.2)(zod@4.4.3)
       '@kontourai/relay':
         specifier: ^0.6.0
-        version: 0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.2.0))
+        version: 0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
       '@kontourai/survey':
-        specifier: ^3.0.0
-        version: 3.0.0(typescript@7.0.2)
+        specifier: ^6.0.0
+        version: 6.0.0(typescript@7.0.2)
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
@@ -38,7 +38,7 @@ importers:
         version: 5.0.6
       openai:
         specifier: ^6.49.0
-        version: 6.49.0(zod@4.2.0)
+        version: 6.49.0(zod@4.4.3)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -311,8 +311,8 @@ packages:
       typescript:
         optional: true
 
-  '@kontourai/survey@3.0.0':
-    resolution: {integrity: sha512-pcSc4oHweLIrRX6UrpoYRIHk49xbaqrCMqTS+un+IhUIPgexdB8+Ni2wuumHHrdQgrq4HTGeo4OXARnpvF4r1g==}
+  '@kontourai/survey@6.0.0':
+    resolution: {integrity: sha512-0GikcgYLMJce1aNMPkPfzFEFpm71pj/XnfitrOd4pHvUBtu28zM0+BSYQLgR1FV4Cb+yGrJ4WtaGoQrpP/G13A==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -819,20 +819,23 @@ packages:
   zod@4.2.0:
     resolution: {integrity: sha512-Bd5fw9wlIhtqCCxotZgdTOMwGm1a0u75wARVEY9HMs1X17trvA/lMi4+MGK5EUfYkXVTbX8UDiDKW4OgzHVUZw==}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
-  '@anthropic-ai/sdk@0.116.0(zod@4.2.0)':
+  '@anthropic-ai/sdk@0.116.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
     optionalDependencies:
-      zod: 4.2.0
+      zod: 4.4.3
 
-  '@anthropic-ai/sdk@0.74.0(zod@4.2.0)':
+  '@anthropic-ai/sdk@0.74.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
-      zod: 4.2.0
+      zod: 4.4.3
     optional: true
 
   '@babel/runtime@7.29.7': {}
@@ -920,22 +923,22 @@ snapshots:
 
   '@kontourai/conduit@0.2.1': {}
 
-  '@kontourai/dispatch@0.3.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))':
+  '@kontourai/dispatch@0.3.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))':
     dependencies:
-      '@kontourai/relay': 0.2.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))
+      '@kontourai/relay': 0.2.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
-  '@kontourai/flow-agents@5.10.0(typescript@7.0.2)(zod@4.2.0)':
+  '@kontourai/flow-agents@5.10.0(typescript@7.0.2)(zod@4.4.3)':
     dependencies:
       '@kontourai/conduit': 0.2.1
-      '@kontourai/dispatch': 0.3.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))
+      '@kontourai/dispatch': 0.3.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))
       '@kontourai/flow': 3.9.0
-      '@kontourai/relay': 0.4.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))
+      '@kontourai/relay': 0.4.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))
       '@kontourai/survey': 2.0.0(typescript@7.0.2)
       esbuild: 0.28.1
     optionalDependencies:
-      '@anthropic-ai/sdk': 0.74.0(zod@4.2.0)
+      '@anthropic-ai/sdk': 0.74.0(zod@4.4.3)
       '@kontourai/surface': 2.13.0
       neo4j-driver: 5.28.3
     transitivePeerDependencies:
@@ -957,17 +960,17 @@ snapshots:
 
   '@kontourai/forage@0.5.1': {}
 
-  '@kontourai/relay@0.2.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))':
+  '@kontourai/relay@0.2.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))':
     optionalDependencies:
-      '@anthropic-ai/sdk': 0.74.0(zod@4.2.0)
+      '@anthropic-ai/sdk': 0.74.0(zod@4.4.3)
 
-  '@kontourai/relay@0.4.0(@anthropic-ai/sdk@0.74.0(zod@4.2.0))':
+  '@kontourai/relay@0.4.0(@anthropic-ai/sdk@0.74.0(zod@4.4.3))':
     optionalDependencies:
-      '@anthropic-ai/sdk': 0.74.0(zod@4.2.0)
+      '@anthropic-ai/sdk': 0.74.0(zod@4.4.3)
 
-  '@kontourai/relay@0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.2.0))':
+  '@kontourai/relay@0.6.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))':
     optionalDependencies:
-      '@anthropic-ai/sdk': 0.116.0(zod@4.2.0)
+      '@anthropic-ai/sdk': 0.116.0(zod@4.4.3)
 
   '@kontourai/surface@2.13.0':
     optionalDependencies:
@@ -984,11 +987,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@kontourai/survey@3.0.0(typescript@7.0.2)':
+  '@kontourai/survey@6.0.0(typescript@7.0.2)':
     dependencies:
       '@kontourai/surface': 2.13.0
       '@modelcontextprotocol/server': 2.0.0
-      zod: 4.2.0
+      zod: 4.4.3
     optionalDependencies:
       typescript: 7.0.2
     transitivePeerDependencies:
@@ -1426,9 +1429,9 @@ snapshots:
     dependencies:
       boolbase: 2.0.0
 
-  openai@6.49.0(zod@4.2.0):
+  openai@6.49.0(zod@4.4.3):
     optionalDependencies:
-      zod: 4.2.0
+      zod: 4.4.3
 
   p-map@7.0.6:
     optional: true
@@ -1531,3 +1534,5 @@ snapshots:
     optional: true
 
   zod@4.2.0: {}
+
+  zod@4.4.3: {}

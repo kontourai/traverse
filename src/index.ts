@@ -69,6 +69,7 @@ export type {
   ParsedPreparedArtifactRef,
 } from "./prepared-artifact.js";
 export { createExtractionTaskSpec, validateExtractionTaskSpec } from "./task.js";
+export { EVIDENCE_MATCH_CHECKER_VERSION } from "./evidence-match.js";
 export {
   EXTRACTION_CONFORMANCE_CAPABILITIES,
   unsupportedProviderCapability,
@@ -119,6 +120,9 @@ export type {
   ExtractionProposal,
   ExtractionProducedBy,
   ExtractionModelSource,
+  ExtractionEvidenceMatch,
+  ExtractionSchemaMatch,
+  ExtractionValueInExcerpt,
   EmbeddedState,
   RawProviderResponse,
   ExtractionResult,
