@@ -353,8 +353,10 @@ export interface ExtractionResult {
   extractedAt: string;
   /**
    * never throws for provider/parse failure — populated instead. Provider
-   * error text copied here (and into chunk warnings) is cut to 500 characters;
-   * `providerFailures[].message` keeps it whole.
+   * error text copied here (and into chunk warnings) is kept whole up to 500
+   * characters; longer text becomes its first 500 characters (one fewer when
+   * the 500th would split a surrogate pair) followed by `… (N chars)`, where N
+   * is the full length. `providerFailures[].message` keeps it whole.
    */
   error?: string;
   /** non-fatal notes: merged provider warnings + normalization notes (dropped/adjusted proposals). */

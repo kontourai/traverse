@@ -653,7 +653,13 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
     // preserves the single-shot contract: a 1-chunk page whose only provider
     // call throws is an error, not an empty success. Coverage and the
     // per-chunk warnings are kept.
+    const droppedChunksWarning = prepared.truncatedChunks > 0
+      ? `dropped ${prepared.truncatedChunks} chunk${prepared.truncatedChunks === 1 ? "" : "s"} beyond maxChunks; content truncated`
+      : undefined;
     if (chunksDispatched > 0 && chunksAnswered === 0) {
+      // A failure envelope carries no coverage, so this warning is how an
+      // envelope-only reader learns the run was also capped by maxChunks.
+      if (droppedChunksWarning) warnings.push(droppedChunksWarning);
       // The embedded-state sidecar is prep-derived, not provider-derived, so it
       // survives even when every provider call fails — a shell page with rich
       // `__NEXT_DATA__` is still extractable from the sidecar without a render.
@@ -694,10 +700,8 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
           : `chunked into ${chunks.length} chunks by character window`,
       );
     }
-    if (prepared.truncatedChunks > 0) {
-      warnings.push(
-        `dropped ${prepared.truncatedChunks} chunk${prepared.truncatedChunks === 1 ? "" : "s"} beyond maxChunks; content truncated`,
-      );
+    if (droppedChunksWarning) {
+      warnings.push(droppedChunksWarning);
       // Truncation is a partial stop, not routine chunking: the capped chunks
       // were never dispatched, so the run did not read the whole document —
       // the same honesty max-provider-calls already reports. An earlier stop

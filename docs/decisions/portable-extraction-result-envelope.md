@@ -21,6 +21,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/170
   - kind: issue
     ref: https://github.com/kontourai/traverse/issues/183
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/187
 ---
 
 # Portable extraction-result envelope
@@ -140,9 +142,10 @@ envelope-only reader can recognise them:
   reports `partial` with the stop's reason and no failure, because an early
   stop wins. The envelope says nothing was answered only through coverage:
   every dispatched range is `unread` (`provider-failure` or
-  `missing-tool-call`), the undispatched rest is `unread`/`not-dispatched`,
-  and the warning codes include `chunk-provider-failure`, `missing-tool-call`
-  or `unusable-answer`.
+  `missing-tool-call`), a dispatched chunk cut at `maxContentChars` also has
+  an `unread`/`content-truncated` tail, the undispatched rest is
+  `unread`/`not-dispatched`, and the warning codes include
+  `chunk-provider-failure`, `missing-tool-call` or `unusable-answer`.
   A reader that needs "was anything answered" should check coverage for a
   `complete` or `output-truncated` entry rather than rely on the outcome.
 - **`maxChunks` truncation and nothing answered.** `max-chunks` is not an
@@ -151,9 +154,10 @@ envelope-only reader can recognise them:
   `provider`/`no-usable-answer`. The in-process result's `coverage` lists the
   capped chunks' ranges (when their text is in the prepared artifact) as
   `unread`/`not-dispatched`. The envelope does not: the serializer emits
-  coverage only on a `partial` outcome and a failure has no `partial` reason,
-  so an envelope-only reader learns that nothing was answered but not that
-  the run was also capped.
+  coverage only on a `partial` outcome and a failure has no `partial` reason.
+  The run still writes the `dropped N chunks beyond maxChunks` warning, so an
+  envelope-only reader learns the run was also capped from the `limit`/
+  `content-truncated` warning classification.
 
 Coverage describes the prepared text only. Structural chunking drops a whole
 outside-text segment beyond `maxChunks` before the prepared text is built, so
