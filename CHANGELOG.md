@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.1](https://github.com/kontourai/traverse/compare/v3.0.0...v3.0.1) (2026-09-29)
+
+
+### Fixes
+
+* classify the maxChunks drop warning as max-chunks, not content-truncated ([#193](https://github.com/kontourai/traverse/issues/193)) ([af38d4a](https://github.com/kontourai/traverse/commit/af38d4af6fdde4b353b4c63199cf92f2ee92bab8)), closes [#191](https://github.com/kontourai/traverse/issues/191)
+* signal a maxChunks cap when nothing was answered; pin the provider-error bound ([#190](https://github.com/kontourai/traverse/issues/190)) ([5839875](https://github.com/kontourai/traverse/commit/583987511d28b15e8c04acbc181f60974ab4c834))
+
 ## [3.0.0](https://github.com/kontourai/traverse/compare/v2.0.0...v3.0.0) (2026-09-28)
 
 
