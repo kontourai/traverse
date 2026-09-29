@@ -148,6 +148,13 @@ export function parseAnySnapshotSourceRef(ref: string): ParsedAnySnapshotRef | u
  * `snapshotSha256`, which is a digest of the stored record rather than of the
  * captured bytes.
  *
+ * The body digests agree only when both sides hashed the same input. forage
+ * 1.0+ hashes a text capture's raw bytes; Traverse's fetcher hashes the UTF-8
+ * encoding of the text it decoded as UTF-8. They match for plain UTF-8 bodies,
+ * but not for a non-UTF-8 charset, a byte-order mark, or invalid UTF-8, so a
+ * cross-scheme comparison of such a capture returns false even when it is the
+ * same capture.
+ *
  * This exists so a consumer does not answer the question with `===`. Getting it
  * wrong is not a failed comparison; it is a forked lineage, and it fails
  * silently because both strings are individually valid.

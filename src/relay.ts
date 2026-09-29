@@ -129,7 +129,7 @@ function relayOutput(
   if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
   // Read as unknown: `modelSource` is optional in Relay's contract and
   // absent from runtimes that predate it, so only the two known values pass.
-  const modelSource: unknown = (result as { modelSource?: unknown }).modelSource;
+  const modelSource: unknown = result.modelSource;
   return {
     proposals: parsed.proposals,
     raw: {
