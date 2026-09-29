@@ -135,7 +135,13 @@ describe("documented outcomes when nothing was answered", () => {
     assert.deepEqual(envelope.result.outcome, { status: "failure", category: "provider", code: "provider-failure" });
     assert.equal(envelope.result.coverage, undefined);
     assert.ok(
-      envelope.result.warningClassifications.some((w: { category: string; code: string }) => w.category === "limit" && w.code === "content-truncated"),
+      envelope.result.warningClassifications.some((w: { category: string; code: string }) => w.category === "limit" && w.code === "max-chunks"),
+      JSON.stringify(envelope.result.warningClassifications),
+    );
+    // With no coverage on a failure, the classification is the only sign of
+    // the cap; it must not read as a maxContentChars cut.
+    assert.ok(
+      !envelope.result.warningClassifications.some((w: { code: string }) => w.code === "content-truncated"),
       JSON.stringify(envelope.result.warningClassifications),
     );
     const imported = importExtractionEnvelope(serializePortableExtractionResult(result), {

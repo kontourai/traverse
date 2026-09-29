@@ -294,8 +294,12 @@ describe("extract() cost guard — maxChunks interplay", () => {
     const parsed = deserializePortableExtractionResult(serializePortableExtractionResult(result));
     assert.deepEqual(parsed.result.outcome, { status: "partial", reason: "max-chunks" });
     assert.ok(
-      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "content-truncated"),
-      `expected a content-truncated classification, got: ${JSON.stringify(parsed.result.warningClassifications)}`,
+      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "max-chunks"),
+      `expected a max-chunks classification, got: ${JSON.stringify(parsed.result.warningClassifications)}`,
+    );
+    assert.ok(
+      !parsed.result.warningClassifications?.some((w) => w.code === "content-truncated"),
+      "no maxContentChars cut happened, so nothing classifies as content-truncated",
     );
     assert.ok(
       parsed.result.warningClassifications?.some((w) => w.category === "content" && w.code === "content-chunking"),
@@ -322,7 +326,7 @@ describe("extract() cost guard — maxChunks interplay", () => {
     assert.deepEqual(result.partial, { reason: "max-provider-calls", completedChunks: 2, remainingChunks: 4 });
     const parsed = deserializePortableExtractionResult(serializePortableExtractionResult(result));
     assert.ok(
-      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "content-truncated"),
+      parsed.result.warningClassifications?.some((w) => w.category === "limit" && w.code === "max-chunks"),
       "truncation stays visible in classifications even when another stop owns the reason",
     );
   });
