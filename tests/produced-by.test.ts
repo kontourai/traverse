@@ -31,7 +31,9 @@ function toolProposals(text: string): unknown {
 }
 
 function relayRuntime(
-  respond: (request: ModelInvocationRequest, call: number) => Partial<ModelInvocationResult> & Record<string, unknown>,
+  // modelSource is left open so a fixture can stand in for a runtime that
+  // reports a value outside Relay's contract (third-party or older runtimes).
+  respond: (request: ModelInvocationRequest, call: number) => Omit<Partial<ModelInvocationResult>, "modelSource"> & Record<string, unknown>,
 ): ModelRuntime & { requests: ModelInvocationRequest[] } {
   const requests: ModelInvocationRequest[] = [];
   return {

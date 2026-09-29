@@ -1,35 +1,37 @@
 import { createHash } from "node:crypto";
-import type { CrawlManifest, Page } from "@kontourai/forage";
+import { decodeTextBody, parseDeclaredCharset } from "@kontourai/forage";
+import type { CrawlManifest, Page, Snapshot } from "@kontourai/forage";
+import { buildSnapshotSourceRef } from "@kontourai/forage/fetch";
 
 export const FORAGE_REPLAY_BODY = "<h1>Sample heading</h1><p>Requested detail.</p>";
 
-function digest(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-/** Generic byte-stable page fixture shaped exactly like a Forage replay manifest. */
+/**
+ * Generic byte-stable page fixture shaped like a Forage replay manifest. The
+ * text snapshot fields (bytes, declared charset, decoded body, byte hash) and
+ * the durable sourceRef come from Forage's own exported builders, so the
+ * fixture follows Forage's current record format instead of a hand copy.
+ */
 export function createForageReplayManifest(): CrawlManifest {
-  const bodyHash = digest(FORAGE_REPLAY_BODY);
-  const snapshot = {
+  const headers = { "content-type": "text/html; charset=utf-8" };
+  const bytes = new TextEncoder().encode(FORAGE_REPLAY_BODY);
+  const declaredCharset = parseDeclaredCharset(headers["content-type"]).charset;
+  const snapshot: Snapshot = {
     sourceId: "generic-source",
     url: "https://example.test/generic",
     status: 200,
     fetchedAt: "2026-07-20T00:00:00.000Z",
-    body: FORAGE_REPLAY_BODY,
-    bodyHash,
-    headers: { "content-type": "text/html; charset=utf-8" },
+    body: decodeTextBody(bytes, declaredCharset).text,
+    bytes,
+    declaredCharset,
+    bodyHash: createHash("sha256").update(bytes).digest("hex"),
+    headers,
   };
-  const params = new URLSearchParams({
-    url: snapshot.url,
-    sha256: snapshot.bodyHash,
-    fetchedAt: snapshot.fetchedAt,
-  });
   const page: Page = {
     url: snapshot.url,
     status: snapshot.status,
     body: snapshot.body,
     snapshot,
-    sourceRef: `forage-snapshot:${encodeURIComponent(snapshot.sourceId)}?${params.toString()}`,
+    sourceRef: buildSnapshotSourceRef(snapshot),
     depth: 0,
     rendered: false,
     warnings: [],
