@@ -365,7 +365,9 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
   if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
-  if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "content-truncated" };
+  // The chunk cap, not the maxContentChars cut: `content-truncated` names only
+  // the latter elsewhere in the envelope, so this matches the partial reason.
+  if (/beyond maxChunks/.test(warning)) return { category: "limit", code: "max-chunks" };
   if (/chunked into/.test(warning)) return { category: "content", code: "content-chunking" };
   if (/js-shell|embedded-state|markdown preparation|extractor-reported|pdfLayout|OCR/i.test(warning)) return { category: "preparation", code: "content-preparation-warning" };
   return { category: "other", code: "unclassified-warning" };

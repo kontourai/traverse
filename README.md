@@ -689,7 +689,9 @@ truncation and a missing tool call each produce a warning naming the chunk
 not read or not fully answered. In the portable envelope each keeps its own
 warning code — `chunk-provider-failure`, `content-truncated-at-dispatch`,
 `output-truncated`, `missing-tool-call` — though the range itself does not
-travel and the outcome stays `success`.
+travel and the outcome stays `success`. Chunks dropped by the `maxChunks` cap
+classify as `limit`/`max-chunks`, matching the partial reason;
+`content-truncated` names only the `maxContentChars` cut.
 For tests, inject a client: `createAnthropicExtractionProvider({ client })`.
 
 ## Provider conformance and additional adapters
