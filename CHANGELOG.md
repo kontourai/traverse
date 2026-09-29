@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.0.0](https://github.com/kontourai/traverse/compare/v3.0.1...v4.0.0) (2026-09-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** crawlAndExtract passes forage 1.0 output through. Each page's sourceRef (and so each prepared artifact's sourceSnapshotRef and ref) differs from a forage 0.x capture of the same response, and a page served with a non-UTF-8 charset, a byte-order mark, or invalid UTF-8 now has its body decoded with the declared charset and a different bodyHash.
+
+### Features
+
+* **deps:** move to forage 1.0; test against relay 0.7 and survey 8 ([#194](https://github.com/kontourai/traverse/issues/194)) ([8f85306](https://github.com/kontourai/traverse/commit/8f853066a24bc19e128cf873ce4f0db051be30e5))
+
 ## [3.0.1](https://github.com/kontourai/traverse/compare/v3.0.0...v3.0.1) (2026-09-29)
 
 
