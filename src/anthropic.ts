@@ -38,7 +38,7 @@ import type {
   ProviderExtractionOutput,
   TargetFieldSchema,
 } from "./types.js";
-import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
+import { ENUM_VALUES_UNRESTRICTED_WARNING, EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 
 // ---------------------------------------------------------------------------
 // Minimal client interface — mirrors @anthropic-ai/sdk Message API surface.
@@ -204,7 +204,11 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
     const descPart = f.description ? ` ${f.description}` : "";
     const inferenceTypePart =
       f.inferenceType === "explicit"
-        ? " Copy this value verbatim from the source text — do not paraphrase, reformat, or normalize it."
+        ? f.type === "date"
+          // A verbatim date and an ISO date cannot both be asked for; the
+          // excerpt carries the wording, the value carries the ISO form.
+          ? " Take this date directly from the source text and write it as ISO 8601 (YYYY-MM-DD) — do not otherwise alter it."
+          : " Copy this value verbatim from the source text — do not paraphrase, reformat, or normalize it."
         : f.inferenceType === "inferred"
           ? " This value may be derived, normalized, or classified from the source text — it still needs a grounding excerpt, but the value itself need not match verbatim."
           : "";
@@ -216,9 +220,11 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
     description: [
       "Submit an array of extraction proposals for the requested target fields.",
       "You are PROPOSING for review — every proposal is a reviewable record, not a resolved value.",
-      "For EACH field you can find in the content, return one proposal with:",
+      "For EACH field you can find in the content, return one proposal per DISTINCT value the content states for it:",
+      "two different values for one field are two proposals, so a reviewer sees the conflict;",
+      "the same value stated more than once is ONE proposal. Each proposal has:",
       "  - fieldPath: the exact target field path from the list below,",
-      "  - value: the extracted value (typed per the field),",
+      "  - value: the extracted value in the field's JSON type (a number field is a JSON number, never a string; a date field is an ISO 8601 date such as 2026-06-09),",
       "  - confidence: optional self-reported 0.0-1.0,",
       "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
       "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",
@@ -229,32 +235,134 @@ export function buildExtractionTool(targetSchema: TargetFieldSchema[]): Anthropi
     ].join("\n"),
     input_schema: {
       type: "object",
-      properties: {
-        proposals: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              fieldPath: { type: "string", description: "Exact target field path." },
-              value: { description: "The extracted value (string, number, boolean, array, or object)." },
-              confidence: { type: "number", description: "Optional self-reported confidence 0.0-1.0." },
-              excerpt: { type: "string", description: "Verbatim source span the value came from." },
-              locator: {
-                type: "string",
-                description: "Optional locator; defaults to \"field:<fieldPath>\" if omitted.",
-              },
-              occurrenceHint: {
-                type: "integer",
-                minimum: 1,
-                description: "Optional 1-based occurrence of the exact repeated excerpt.",
-              },
-            },
-            required: ["fieldPath", "value", "excerpt"],
-          },
-        },
-      },
+      properties: { proposals: { type: "array", description: DISTINCT_VALUES_RULE, items: proposalItemSchema(targetSchema, false) } },
       required: ["proposals"],
     },
+  };
+}
+
+type JsonSchemaObject = Record<string, unknown>;
+
+/**
+ * Stated in the schema and the message as well as the tool description: a
+ * runtime that projects the tool as a structured-output schema (a CLI runtime
+ * behind Relay) never shows the model the tool description.
+ */
+const DISTINCT_VALUES_RULE =
+  "One proposal per DISTINCT value the content states for a field: two different values for one field are two proposals, so a reviewer sees the conflict; the same value stated more than once is ONE proposal.";
+
+/**
+ * Most distinct enum value sets given their own item variant. Each one repeats
+ * the whole item schema (about 0.75 KB), so a schema with hundreds of enum
+ * fields would otherwise grow past what a provider accepts. Enum fields past
+ * the cap are typed as a plain string; their values stay in the tool
+ * description, `evidenceMatch.schema` still checks them, and the adapter
+ * warns that the schema did not restrict them.
+ */
+export const MAX_ENUM_VALUE_VARIANTS = 8;
+
+/** JSON Schema for one field's `value`: the field's declared type, and its values for an enum when `restrictEnum`. */
+function fieldValueSchema(field: TargetFieldSchema, restrictEnum: boolean): JsonSchemaObject {
+  switch (field.type) {
+    case "number": return { type: "number" };
+    case "boolean": return { type: "boolean" };
+    case "enum": return restrictEnum && field.enumValues?.length ? { type: "string", enum: [...new Set(field.enumValues)] } : { type: "string" };
+    case "date": return { type: "string", description: "ISO 8601 date, e.g. 2026-06-09." };
+    case "array": return { type: "array", items: {} };
+    case "object": return { type: "object" };
+    default: return { type: "string" };
+  }
+}
+
+/**
+ * One proposal item schema per distinct value type, each naming the field
+ * paths that take it, so a proposal's `value` is constrained by its own
+ * field's type rather than by the union of every field's. `strict` is the
+ * structured-output dialect: every key required, optional ones nullable, no
+ * additional properties.
+ */
+function proposalItemSchema(targetSchema: TargetFieldSchema[], strict: boolean): JsonSchemaObject {
+  const groups = new Map<string, { paths: string[]; value: JsonSchemaObject }>();
+  const unrestricted = new Set(enumFieldsLeftUnrestricted(targetSchema));
+  for (const field of targetSchema) {
+    const value = fieldValueSchema(field, !unrestricted.has(field.path));
+    const key = JSON.stringify(value);
+    const group = groups.get(key) ?? { paths: [], value };
+    groups.set(key, group);
+    if (!group.paths.includes(field.path)) group.paths.push(field.path);
+  }
+  const variant = (paths: string[] | undefined, value: JsonSchemaObject): JsonSchemaObject => ({
+    type: "object",
+    ...(strict ? { additionalProperties: false } : {}),
+    properties: {
+      // Outside strict mode an indexed path ("schedules[0].startDate") is a
+      // supported answer for a declared "schedules[].startDate", so a group
+      // holding an array path does not pin the path to an enum.
+      fieldPath: paths && (strict || !paths.some((path) => path.includes("[]")))
+        ? { type: "string", enum: paths, description: "Exact target field path." }
+        : { type: "string", description: "Exact target field path." },
+      value,
+      ...(strict
+        ? {
+          confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+          excerpt: { type: "string", description: "Verbatim source span the value came from." },
+          locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+          occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." },
+        }
+        : {
+          confidence: { type: "number", description: "Optional self-reported confidence 0.0-1.0." },
+          excerpt: { type: "string", description: "Verbatim source span the value came from." },
+          locator: { type: "string", description: "Optional locator; defaults to \"field:<fieldPath>\" if omitted." },
+          occurrenceHint: { type: "integer", minimum: 1, description: "Optional 1-based occurrence of the exact repeated excerpt." },
+        }),
+    },
+    required: strict
+      ? ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
+      : ["fieldPath", "value", "excerpt"],
+  });
+  const variants = [...groups.values()].map((group) => variant(group.paths, group.value));
+  if (variants.length === 0) return variant(undefined, { description: "The extracted value." });
+  return variants.length === 1 ? variants[0] : { anyOf: variants };
+}
+
+/**
+ * Paths of the enum fields whose values the tool schema does not restrict:
+ * those whose value set is not among the first `MAX_ENUM_VALUE_VARIANTS`
+ * distinct sets in schema order.
+ */
+export function enumFieldsLeftUnrestricted(targetSchema: TargetFieldSchema[]): string[] {
+  const kept = new Set<string>();
+  const paths: string[] = [];
+  for (const field of targetSchema) {
+    if (field.type !== "enum" || !field.enumValues?.length) continue;
+    const key = JSON.stringify([...new Set(field.enumValues)]);
+    if (kept.has(key)) continue;
+    if (kept.size < MAX_ENUM_VALUE_VARIANTS) kept.add(key);
+    else if (!paths.includes(field.path)) paths.push(field.path);
+  }
+  return paths;
+}
+
+/** The warning an adapter returns when `enumFieldsLeftUnrestricted` is not empty. */
+export function enumValuesUnrestrictedWarnings(targetSchema: TargetFieldSchema[]): string[] {
+  const paths = enumFieldsLeftUnrestricted(targetSchema);
+  if (paths.length === 0) return [];
+  return [`${ENUM_VALUES_UNRESTRICTED_WARNING} ${paths.length} field(s) (more than ${MAX_ENUM_VALUE_VARIANTS} distinct enums): ${paths.map((path) => JSON.stringify(path)).join(", ")}`];
+}
+
+/**
+ * The tool input schema in the strict structured-output dialect, or
+ * `undefined` when it cannot be expressed: no target field, or an
+ * `array`/`object` target, whose nested shape `TargetFieldSchema` does not
+ * declare.
+ */
+export function buildStrictExtractionSchema(targetSchema: TargetFieldSchema[]): JsonSchemaObject | undefined {
+  if (targetSchema.length === 0 || targetSchema.some((field) => field.type === "array" || field.type === "object")) return undefined;
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: { proposals: { type: "array", description: DISTINCT_VALUES_RULE, items: proposalItemSchema(targetSchema, true) } },
+    required: ["proposals"],
   };
 }
 
@@ -400,6 +508,7 @@ export function buildExtractionMessages(input: ProviderExtractionInput): { syste
     "You are PROPOSING for review — never invent values, and only propose a field",
     "when you can ground it in a verbatim excerpt from the content.",
     "Omit fields you cannot find.",
+    DISTINCT_VALUES_RULE,
     hintLines.length ? "\nPer-field hints:" : "",
     ...hintLines,
     ...taskLines,
@@ -467,6 +576,7 @@ export function createAnthropicExtractionProvider(
       const toolInput = extractToolUseInput(message, TOOL_NAME);
       const { proposals, warnings, unusable, malformedItems, totalItems } = parseProposals(toolInput, name, input.contentType);
       if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
+      warnings.push(...enumValuesUnrestrictedWarnings(input.targetSchema));
 
       if (message.stop_reason === "max_tokens") {
         warnings.push("response truncated at maxTokens; proposals may be incomplete");

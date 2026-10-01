@@ -38,6 +38,7 @@ export {
   EXACT_OCCURRENCE_RESOLVER_VERSION,
   enumerateExactOccurrences,
   ExactOccurrenceResolver,
+  sameResolvedOccurrence,
 } from "./occurrence-resolver.js";
 export type {
   ExactOccurrence,
@@ -121,6 +122,7 @@ export type {
   ExtractionProducedBy,
   ExtractionModelSource,
   ExtractionEvidenceMatch,
+  ExtractionValueNormalization,
   ExtractionSchemaMatch,
   ExtractionValueInExcerpt,
   EmbeddedState,

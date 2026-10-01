@@ -79,7 +79,16 @@ the version this Traverse release computes (`evidence-match-v4`); a reader
 cannot check rules it does not know. `tokenBoundary` depends on the prepared
 text around the excerpt, which the envelope does not carry, so only its type
 is checked. It is a set of facts, not a trust
-state. Prepared artifact resolution can be attached as a text-free
+state.
+The envelope does not carry a proposal's in-process `valueNormalization`
+(the record that `extract()` rewrote the provider's value into the field's
+declared type; see `extraction-proposals.md`). Released readers reject an
+unknown proposal key, so the serializer omits it and the validator still
+rejects it. A rewrite reaches the envelope only as the
+`normalization`/`proposal-normalization` warning classification. A
+per-proposal key is deferred until readers accept it.
+In `provenance.occurrence`, `selection` and `hintUsed` are not identity;
+compare resolutions with `sameResolvedOccurrence`. Prepared artifact resolution can be attached as a text-free
 typed state (`available`, `unavailable`, `storage-error`, `identity-mismatch`,
 `digest-mismatch`, or `invalid-artifact`).
 Resolution states carry requested/canonical reference evidence rather than a

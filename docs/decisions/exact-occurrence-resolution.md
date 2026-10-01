@@ -7,6 +7,8 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/64
   - kind: doc
     ref: tests/occurrence-resolver.test.ts
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/199
 ---
 
 # Exact occurrence resolution
@@ -31,6 +33,14 @@ Every retained proposal exposes `provenance.occurrence` with the resolver
 version, full exact-match count, selected index/span, selection mode, hint use,
 and ambiguity. More than one exact span is an ambiguity signal for a reviewer;
 it does not claim that any source occurrence is true.
+
+The resolved occurrence is `resolverVersion`, `count` and `selected`.
+`selection` and `hintUsed` record how it was reached and are not part of its
+identity: the hint is optional, so a model can send it in one run and omit it
+in the next and resolve the same span (issue #199). A consumer comparing
+proposals between runs uses `sameResolvedOccurrence(a, b)`, which ignores
+both, rather than deep equality. The two fields are kept as written because
+whether a hint was honoured is a fact about the run.
 
 Deduplication occurs after resolution and collapses only matching field path,
 path indices, canonical candidate value, and selected span. This preserves both

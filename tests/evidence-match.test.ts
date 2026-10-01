@@ -147,7 +147,10 @@ describe("evidenceMatch", () => {
       ["2026-02-29", "format-invalid"],
       ["2026-13-01", "format-invalid"],
       ["2026-06-09T25:00", "format-invalid"],
-      ["June 9, 2026", "format-invalid"],
+      // A written date extract() cannot rewrite losslessly stays as written.
+      // ("June 9, 2026" is rewritten to ISO first: tests/typed-values.test.ts.)
+      ["06/09/2026", "format-invalid"],
+      ["June 2026", "format-invalid"],
       [20260609, "type-mismatch"],
     ];
     for (const [value, expected] of cases) {

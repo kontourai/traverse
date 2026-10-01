@@ -5,10 +5,9 @@ import {
   type ModelInvocationResult,
   type ModelRuntime,
 } from "@kontourai/relay";
-import { buildExtractionMessages, buildExtractionTool, parseProposals } from "./anthropic.js";
+import { buildExtractionMessages, buildExtractionTool, buildStrictExtractionSchema, enumValuesUnrestrictedWarnings, parseProposals } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type {
-  ContentType,
   ExtractionProvider,
   ProviderExtractionInput,
   ProviderExtractionOutput,
@@ -41,7 +40,7 @@ export function createRelayExtractionProvider(options: RelayExtractionAdapterOpt
         prepared.request,
         input.signal ? { signal: input.signal } : undefined,
       );
-      return relayOutput(result, prepared.toolName, name, input.contentType);
+      return relayOutput(result, prepared.toolName, name, input);
     },
   };
   if (physicalBatch) {
@@ -73,7 +72,7 @@ export function createRelayExtractionProvider(options: RelayExtractionAdapterOpt
             outcome.value,
             prepared[index].toolName,
             name,
-            inputs[index].contentType,
+            inputs[index],
           ),
         }
         : {
@@ -117,13 +116,13 @@ function relayOutput(
   result: ModelInvocationResult,
   toolName: string,
   providerName: string,
-  contentType: ContentType,
+  input: ProviderExtractionInput,
 ): ProviderExtractionOutput {
   const call = result.toolCalls.find((candidate) => candidate.name === toolName);
   // A call present with no input is an unusable answer, not a missing call.
   const toolInput = call === undefined ? undefined : (call.input ?? null);
-  const parsed = parseProposals(toolInput, providerName, contentType);
-  const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
+  const parsed = parseProposals(toolInput, providerName, input.contentType);
+  const warnings = [...parsed.warnings, ...(result.warnings ?? []), ...enumValuesUnrestrictedWarnings(input.targetSchema)];
   if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
   const truncated = result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens";
   if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
@@ -161,43 +160,17 @@ function sharedSignal(inputs: ProviderExtractionInput[]): AbortSignal | undefine
 /**
  * Relay runtimes may project tools through strict structured-output APIs.
  * Traverse owns the proposal value types, so it supplies the strict schema
- * instead of asking Relay to guess. Array/object targets need a caller-owned
- * nested schema and are rejected until TargetFieldSchema can express one.
+ * instead of asking Relay to guess: each proposal's `value` is typed by its
+ * own field (a `number` field cannot be answered with a string). Array/object
+ * targets need a caller-owned nested schema and are rejected until
+ * TargetFieldSchema can express one.
  */
 export function buildRelayExtractionSchema(targetSchema: TargetFieldSchema[]): JsonSchema {
   const unsupported = targetSchema.find((field) => field.type === "array" || field.type === "object");
   if (unsupported) {
     throw new Error(`Relay structured extraction requires a nested schema for ${unsupported.type} target: ${unsupported.path}`);
   }
-  const valueTypes = [...new Set(targetSchema.map((field) =>
-    field.type === "number" ? "number"
-      : field.type === "boolean" ? "boolean"
-        : "string"))];
-  if (valueTypes.length === 0) throw new Error("Relay structured extraction requires at least one target field");
-  const valueSchema = valueTypes.length === 1
-    ? { type: valueTypes[0] }
-    : { anyOf: valueTypes.map((type) => ({ type })) };
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      proposals: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            fieldPath: { type: "string", enum: targetSchema.map((field) => field.path), description: "Exact target field path." },
-            value: valueSchema,
-            confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
-            excerpt: { type: "string", description: "Verbatim source span the value came from." },
-            locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
-            occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
-          },
-          required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
-        }
-      }
-    },
-    required: ["proposals"]
-  };
+  const schema = buildStrictExtractionSchema(targetSchema);
+  if (!schema) throw new Error("Relay structured extraction requires at least one target field");
+  return schema as JsonSchema;
 }

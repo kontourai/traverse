@@ -75,9 +75,15 @@
  *    through; an out-of-range value is CLAMPED into `0..1` with a warning. The
  *    bundled adapters pass finite out-of-range values through to this clamp.
  *
+ * A value is rewritten into its field's declared type in exactly two lossless
+ * cases (a plain decimal string for a `number` field, a written English date
+ * for a `date` field; src/value-normalization.ts). Each rewrite a returned
+ * proposal carries is recorded on it as `valueNormalization` (in process only)
+ * and in a warning naming the field and the original.
+ *
  * Every surviving proposal also gets `evidenceMatch`, deterministic schema and
- * value-in-excerpt annotations (src/evidence-match.ts). They never drop, warn
- * about or reorder a proposal.
+ * value-in-excerpt annotations (src/evidence-match.ts) of the value it carries.
+ * They never drop, warn about or reorder a proposal.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
@@ -87,13 +93,14 @@
 
 import { prepareAndChunk } from "./chunk.js";
 import { canonicalTaskJson, checkExtractionTaskSpec } from "./task.js";
-import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
+import { ENUM_VALUES_UNRESTRICTED_WARNING, normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
 import { NO_USABLE_ANSWER_ERROR, isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import { evidenceMatchFor } from "./evidence-match.js";
+import { normalizeCandidateValue } from "./value-normalization.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
@@ -574,7 +581,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       // fallback for providers that do not set it. Whatever decides, the
       // located warning below is written exactly when the loss is recorded,
       // so the envelope's warning codes and its outcome always agree.
-      const adapterWarnings = output.warnings ?? [];
+      // A run-level adapter note repeated on every call is kept once.
+      const adapterWarnings = (output.warnings ?? []).filter((warning) =>
+        !(typeof warning === "string" && warning.startsWith(ENUM_VALUES_UNRESTRICTED_WARNING) && warnings.includes(warning)));
       const missingToolCall = typeof output.missingToolCall === "boolean"
         ? output.missingToolCall
         : adapterWarnings.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning));
@@ -692,6 +701,16 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         `dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} (same field + value + source span)`,
       );
     }
+    // One warning per rewrite a returned proposal carries, naming the field
+    // and the original. The portable envelope has no key for the record, so
+    // this warning's classification is how an envelope reader learns of it.
+    for (const proposal of proposals) {
+      const rewrite = proposal.valueNormalization;
+      if (!rewrite) continue;
+      warnings.push(rewrite.kind === "string-to-number"
+        ? `coerced string value ${JSON.stringify(rewrite.from)} to number for "${proposal.fieldPath}"`
+        : `normalized date value ${JSON.stringify(rewrite.from)} to ISO 8601 for "${proposal.fieldPath}"`);
+    }
 
     if (chunks.length > 1) {
       warnings.push(
@@ -779,6 +798,12 @@ function producedByFor(output: ProviderExtractionOutput, requestDigest: string):
  * order, whole, regardless of any self-reported confidence, so the kept
  * proposal's `extractor`, `producedBy` and metadata are deterministic.
  * First-seen key order is preserved.
+ *
+ * One exception keeps the survivor independent of provider order: among
+ * duplicates, a proposal whose value was returned in its declared type wins
+ * over one `extract()` rewrote into it, and between two rewritten ones the
+ * smaller original (by code unit) wins. So a returned proposal carries
+ * `valueNormalization` only if every duplicate of it was rewritten.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
@@ -799,10 +824,19 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
       order.push(key);
     } else {
       dropped++;
+      if (prefersOverDuplicate(proposal, existing)) byKey.set(key, proposal);
     }
   }
 
   return { proposals: order.map((k) => byKey.get(k) as ExtractionProposal), dropped };
+}
+
+/** Whether `candidate` replaces the kept duplicate `kept` (same field, value and span). */
+function prefersOverDuplicate(candidate: ExtractionProposal, kept: ExtractionProposal): boolean {
+  const [a, b] = [candidate.valueNormalization, kept.valueNormalization];
+  if (!b) return false;
+  if (!a) return true;
+  return a.from < b.from;
 }
 
 /**
@@ -888,11 +922,17 @@ function normalizeChunkProposals(
     // nested inside an object or array used to fail assertJsonSafe just like a
     // top-level one, and dropped the whole proposal over a value the envelope
     // could carry once rewritten.
-    const candidateValue = normalizeNestedNegativeZero(candidate.candidateValue);
-    if (!isPortableJsonValue(candidateValue)) {
+    const providerValue = normalizeNestedNegativeZero(candidate.candidateValue);
+    if (!isPortableJsonValue(providerValue)) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
       continue;
     }
+    // Rewritten before resolution and dedup so `"2.1"` and `2.1` for one span
+    // are one proposal. The rewrite is recorded below, never silent.
+    const matchedSchema = schemaByPath.get(effectiveFieldPath);
+    const { value: candidateValue, normalization: valueNormalization } = matchedSchema
+      ? normalizeCandidateValue(providerValue, matchedSchema)
+      : { value: providerValue };
     // Confidence is an optional provider self-report. Missing (or null) is
     // omitted silently; a value that is not a finite number is omitted with a
     // warning. Neither drops the proposal.
@@ -944,7 +984,8 @@ function normalizeChunkProposals(
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
-    const matchedSchema = schemaByPath.get(effectiveFieldPath);
+    // The warning for a rewrite is written after dedup, for survivors only.
+    if (valueNormalization) proposal.valueNormalization = valueNormalization;
     if (matchedSchema?.inferenceType !== undefined) proposal.inferenceType = matchedSchema.inferenceType;
     if (matchedSchema?.type !== undefined) proposal.valueType = matchedSchema.type;
     if (matchedSchema?.enumValues?.length) proposal.enumValues = [...matchedSchema.enumValues];

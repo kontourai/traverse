@@ -49,7 +49,7 @@ export interface PortableExtractionSource {
   snapshotRef?: string;
 }
 
-export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint" | "producedBy"> {
+export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint" | "producedBy" | "valueNormalization"> {
   /** Carried only when the in-process `producedBy` names its `modelSource`. */
   producedBy?: PortableExtractionProducedBy;
   provenance: {
@@ -362,8 +362,8 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider answer unusable/.test(warning)) return { category: "provider", code: "unusable-answer" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): dropped \d+ of \d+ tool items as malformed$/.test(warning)) return { category: "normalization", code: "malformed-tool-items" };
-  if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
-  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
+  if (/provider call failed|^response truncated|^provider returned|^provider tool (?:call|schema)/.test(warning)) return { category: "provider", code: "provider-warning" };
+  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^coerced string value |^normalized date value |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
   // The chunk cap, not the maxContentChars cut: `content-truncated` names only
   // the latter elsewhere in the envelope, so this matches the partial reason.
