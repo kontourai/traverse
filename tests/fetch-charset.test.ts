@@ -14,8 +14,8 @@ import {
 import { buildSnapshotSourceRef } from "../src/fetch/compose.js";
 import { fetchSource, sha256Hex, snapshotHashBasis } from "../src/fetch/fetch-source.js";
 import { isSameSnapshotRef, parseAnySnapshotSourceRef } from "../src/fetch/forage-interop.js";
-import { createFilesystemSnapshotStore } from "../src/fetch/snapshot-store.js";
-import type { FetchLike, Snapshot } from "../src/fetch/types.js";
+import { createFilesystemSnapshotStore, createInMemorySnapshotStore, replaySource } from "../src/fetch/snapshot-store.js";
+import type { FetchLike, Snapshot, SnapshotStore } from "../src/fetch/types.js";
 import { CHARSET_PAGES, startCharsetServer, type CharsetPage, type CharsetServer } from "./fixtures/charset-server.js";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
 
@@ -115,13 +115,77 @@ describe("text capture hash basis and charset decoding", () => {
     const url = "https://example.test/text-only";
     const result = await fetchSource(
       { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0 },
-      { fetch: fakeFetch({ [url]: { headers: { "content-type": "text/html; charset=iso-8859-1" }, body: "<h1>Café</h1>" } }), clock: () => CLOCK },
+      { fetch: fakeFetch({ [url]: { headers: { "content-type": "text/html; charset=iso-8859-1" }, body: "<h1>Café</h1>", noArrayBuffer: true } }), clock: () => CLOCK },
     );
     const snapshot = result.snapshot!;
     assert.equal(snapshot.bodyHash, sha256Hex("<h1>Café</h1>"));
     assert.equal(snapshot.bytes, undefined);
     assert.equal(snapshot.declaredCharset, undefined);
     assert.equal(snapshotHashBasis(snapshot), "decoded-utf8");
+  });
+
+  it("reports the bytes basis for a binary capture", async () => {
+    const url = "https://example.test/doc.pdf";
+    const result = await fetchSource(
+      { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0 },
+      { fetch: fakeFetch({ [url]: { headers: { "content-type": "application/pdf" }, bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]) } }), clock: () => CLOCK },
+    );
+    assert.ok(result.snapshot!.bodyBytes instanceof Uint8Array);
+    assert.equal(result.snapshot!.bytes, undefined);
+    assert.equal(snapshotHashBasis(result.snapshot!), "bytes");
+  });
+
+  it("passes on the decoder's warning for a malformed or unknown charset label", async () => {
+    const malformed = "https://example.test/malformed";
+    const unknown = "https://example.test/unknown";
+    const fetch = fakeFetch({
+      [malformed]: { headers: { "content-type": 'text/html; charset="not a token"' }, body: "<h1>ok</h1>" },
+      [unknown]: { headers: { "content-type": "text/html; charset=x-no-such-charset" }, body: "<h1>ok</h1>" },
+    });
+    const first = await fetchSource({ id: SOURCE_ID, url: malformed, respectRobots: false, minDelayMs: 0 }, { fetch, clock: () => CLOCK });
+    assert.deepEqual(first.warnings, [`${malformed}: content-type declares a malformed charset parameter; decoded as utf-8`]);
+    assert.equal(first.snapshot!.declaredCharset, null);
+
+    const second = await fetchSource({ id: SOURCE_ID, url: unknown, respectRobots: false, minDelayMs: 0 }, { fetch, clock: () => CLOCK });
+    assert.deepEqual(second.warnings, [`${unknown}: unknown charset "x-no-such-charset"; decoded as utf-8`]);
+    assert.equal(second.snapshot!.declaredCharset, "x-no-such-charset");
+    assert.equal(second.snapshot!.body, "<h1>ok</h1>");
+  });
+
+  it("the fake fetch reads text through arrayBuffer() by default, as a real Response does", async () => {
+    const url = "https://example.test/default";
+    const result = await fetchSource(
+      { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0 },
+      { fetch: fakeFetch({ [url]: { headers: { "content-type": "text/html" }, body: "<h1>Café</h1>" } }), clock: () => CLOCK },
+    );
+    assert.equal(snapshotHashBasis(result.snapshot!), "bytes");
+    assert.deepEqual(Array.from(result.snapshot!.bytes!), Array.from(new TextEncoder().encode("<h1>Café</h1>")));
+  });
+
+  it("a 304 re-serves a bytes-bearing prior with its bytes, charset, text and hash", async () => {
+    const url = "https://example.test/latin1";
+    const page = CHARSET_PAGES.latin1;
+    const store = createInMemorySnapshotStore();
+    const opts = { sleep: async () => {}, politenessState: new Map<string, number>(), store };
+    const first = await fetchSource(
+      { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0 },
+      { ...opts, clock: () => CLOCK, fetch: fakeFetch({ [url]: { headers: { "content-type": page.contentType, etag: '"v1"' }, bytes: page.bytes } }) },
+    );
+    await store.put(first.snapshot!);
+
+    const second = await fetchSource(
+      { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0, revalidate: true },
+      { ...opts, clock: () => "2026-08-02T00:00:00.000Z", fetch: fakeFetch({ [url]: { status: 304 } }) },
+    );
+    const served = second.snapshot!;
+    assert.equal(served.notModified, true);
+    assert.equal(served.fromCache, true);
+    assert.equal(served.bodyHash, page.sha256);
+    assert.equal(served.body, page.text);
+    assert.deepEqual(Array.from(served.bytes!), Array.from(page.bytes));
+    assert.equal(served.declaredCharset, "iso-8859-1");
+    assert.equal(served.fetchedAt, CLOCK);
+    assert.equal(buildSnapshotSourceRef(served), buildSnapshotSourceRef(first.snapshot!));
   });
 });
 
@@ -169,21 +233,117 @@ describe("filesystem snapshot store and text bytes", () => {
     assert.notEqual(stored.bodyHash, CHARSET_PAGES.bom.sha256, "the two bases give different digests for this page");
   });
 
-  it("skips a record whose declared charset has no bytes behind it", async () => {
-    const brokenRoot = path.join(root, "broken");
-    const store = createFilesystemSnapshotStore({ root: brokenRoot });
-    const { snapshot } = await traverseCapture(CHARSET_PAGES.bom);
-    await store.put({ ...snapshot, sourceId: "broken-source" });
+  for (const name of ["latin1", "bom", "invalid", "plain"] as const) {
+    it(`${name}: a capture read back from the store still agrees with forage`, async () => {
+      const page = CHARSET_PAGES[name];
+      const sourceRoot = path.join(root, `agree-${name}`);
+      const store = createFilesystemSnapshotStore({ root: sourceRoot });
+      const { snapshot } = await traverseCapture(page);
+      const forage = await forageCapture(page);
+      await store.put(snapshot);
 
-    const [dir] = await readdir(brokenRoot);
-    const [file] = await readdir(path.join(brokenRoot, dir));
-    const filePath = path.join(brokenRoot, dir, file);
+      const record = await readOnlyRecord(sourceRoot);
+      assert.equal("body" in record, false, "the text is not stored beside the bytes it is derived from");
+
+      const stored = (await store.get(SOURCE_ID, page.sha256))!;
+      assert.equal(stored.bodyHash, page.sha256);
+      assert.equal(stored.bodyHash, forage.bodyHash);
+      assert.equal(stored.body, page.text);
+      assert.equal(stored.body, forage.body);
+      assert.deepEqual(stored, snapshot, "the record read back is the snapshot that was put");
+      assert.equal(isSameSnapshotRef(buildSnapshotSourceRef(stored), buildForageSnapshotSourceRef(forage)), true);
+
+      const replayed = await replaySource(store, SOURCE_ID);
+      assert.deepEqual(replayed.snapshot, { ...snapshot, fromCache: true });
+    });
+  }
+
+  /** Put the latin1 capture in a fresh store, rewrite its one record, and return the store. */
+  async function storeWithRewrittenRecord(
+    label: string,
+    rewrite: (record: Record<string, unknown>) => void,
+  ): Promise<{ store: SnapshotStore; snapshot: Snapshot }> {
+    const sourceRoot = path.join(root, label);
+    const store = createFilesystemSnapshotStore({ root: sourceRoot });
+    const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
+    await store.put(snapshot);
+    const [dir] = await readdir(sourceRoot);
+    const [file] = await readdir(path.join(sourceRoot, dir));
+    const filePath = path.join(sourceRoot, dir, file);
     const record = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
-    assert.equal(typeof record.bytesBase64, "string");
-    delete record.bytesBase64;
+    rewrite(record);
     await writeFile(filePath, JSON.stringify(record));
+    return { store, snapshot };
+  }
 
-    assert.equal(await store.latest("broken-source"), undefined);
+  async function readOnlyRecord(sourceRoot: string): Promise<Record<string, unknown>> {
+    const [dir] = await readdir(sourceRoot);
+    const [file] = await readdir(path.join(sourceRoot, dir));
+    return JSON.parse(await readFile(path.join(sourceRoot, dir, file), "utf8")) as Record<string, unknown>;
+  }
+
+  it("a body written into a byte-hashed record is not what the store returns", async () => {
+    const { store } = await storeWithRewrittenRecord("tampered-body", (record) => {
+      record.body = "<h1>TAMPERED</h1>";
+    });
+    const stored = (await store.latest(SOURCE_ID))!;
+    assert.equal(stored.body, CHARSET_PAGES.latin1.text, "the text comes from the bytes");
+  });
+
+  it("skips a record whose bytes do not hash to its bodyHash", async () => {
+    const { store, snapshot } = await storeWithRewrittenRecord("swapped-bytes", (record) => {
+      assert.equal(typeof record.bytesBase64, "string");
+      record.bytesBase64 = Buffer.from("<h1>TAMPERED</h1>", "utf8").toString("base64");
+    });
+    assert.equal(await store.latest(SOURCE_ID), undefined);
+    assert.equal(await store.get(SOURCE_ID, snapshot.bodyHash), undefined);
+    assert.deepEqual(await store.list(SOURCE_ID), []);
+    assert.equal((await replaySource(store, SOURCE_ID)).error?.kind, "no-snapshot");
+  });
+
+  it("derives the text from the bytes under whatever charset the record declares", async () => {
+    // bodyHash covers the bytes, not the charset label, so a changed label is
+    // not detectable here. What holds is that the text returned is always the
+    // decode of the stored bytes under the stored label.
+    const { store } = await storeWithRewrittenRecord("changed-charset", (record) => {
+      record.declaredCharset = "utf-8";
+    });
+    const stored = (await store.latest(SOURCE_ID))!;
+    assert.equal(stored.declaredCharset, "utf-8");
+    assert.equal(stored.body, new TextDecoder("utf-8").decode(CHARSET_PAGES.latin1.bytes));
+    assert.notEqual(stored.body, CHARSET_PAGES.latin1.text);
+  });
+
+  it("skips a record that has bytes without a declared charset, or the reverse, or a charset of the wrong type", async () => {
+    const noCharset = await storeWithRewrittenRecord("bytes-without-charset", (record) => {
+      delete record.declaredCharset;
+      record.body = CHARSET_PAGES.latin1.text;
+    });
+    assert.equal(await noCharset.store.latest(SOURCE_ID), undefined);
+
+    const noBytes = await storeWithRewrittenRecord("charset-without-bytes", (record) => {
+      delete record.bytesBase64;
+      record.body = CHARSET_PAGES.latin1.text;
+    });
+    assert.equal(await noBytes.store.latest(SOURCE_ID), undefined);
+
+    const wrongType = await storeWithRewrittenRecord("charset-wrong-type", (record) => {
+      record.declaredCharset = 1252;
+      record.body = CHARSET_PAGES.latin1.text;
+    });
+    assert.equal(await wrongType.store.latest(SOURCE_ID), undefined);
+  });
+
+  it("the in-memory store applies the same read rule", async () => {
+    const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
+    const store = createInMemorySnapshotStore();
+    await store.put({ ...snapshot, body: "<h1>TAMPERED</h1>" });
+    assert.equal((await store.latest(SOURCE_ID))!.body, CHARSET_PAGES.latin1.text);
+
+    const swapped = createInMemorySnapshotStore();
+    await swapped.put({ ...snapshot, bytes: new TextEncoder().encode("<h1>TAMPERED</h1>") });
+    assert.equal(await swapped.latest(SOURCE_ID), undefined);
+    assert.equal(await swapped.get(SOURCE_ID, snapshot.bodyHash), undefined);
   });
 });
 

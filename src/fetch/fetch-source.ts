@@ -74,13 +74,20 @@ export function sha256Bytes(bytes: Uint8Array): string {
 }
 
 /**
- * What a snapshot's `bodyHash` was computed over.
+ * Which input a snapshot's `bodyHash` is taken over, read from which fields
+ * the snapshot carries.
  *
- * - `"bytes"`: the exact response bytes. Binary snapshots (`bodyBytes`) and
- *   text snapshots that carry `bytes`.
- * - `"decoded-utf8"`: the UTF-8 encoding of `body`. Text snapshots without
- *   `bytes`: captures stored before text was hashed by its bytes, rendered
- *   pages, transcripts, and a `fetchImpl` that has no `arrayBuffer()`.
+ * - `"bytes"`: the snapshot carries response bytes (`bodyBytes` for binary,
+ *   `bytes` for text) and its hash is meant to cover them.
+ * - `"decoded-utf8"`: it carries neither, and its hash is meant to cover the
+ *   UTF-8 encoding of `body`. Text captures stored before text was hashed by
+ *   its bytes, rendered pages, transcripts, and a `fetchImpl` that has no
+ *   `arrayBuffer()`.
+ *
+ * This is a label, not a check: it looks at field presence and does not hash
+ * anything, so it does not show that `bodyHash` matches the bytes or the body.
+ * The bundled stores do check a text record's `bytes` against `bodyHash` when
+ * they read it; a snapshot from anywhere else is as trustworthy as its source.
  *
  * Two digests on different bases are not comparable: a difference between them
  * does not show that the page changed.

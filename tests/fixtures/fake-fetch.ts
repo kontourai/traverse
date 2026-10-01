@@ -15,8 +15,10 @@ export interface FakeResponseSpec {
   networkError?: string;
   /** when true, never resolve until aborted — used with a firing scheduler for timeouts. */
   hang?: boolean;
-  /** raw bytes backing arrayBuffer() for a binary response. Omit to simulate a fetchImpl with no arrayBuffer() (exercises the fallback-to-text path). */
+  /** raw bytes backing arrayBuffer(). Defaults to the UTF-8 of `body`, as a real `Response` would give. */
   bytes?: Uint8Array;
+  /** when true, the response has no arrayBuffer() at all, as a text()-only fetchImpl (exercises the fallback path). */
+  noArrayBuffer?: boolean;
 }
 
 export interface FakeFetchCall {
@@ -38,8 +40,8 @@ function makeResponse(spec: FakeResponseSpec): FetchLikeResponse {
       return spec.body ?? "";
     },
   };
-  if (spec.bytes) {
-    const bytes = spec.bytes;
+  if (!spec.noArrayBuffer) {
+    const bytes = spec.bytes ?? new TextEncoder().encode(spec.body ?? "");
     response.arrayBuffer = async () =>
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   }

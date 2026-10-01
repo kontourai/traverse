@@ -20,6 +20,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "../canonical-json.js";
+import { decodeTextBody } from "@kontourai/forage/fetch";
 import type { FetchResult, Snapshot, SnapshotStore } from "./types.js";
 
 /** Render a caller-owned sourceId into a stable, collision-resistant dir name. */
@@ -36,7 +37,12 @@ function snapshotFileName(snapshot: Snapshot): string {
   return `${ts}-${snapshot.bodyHash.slice(0, 12)}.json`;
 }
 
-/** JSON-serialisable on-disk shape: each byte field present becomes base64 in a sibling `<field>Base64`. */
+/**
+ * JSON-serialisable on-disk shape. Each byte field present becomes base64 in a
+ * sibling `<field>Base64`. A text record that carries `bytes` is written
+ * WITHOUT `body`: the text is derived from the bytes on read, so a stored
+ * record cannot hold a body that disagrees with the bytes its hash covers.
+ */
 const BYTE_FIELDS = ["bodyBytes", "bytes"] as const;
 
 function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
@@ -47,10 +53,11 @@ function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
     delete out[field];
     out[`${field}Base64`] = Buffer.from(value).toString("base64");
   }
+  if (snapshot.bytes !== undefined) delete out.body;
   return out;
 }
 
-/** Reverse of toDiskShape. Files without a base64 sibling field pass through unchanged. */
+/** Reverse of toDiskShape's base64 step. Files without a base64 sibling field pass through unchanged. */
 function fromDiskShape(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
   const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
@@ -63,14 +70,32 @@ function fromDiskShape(value: unknown): unknown {
   return out;
 }
 
+/**
+ * Bind a text record that carries `bytes` to those bytes.
+ *
+ * Returns the record with `body` decoded from `bytes` using `declaredCharset`,
+ * whatever `body` it arrived with, or `undefined` when the bytes do not hash
+ * to `bodyHash` or `declaredCharset` is missing or not a string or `null`. A
+ * record without `bytes` is returned as it is, unless it has a
+ * `declaredCharset` with no bytes behind it.
+ *
+ * Only `bytes` is checked. A binary record's `bodyBytes` and the body of a
+ * text record without `bytes` are returned as stored.
+ */
+function bindTextBytes(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+  const v = value as Record<string, unknown>;
+  if (v.bytes === undefined) return v.declaredCharset === undefined ? value : undefined;
+  if (!(v.bytes instanceof Uint8Array)) return undefined;
+  if (v.declaredCharset !== null && typeof v.declaredCharset !== "string") return undefined;
+  if (createHash("sha256").update(v.bytes).digest("hex") !== v.bodyHash) return undefined;
+  return { ...v, body: decodeTextBody(v.bytes, v.declaredCharset).text };
+}
+
 function isSnapshot(value: unknown): value is Snapshot {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (v.bodyBytes !== undefined && !(v.bodyBytes instanceof Uint8Array)) return false;
-  if (v.bytes !== undefined && !(v.bytes instanceof Uint8Array)) return false;
-  // `bytes` and `declaredCharset` travel together; one without the other is not a record this package wrote.
-  if ((v.bytes === undefined) !== (v.declaredCharset === undefined)) return false;
-  if (v.declaredCharset !== undefined && v.declaredCharset !== null && typeof v.declaredCharset !== "string") return false;
   return (
     typeof v.sourceId === "string" &&
     typeof v.url === "string" &&
@@ -91,6 +116,11 @@ export interface FilesystemSnapshotStoreOptions {
  * A filesystem-backed {@link SnapshotStore}. Reads tolerate a partially-written
  * or foreign file (unparseable/shape-invalid entries are skipped), so a
  * corrupt file never crashes `latest()`/`list()`.
+ *
+ * A text record whose `bytes` do not hash to its `bodyHash` is skipped the same
+ * way. `SnapshotStore` has no channel to report a skipped record, so the skip
+ * is silent: `get()` by that hash finds nothing, and `latest()` returns the
+ * newest record that does verify, which may be an older capture.
  */
 export function createFilesystemSnapshotStore(
   opts: FilesystemSnapshotStoreOptions,
@@ -109,7 +139,7 @@ export function createFilesystemSnapshotStore(
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
       try {
-        const parsed = fromDiskShape(JSON.parse(await readFile(path.join(dir, name), "utf8")));
+        const parsed = bindTextBytes(fromDiskShape(JSON.parse(await readFile(path.join(dir, name), "utf8"))));
         if (isSnapshot(parsed)) out.push(parsed);
       } catch {
         // skip unreadable/foreign file
@@ -150,7 +180,9 @@ export function createFilesystemSnapshotStore(
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
   function sorted(sourceId: string): Snapshot[] {
-    const arr = [...(bySource.get(sourceId) ?? [])];
+    // Same read rule as the filesystem store: text is derived from `bytes`, and
+    // a record whose bytes no longer hash to its `bodyHash` is skipped.
+    const arr = (bySource.get(sourceId) ?? []).map(bindTextBytes).filter(isSnapshot);
     arr.sort((a, b) =>
       a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );

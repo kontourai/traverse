@@ -16,17 +16,41 @@ evidence:
 `arrayBuffer()`. `bodyHash` is the SHA-256 of those bytes for text and binary
 alike. A text body is decoded with the charset its `Content-Type` declares
 (UTF-8 when none is declared, a matching byte-order mark removed), using
-forage's `parseDeclaredCharset` and `decodeTextBody` so the two fetchers
-cannot drift apart.
+forage's `parseDeclaredCharset` and `decodeTextBody`. Traverse and the forage
+it resolves therefore decode alike. An application that also installs another
+forage version can still see two decoders.
 
 A text snapshot read this way carries `bytes` (the exact bytes) and
 `declaredCharset` (`null` when none was usable). The names and meanings are
 forage's. `bodyBytes` stays the binary marker and is never set for text.
-The filesystem store writes `bytes` as base64 in `bytesBase64`.
 
-`snapshotHashBasis(snapshot)` reports which input a `bodyHash` covers:
+`snapshotHashBasis(snapshot)` names which input a `bodyHash` is taken over:
 `"bytes"` when the snapshot carries `bodyBytes` or `bytes`, `"decoded-utf8"`
-otherwise.
+otherwise. It reads field presence only and verifies nothing.
+
+## Stored records
+
+The bundled stores keep one copy of a byte-hashed text record's content: the
+bytes. The filesystem store writes `bytesBase64` and `declaredCharset` and
+does not write `body`. On read, both stores check that the bytes hash to
+`bodyHash` and decode `body` from them with `declaredCharset`. A stored record
+therefore cannot return text that disagrees with the bytes its hash covers.
+
+A record fails that read when its bytes do not hash to `bodyHash`, when it
+has `bytes` without `declaredCharset` or the reverse, or when
+`declaredCharset` is neither a string nor `null`. `SnapshotStore` returns
+snapshots and has no channel for reporting a record it declined, so a failed
+record is skipped, the same way an unparseable file already was. `get()` by
+its hash then finds nothing. `latest()` returns the newest record that does
+pass, which can be an older capture; nothing tells the caller that happened.
+That is a known limit of the store interface, not a decision that it is
+acceptable.
+
+What the read check covers is the bytes. `bodyHash` does not cover the
+charset label, so a record whose `declaredCharset` was altered still reads,
+with its text decoded under the altered label. A binary record's `bodyBytes`
+and the body of a text record without `bytes` are returned as stored, as
+before.
 
 ## Why
 
@@ -41,8 +65,9 @@ followed.
   two packages disagreed about the same response, and comparing their digests
   or references reported a difference where there was none.
 
-Keeping the bytes is what makes the digest checkable. A stored text record
-whose hash covers bytes it no longer has could not be verified by anyone.
+Keeping the bytes is what makes the digest checkable: a stored text record
+whose hash covers bytes it no longer has could not be verified by anyone. The
+bundled stores do that check on every read (see Stored records).
 
 ## What changes on the wire
 

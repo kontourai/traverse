@@ -885,9 +885,10 @@ if (result.error) {
   // populated. A text response is decoded with the charset its Content-Type
   // declares and keeps its exact bytes on s.bytes (with s.declaredCharset).
   // bodyHash is sha256 of the raw response bytes (s.bodyBytes or s.bytes);
-  // a snapshot with neither (rendered, transcript, or a fetch implementation
-  // without arrayBuffer()) hashes the utf8 of s.body. snapshotHashBasis(s)
-  // reports which.
+  // a snapshot with neither (rendered, transcript, a fetch implementation
+  // without arrayBuffer(), or a text record stored before text was hashed by
+  // its bytes) hashes the utf8 of s.body. snapshotHashBasis(s) names which,
+  // from the fields present; it does not verify the hash.
 }
 ```
 

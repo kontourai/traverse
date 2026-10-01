@@ -1,5 +1,6 @@
 // A loopback HTTP server that serves the same heading three ways: as latin1,
-// as UTF-8 behind a byte-order mark, and as plain UTF-8. The bytes are built
+// as UTF-8 behind a byte-order mark, and as plain UTF-8, plus one page whose
+// bytes are not valid UTF-8. The bytes are built
 // here by hand so a test can hash exactly what went over the wire.
 
 import { createHash } from "node:crypto";
@@ -37,6 +38,13 @@ export const CHARSET_PAGES = {
     BOM_HTML,
   ),
   plain: page("/plain", "text/html; charset=utf-8", new Uint8Array(Buffer.from(PLAIN_HTML, "utf8")), PLAIN_HTML),
+  // One byte (0xff) that is not valid UTF-8, declared as UTF-8.
+  invalid: page(
+    "/invalid",
+    "text/html; charset=utf-8",
+    new Uint8Array(Buffer.concat([Buffer.from("<h1>a", "utf8"), Buffer.from([0xff]), Buffer.from("b</h1>", "utf8")])),
+    "<h1>a\uFFFDb</h1>",
+  ),
 } as const;
 
 export interface CharsetServer {

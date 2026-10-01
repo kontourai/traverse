@@ -179,6 +179,8 @@ export interface Snapshot {
    * {@link declaredCharset} is: on a text snapshot whose response bytes the
    * fetcher read. `bodyHash` is then the SHA-256 of these bytes and `body` is
    * derived from them. Same field and meaning as forage's `Snapshot.bytes`.
+   * The bundled stores keep only the bytes for such a record and decode
+   * `body` from them on read, after checking they hash to `bodyHash`.
    *
    * Absent on binary snapshots (their bytes are {@link bodyBytes}), rendered
    * snapshots, transcripts, captures made through a `fetchImpl` without
