@@ -28,19 +28,74 @@ describe("Relay extraction provider", () => {
       properties: {
         proposals: {
           type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              fieldPath: { type: "string", enum: ["amount", "label", "active", "date", "kind"], description: "Exact target field path." },
-              value: { anyOf: [{ type: "number" }, { type: "string" }, { type: "boolean" }] },
-              confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
-              excerpt: { type: "string", description: "Verbatim source span the value came from." },
-              locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
-              occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+          description: "One proposal per DISTINCT value the content states for a field: two different values for one field are two proposals, so a reviewer sees the conflict; the same value stated more than once is ONE proposal.",
+          items: { anyOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                fieldPath: { type: "string", enum: ["amount"], description: "Exact target field path." },
+                value: { type: "number" },
+                confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+                excerpt: { type: "string", description: "Verbatim source span the value came from." },
+                locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+                occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+              },
+              required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
             },
-            required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
-          }
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                fieldPath: { type: "string", enum: ["label"], description: "Exact target field path." },
+                value: { type: "string" },
+                confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+                excerpt: { type: "string", description: "Verbatim source span the value came from." },
+                locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+                occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+              },
+              required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                fieldPath: { type: "string", enum: ["active"], description: "Exact target field path." },
+                value: { type: "boolean" },
+                confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+                excerpt: { type: "string", description: "Verbatim source span the value came from." },
+                locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+                occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+              },
+              required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                fieldPath: { type: "string", enum: ["date"], description: "Exact target field path." },
+                value: { type: "string", description: "ISO 8601 date, e.g. 2026-06-09." },
+                confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+                excerpt: { type: "string", description: "Verbatim source span the value came from." },
+                locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+                occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+              },
+              required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                fieldPath: { type: "string", enum: ["kind"], description: "Exact target field path." },
+                value: { type: "string", enum: ["a", "b"] },
+                confidence: { type: ["number", "null"], description: "Optional self-reported confidence 0.0-1.0; null when not reported." },
+                excerpt: { type: "string", description: "Verbatim source span the value came from." },
+                locator: { type: ["string", "null"], description: "Optional source locator; null when absent." },
+                occurrenceHint: { type: ["integer", "null"], minimum: 1, description: "Optional 1-based exact-excerpt occurrence; null when absent." }
+              },
+              required: ["fieldPath", "value", "confidence", "excerpt", "locator", "occurrenceHint"]
+            },
+          ] }
         }
       },
       required: ["proposals"]

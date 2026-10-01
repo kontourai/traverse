@@ -16,19 +16,43 @@ export interface ExactOccurrence {
   end: number;
 }
 
-/** Metadata attached to a verified proposal's provenance. */
+/**
+ * Metadata attached to a verified proposal's provenance.
+ *
+ * The resolved occurrence (`resolverVersion`, `count`, `selected`) is what a
+ * proposal is grounded in. `selection` and `hintUsed` record HOW it was
+ * reached and are not part of its identity: a model may send the optional
+ * hint in one run and omit it in the next and resolve the same span. Compare
+ * two resolutions with `sameResolvedOccurrence`, not by deep equality.
+ */
 export interface ExactOccurrenceResolution {
   resolverVersion: typeof EXACT_OCCURRENCE_RESOLVER_VERSION;
   /** Number of exact excerpt matches in the complete prepared text. */
   count: number;
   /** Selected exact match, indexed in source order from zero. */
   selected: ExactOccurrence;
-  /** Whether selection followed a valid provider-supplied hint or source order. */
+  /** Whether selection followed a valid provider-supplied hint or source order. Not identity; varies between runs. */
   selection: "occurrence-hint" | "source-order";
-  /** True only when a bounded, exact-match occurrence hint was used. */
+  /** True only when a bounded, exact-match occurrence hint was used. Not identity; varies between runs. */
   hintUsed: boolean;
   /** More than one exact source span was available for this excerpt. */
   ambiguous: boolean;
+}
+
+/**
+ * Whether two resolutions name the same occurrence: same resolver version,
+ * same exact-match count and same selected index and span. `selection` and
+ * `hintUsed` are ignored (`ambiguous` is derived from `count`).
+ */
+export function sameResolvedOccurrence(
+  a: Pick<ExactOccurrenceResolution, "resolverVersion" | "count" | "selected">,
+  b: Pick<ExactOccurrenceResolution, "resolverVersion" | "count" | "selected">,
+): boolean {
+  return a.resolverVersion === b.resolverVersion
+    && a.count === b.count
+    && a.selected.index === b.selected.index
+    && a.selected.start === b.selected.start
+    && a.selected.end === b.selected.end;
 }
 
 export interface ResolveExactOccurrenceInput {

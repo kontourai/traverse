@@ -222,18 +222,19 @@ describe("resolveSdkClientOptions (unit)", () => {
 describe("buildExtractionTool / parseProposals (units)", () => {
   it("requires fieldPath, value, and excerpt (not confidence) in the tool schema", () => {
     const tool = buildExtractionTool(genericTargetSchema);
-    const itemRequired = (tool.input_schema.properties.proposals as {
-      items: { required: string[] };
-    }).items.required;
-    assert.deepEqual([...itemRequired].sort(), ["excerpt", "fieldPath", "value"]);
-    const properties = (tool.input_schema.properties.proposals as {
-      items: { properties: Record<string, { type?: string; minimum?: number }> };
-    }).items.properties;
-    assert.deepEqual(properties.occurrenceHint, {
-      type: "integer",
-      minimum: 1,
-      description: "Optional 1-based occurrence of the exact repeated excerpt.",
-    });
+    // One item variant per value type (see tests/typed-values.test.ts).
+    const variants = (tool.input_schema.properties.proposals as {
+      items: { anyOf: Array<{ required: string[]; properties: Record<string, { type?: string; minimum?: number }> }> };
+    }).items.anyOf;
+    assert.equal(variants.length, 3);
+    for (const variant of variants) {
+      assert.deepEqual([...variant.required].sort(), ["excerpt", "fieldPath", "value"]);
+      assert.deepEqual(variant.properties.occurrenceHint, {
+        type: "integer",
+        minimum: 1,
+        description: "Optional 1-based occurrence of the exact repeated excerpt.",
+      });
+    }
   });
 
   it("returns empty proposals/warnings for non-record / missing proposals input", () => {
@@ -268,9 +269,11 @@ describe("buildExtractionTool / parseProposals (units)", () => {
         [
           "Submit an array of extraction proposals for the requested target fields.",
           "You are PROPOSING for review — every proposal is a reviewable record, not a resolved value.",
-          "For EACH field you can find in the content, return one proposal with:",
+          "For EACH field you can find in the content, return one proposal per DISTINCT value the content states for it:",
+          "two different values for one field are two proposals, so a reviewer sees the conflict;",
+          "the same value stated more than once is ONE proposal. Each proposal has:",
           "  - fieldPath: the exact target field path from the list below,",
-          "  - value: the extracted value (typed per the field),",
+          "  - value: the extracted value in the field's JSON type (a number field is a JSON number, never a string; a date field is an ISO 8601 date such as 2026-06-09),",
           "  - confidence: optional self-reported 0.0-1.0,",
           "  - excerpt: the VERBATIM span of source text the value was drawn from (required — no excerpt, no proposal).",
           "  - occurrenceHint: optional 1-based occurrence of that exact excerpt when it repeats; omit it when uncertain.",

@@ -1,4 +1,4 @@
-import { buildExtractionTool, parseProposals, resolveSdkMaxRetries } from "./anthropic.js";
+import { buildExtractionTool, buildStrictExtractionSchema, parseProposals, resolveSdkMaxRetries } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "./types.js";
 
@@ -57,11 +57,14 @@ export function createOpenAIExtractionProvider(opts: OpenAIAdapterOptions = {}):
     async extract(input): Promise<ProviderExtractionOutput> {
       const client = await resolveClient(opts);
       const tool = buildExtractionTool(input.targetSchema);
+      // Strict mode needs the all-required, closed dialect; an array or
+      // object target has no declared nested shape, so it is sent non-strict.
+      const strictSchema = buildStrictExtractionSchema(input.targetSchema);
       const response = await client.create({
         model,
         max_completion_tokens: opts.maxTokens ?? 2048,
         messages: [{ role: "user", content: prompt(input) }],
-        tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.input_schema, strict: true } }],
+        tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: strictSchema ?? tool.input_schema, strict: strictSchema !== undefined } }],
         tool_choice: { type: "function", function: { name: TOOL_NAME } },
       });
       const call = response.choices[0]?.message.tool_calls?.find((item) => item.function.name === TOOL_NAME);

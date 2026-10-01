@@ -75,9 +75,14 @@
  *    through; an out-of-range value is CLAMPED into `0..1` with a warning. The
  *    bundled adapters pass finite out-of-range values through to this clamp.
  *
+ * A value is rewritten into its field's declared type in exactly two lossless
+ * cases (a plain decimal string for a `number` field, a written English date
+ * for a `date` field; src/value-normalization.ts). Each rewrite is recorded on
+ * the proposal as `valueNormalization` and in a warning.
+ *
  * Every surviving proposal also gets `evidenceMatch`, deterministic schema and
- * value-in-excerpt annotations (src/evidence-match.ts). They never drop, warn
- * about or reorder a proposal.
+ * value-in-excerpt annotations (src/evidence-match.ts) of the value it carries.
+ * They never drop, warn about or reorder a proposal.
  *
  * `warnings` on the final `ExtractionResult` merges BOTH of the above
  * normalization notes AND any `warnings` the provider itself returned (e.g.
@@ -94,6 +99,7 @@ import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact
 import { NO_USABLE_ANSWER_ERROR, isPortableJsonValue, isPortableStableIdentity } from "./extraction-result-envelope.js";
 import { ExactOccurrenceResolver } from "./occurrence-resolver.js";
 import { evidenceMatchFor } from "./evidence-match.js";
+import { normalizeCandidateValue } from "./value-normalization.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { PreparedArtifact, PreparedArtifactPreparationMode } from "./prepared-artifact.js";
 import type {
@@ -888,11 +894,17 @@ function normalizeChunkProposals(
     // nested inside an object or array used to fail assertJsonSafe just like a
     // top-level one, and dropped the whole proposal over a value the envelope
     // could carry once rewritten.
-    const candidateValue = normalizeNestedNegativeZero(candidate.candidateValue);
-    if (!isPortableJsonValue(candidateValue)) {
+    const providerValue = normalizeNestedNegativeZero(candidate.candidateValue);
+    if (!isPortableJsonValue(providerValue)) {
       warnings.push(`dropped proposal for "${effectiveFieldPath}": value not representable as portable JSON`);
       continue;
     }
+    // Rewritten before resolution and dedup so `"2.1"` and `2.1` for one span
+    // are one proposal. The rewrite is recorded below, never silent.
+    const matchedSchema = schemaByPath.get(effectiveFieldPath);
+    const { value: candidateValue, normalization: valueNormalization } = matchedSchema
+      ? normalizeCandidateValue(providerValue, matchedSchema)
+      : { value: providerValue };
     // Confidence is an optional provider self-report. Missing (or null) is
     // omitted silently; a value that is not a finite number is omitted with a
     // warning. Neither drops the proposal.
@@ -944,7 +956,12 @@ function normalizeChunkProposals(
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
-    const matchedSchema = schemaByPath.get(effectiveFieldPath);
+    if (valueNormalization) {
+      proposal.valueNormalization = valueNormalization;
+      warnings.push(valueNormalization.kind === "string-to-number"
+        ? `coerced string value to number for "${effectiveFieldPath}"`
+        : `normalized date value to ISO 8601 for "${effectiveFieldPath}"`);
+    }
     if (matchedSchema?.inferenceType !== undefined) proposal.inferenceType = matchedSchema.inferenceType;
     if (matchedSchema?.type !== undefined) proposal.valueType = matchedSchema.type;
     if (matchedSchema?.enumValues?.length) proposal.enumValues = [...matchedSchema.enumValues];

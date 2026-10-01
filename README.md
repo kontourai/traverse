@@ -260,6 +260,21 @@ excerpt, not that the excerpt supports it.** Known false matches remain,
 such as negation far from or after the value, `"formerly open"`,
 `"excludes C"`, and a number in another currency; the decision record lists
 them.
+
+`evidenceMatch` describes the value the proposal carries. `extract()` rewrites
+a provider's value into its field's declared type in two lossless cases only:
+a plain decimal string for a `number` field (`"2.1"` becomes `2.1`) and a
+written English date for a `date` field (`"21 March 2013"` becomes
+`"2013-03-21"`). Each rewrite is recorded as
+`valueNormalization: { kind, from }` on the proposal and as a warning; a
+proposal without it carries exactly what the provider returned. Anything else
+(`"1,234"`, `"03/04/2013"`) is left as written and reported by `schema`.
+
+One field can have several proposals: the prompt asks for one per distinct
+value the content states, so two conflicting values both reach review. When
+comparing proposals between runs, compare `provenance.occurrence` with
+`sameResolvedOccurrence(a, b)`: its `selection` and `hintUsed` say how the
+occurrence was reached and can differ between runs that resolved the same span.
 `tokenBoundary` is false when the excerpt was cut from inside a word. These are
 annotations, not verdicts: nothing is dropped because of them, and your review
 policy decides what blocks. The rules and a recommended policy are in

@@ -227,6 +227,22 @@ export interface ExtractionProposal {
    * code that builds proposals by hand keeps compiling.
    */
   evidenceMatch?: ExtractionEvidenceMatch;
+  /**
+   * Present ONLY when `extract()` rewrote the provider's value into the
+   * field's declared type: a plain decimal string for a `number` field, or a
+   * written English date for a `date` field. `candidateValue` is the rewritten
+   * value and `evidenceMatch` describes it; `from` is what the provider wrote.
+   * Absent means the value is exactly what the provider returned.
+   * Provider-supplied values are ignored. See `src/value-normalization.ts`.
+   */
+  valueNormalization?: ExtractionValueNormalization;
+}
+
+/** A lossless rewrite of a provider's value into its field's declared type. */
+export interface ExtractionValueNormalization {
+  kind: "string-to-number" | "date-to-iso";
+  /** The string the provider returned, before the rewrite. */
+  from: string;
 }
 
 /** Exact validity of a candidate value against its schema entry's type and enum. */

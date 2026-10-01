@@ -11,6 +11,10 @@ evidence:
     ref: https://github.com/kontourai/traverse/issues/170
   - kind: doc
     ref: src/evidence-match.ts
+  - kind: issue
+    ref: https://github.com/kontourai/traverse/issues/199
+  - kind: doc
+    ref: src/value-normalization.ts
 ---
 
 # Extraction proposals
@@ -200,6 +204,67 @@ The consumer decides what blocks; Traverse does not.
 
 The portable envelope carries `evidenceMatch` as an optional proposal key
 (see `portable-extraction-result-envelope.md`).
+
+## Value typing, value normalization and several values per field
+
+Found by running a real model end to end (issue #199).
+
+**The tool schema types each value by its own field.** Every bundled adapter
+sends an item schema with one variant per distinct value type, each naming the
+field paths that take it: `number` and `boolean` as those JSON types, `enum`
+as a string restricted to its `enumValues`, `date` as a string described as
+ISO 8601, `array`/`object` as those JSON types. A `number` field therefore
+cannot be answered with a string where the provider enforces the schema. The
+Relay and OpenAI adapters send the strict structured-output dialect (every key
+required, optional ones nullable, no additional properties); OpenAI falls back
+to a non-strict tool, and Relay refuses, when a target is `array` or `object`,
+whose nested shape `TargetFieldSchema` does not declare. Outside strict mode a
+variant holding an array path (`schedules[].startDate`) leaves `fieldPath`
+open, so an indexed answer stays possible.
+
+**`extract()` rewrites a value into its declared type in two lossless cases,
+and records each one.** Not every provider enforces a schema, and a custom
+provider has none, so the core also normalizes:
+
+- `string-to-number`: a `number` field answered with a plain decimal string
+  (`"2.1"` becomes `2.1`). Only an optional `-`, digits and at most one point,
+  no leading zero, and only when the number round-trips to the same digits.
+  `"1,234"`, `"007"`, `"2.1 kg"`, `"$5"`, `"1e3"` and a number too long for a
+  double are left as written.
+- `date-to-iso`: a `date` field answered with a written English date, the
+  whole value being `21 March 2013` or `March 21, 2013` (full or abbreviated
+  month, optional ordinal and comma), becomes `2013-03-21`. Numeric forms
+  (`03/04/2013`) are day/month ambiguous and are left as written, as are a
+  partial (`March 2013`) or impossible date.
+
+A rewritten proposal carries `valueNormalization: { kind, from }`, where
+`from` is the string the provider returned, and the run gets one warning per
+rewrite (`coerced string value to number for "<field>"`,
+`normalized date value to ISO 8601 for "<field>"`; envelope code
+`normalization`/`value-normalized`). `candidateValue` is the rewritten value
+and `evidenceMatch` describes it. A proposal without `valueNormalization`
+carries exactly what the provider returned. Anything not rewritten is left for
+`evidenceMatch.schema` to report as `type-mismatch` or `format-invalid`. The
+rewrite runs before occurrence resolution and dedup, so `"2.1"` and `2.1` for
+one span are one proposal.
+
+The checker's rules did not change, so `checkerVersion` stays
+`evidence-match-v4`: `schemaMatch("21 March 2013", date)` is still
+`format-invalid`. What changed is the value `extract()` hands the checker.
+
+An `explicit` `date` field's prompt line asks for the stated date in ISO form
+rather than verbatim; the two could not both be asked for. The excerpt keeps
+the source wording.
+
+**One proposal per distinct value.** The prompt asks for one proposal per
+distinct value the content states for a field, not one per field: two
+different values for one field are two proposals, so a reviewer sees the
+conflict, and a value stated more than once is one proposal. The rule is
+written in the tool description, in the `proposals` array's schema description
+and in the message, because a runtime that projects the tool as a
+structured-output schema never shows the model the tool description. Dedup is
+unchanged: it collapses only the same field, value and span, so distinct
+values always survive it. Traverse does not pick between them.
 
 ## Out of scope
 
