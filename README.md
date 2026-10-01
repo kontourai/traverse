@@ -882,8 +882,12 @@ if (result.error) {
   // s.bodyHash (sha256), s.redirects?, s.fetchedAt
   // Binary content (today: "pdf" only) sets s.bodyBytes (raw bytes) instead
   // of s.body (which stays ""); EXACTLY ONE of body / bodyBytes is ever
-  // populated. bodyHash's hash domain follows suit: sha256 of the raw bytes
-  // for a binary snapshot, sha256 of utf8-body otherwise.
+  // populated. A text response is decoded with the charset its Content-Type
+  // declares and keeps its exact bytes on s.bytes (with s.declaredCharset).
+  // bodyHash is sha256 of the raw response bytes (s.bodyBytes or s.bytes);
+  // a snapshot with neither (rendered, transcript, or a fetch implementation
+  // without arrayBuffer()) hashes the utf8 of s.body. snapshotHashBasis(s)
+  // reports which.
 }
 ```
 

@@ -36,26 +36,41 @@ function snapshotFileName(snapshot: Snapshot): string {
   return `${ts}-${snapshot.bodyHash.slice(0, 12)}.json`;
 }
 
-/** JSON-serialisable on-disk shape: bodyBytes (if any) becomes base64 in a sibling field. */
+/** JSON-serialisable on-disk shape: each byte field present becomes base64 in a sibling `<field>Base64`. */
+const BYTE_FIELDS = ["bodyBytes", "bytes"] as const;
+
 function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
-  if (snapshot.bodyBytes === undefined) return snapshot as unknown as Record<string, unknown>;
-  const { bodyBytes, ...rest } = snapshot;
-  return { ...rest, bodyBytesBase64: Buffer.from(bodyBytes).toString("base64") };
+  const out: Record<string, unknown> = { ...snapshot };
+  for (const field of BYTE_FIELDS) {
+    const value = snapshot[field];
+    if (value === undefined) continue;
+    delete out[field];
+    out[`${field}Base64`] = Buffer.from(value).toString("base64");
+  }
+  return out;
 }
 
-/** Reverse of toDiskShape: base64 sibling field -> bodyBytes. Old files (no such field) pass through unchanged. */
+/** Reverse of toDiskShape. Files without a base64 sibling field pass through unchanged. */
 function fromDiskShape(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
-  const v = value as Record<string, unknown>;
-  if (typeof v.bodyBytesBase64 !== "string") return value;
-  const { bodyBytesBase64, ...rest } = v;
-  return { ...rest, bodyBytes: new Uint8Array(Buffer.from(bodyBytesBase64 as string, "base64")) };
+  const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const field of BYTE_FIELDS) {
+    const encoded = out[`${field}Base64`];
+    if (typeof encoded !== "string") continue;
+    delete out[`${field}Base64`];
+    out[field] = new Uint8Array(Buffer.from(encoded, "base64"));
+  }
+  return out;
 }
 
 function isSnapshot(value: unknown): value is Snapshot {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   if (v.bodyBytes !== undefined && !(v.bodyBytes instanceof Uint8Array)) return false;
+  if (v.bytes !== undefined && !(v.bytes instanceof Uint8Array)) return false;
+  // `bytes` and `declaredCharset` travel together; one without the other is not a record this package wrote.
+  if ((v.bytes === undefined) !== (v.declaredCharset === undefined)) return false;
+  if (v.declaredCharset !== undefined && v.declaredCharset !== null && typeof v.declaredCharset !== "string") return false;
   return (
     typeof v.sourceId === "string" &&
     typeof v.url === "string" &&

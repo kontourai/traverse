@@ -159,6 +159,12 @@ test).
   stays `""` and `bodyHash` hashes the raw bytes. This is what lets
   `fetchAndExtract()` pass fetched PDF/image snapshots into caller-supplied
   text-extractor seams.
+- **Text Snapshot Bytes** (`Snapshot.bytes`, `Snapshot.declaredCharset`): the
+  exact bytes of a text response and the charset its `Content-Type` declared.
+  `Snapshot.body` is those bytes decoded with that charset, and `bodyHash`
+  hashes the bytes. A text snapshot without them hashes the UTF-8 of `body`;
+  `snapshotHashBasis` reports which basis a snapshot uses. See
+  [`docs/decisions/text-snapshot-bytes.md`](docs/decisions/text-snapshot-bytes.md).
 - **Field Path Normalization**: `extract()`'s recovery rule for a
   provider-emitted `fieldPath` that carries concrete array indices (e.g.
   `"schedules[0].startDate"`) against a `targetSchema` that declares the

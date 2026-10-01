@@ -38,6 +38,7 @@ import type { ContentType } from "../types.js";
 import { prepareContent } from "../content-prep.js";
 import { isPureJsShellWarning } from "../embedded.js";
 import { createGuardedFetch } from "@kontourai/forage/egress";
+import { decodeTextBody, parseDeclaredCharset } from "@kontourai/forage/fetch";
 
 /**
  * The default egress transport: forage's SSRF-pinned guarded fetch. It resolves
@@ -59,14 +60,33 @@ const GLOBAL_POLITENESS = new Map<string, number>();
 /** Process-wide robots cache (per origin), used when none is injected. */
 const GLOBAL_ROBOTS = new Map<string, RobotsRules>();
 
-/** sha256 hex of a string body — the byte-identity fingerprint on every snapshot. */
+/**
+ * sha256 hex of the UTF-8 encoding of a string body. The `bodyHash` of a text
+ * snapshot that carries no raw bytes (see `snapshotHashBasis`).
+ */
 export function sha256Hex(body: string): string {
   return createHash("sha256").update(body, "utf8").digest("hex");
 }
 
-/** sha256 hex of RAW bytes — the byte-identity fingerprint for a binary snapshot's bodyHash. */
+/** sha256 hex of RAW bytes — the `bodyHash` of every snapshot whose response bytes were read. */
 export function sha256Bytes(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * What a snapshot's `bodyHash` was computed over.
+ *
+ * - `"bytes"`: the exact response bytes. Binary snapshots (`bodyBytes`) and
+ *   text snapshots that carry `bytes`.
+ * - `"decoded-utf8"`: the UTF-8 encoding of `body`. Text snapshots without
+ *   `bytes`: captures stored before text was hashed by its bytes, rendered
+ *   pages, transcripts, and a `fetchImpl` that has no `arrayBuffer()`.
+ *
+ * Two digests on different bases are not comparable: a difference between them
+ * does not show that the page changed.
+ */
+export function snapshotHashBasis(snapshot: Pick<Snapshot, "bodyBytes" | "bytes">): "bytes" | "decoded-utf8" {
+  return snapshot.bodyBytes !== undefined || snapshot.bytes !== undefined ? "bytes" : "decoded-utf8";
 }
 
 /**
@@ -693,30 +713,54 @@ async function fetchSourceAttempt(
       );
     }
 
-    // success: build the snapshot. Binary content-types (PDF and image formats,
-    // via isBinaryContentType) are captured as RAW BYTES on `bodyBytes` when
-    // the response supports `arrayBuffer()` — the real global `fetch`
-    // Response always does; a custom `fetchImpl` that omits it degrades to
-    // the pre-existing lossy `text()` capture, flagged with a warning, rather
-    // than silently corrupting the body (see traverse#23).
-    const resolvedContentType = resolveContentType(config.contentType, response.headers.get("content-type"));
+    // success: build the snapshot. The body is read as RAW BYTES whenever the
+    // response supports `arrayBuffer()` — the real global `fetch` Response
+    // always does — and `bodyHash` is the SHA-256 of exactly those bytes, for
+    // text and binary alike. That is the basis forage hashes on, so the two
+    // fetchers agree on the digest of one response.
+    //
+    // A binary content-type (PDF and image formats, via isBinaryContentType)
+    // keeps the bytes on `bodyBytes` (traverse#23). A text content-type decodes
+    // them with the charset `Content-Type` declares, through forage's own
+    // decoder, and keeps the bytes and the declared charset on the snapshot so
+    // the digest stays checkable against what is stored.
+    //
+    // A custom `fetchImpl` without `arrayBuffer()` cannot report its bytes. It
+    // keeps the `text()` capture, hashed over the UTF-8 of that text, and a
+    // binary content-type read that way is flagged lossy with a warning.
+    const contentTypeHeader = response.headers.get("content-type");
+    const resolvedContentType = resolveContentType(config.contentType, contentTypeHeader);
+    const binary = isBinaryContentType(resolvedContentType);
     let body = "";
     let bodyBytes: Uint8Array | undefined;
+    let textBytes: Uint8Array | undefined;
+    let declaredCharset: string | null = null;
     let bodyHash: string;
-    if (isBinaryContentType(resolvedContentType) && typeof response.arrayBuffer === "function") {
-      let buf: ArrayBuffer;
+    if (typeof response.arrayBuffer === "function") {
+      let raw: Uint8Array;
       try {
-        buf = await response.arrayBuffer();
+        raw = new Uint8Array(await response.arrayBuffer());
       } catch (err) {
         return withWarnings(
           { error: { kind: "network", message: `failed to read body from ${currentUrl.href}: ${err instanceof Error ? err.message : String(err)}` } },
           warnings,
         );
       }
-      bodyBytes = new Uint8Array(buf);
-      bodyHash = sha256Bytes(bodyBytes);
+      bodyHash = sha256Bytes(raw);
+      if (binary) {
+        bodyBytes = raw;
+      } else {
+        const declared = parseDeclaredCharset(contentTypeHeader);
+        const decoded = decodeTextBody(raw, declared.charset);
+        for (const warning of [...declared.warnings, ...decoded.warnings]) {
+          warnings.push(`${currentUrl.href}: ${warning}`);
+        }
+        body = decoded.text;
+        textBytes = raw;
+        declaredCharset = declared.charset;
+      }
     } else {
-      if (isBinaryContentType(resolvedContentType)) {
+      if (binary) {
         warnings.push(
           `fetchImpl has no arrayBuffer(); binary content-type "${resolvedContentType}" from ${currentUrl.href} captured as lossy text — pass a fetchImpl with arrayBuffer for binary sources`,
         );
@@ -741,6 +785,10 @@ async function fetchSourceAttempt(
       bodyHash,
     };
     if (bodyBytes) snapshot.bodyBytes = bodyBytes;
+    if (textBytes) {
+      snapshot.bytes = textBytes;
+      snapshot.declaredCharset = declaredCharset;
+    }
     if (redirects.length > 0) snapshot.redirects = redirects;
     // Capture HTTP validators (verbatim) so a later `revalidate` fetch can turn
     // an unchanged re-fetch into a cheap 304. Absent headers leave the fields

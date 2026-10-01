@@ -152,11 +152,16 @@ export interface Snapshot {
    */
   contentType: ContentType;
   /**
-   * The response body, decoded as UTF-8 text — populated for every resolved
-   * `contentType` EXCEPT one classified BINARY (see
-   * `isBinaryContentType` in fetch-source.ts), where it is `""` and the raw
-   * bytes live on {@link bodyBytes} instead. EXACTLY ONE of `body` /
-   * `bodyBytes` is ever populated for a given snapshot.
+   * The response body as text — populated for every resolved `contentType`
+   * EXCEPT one classified BINARY (see `isBinaryContentType` in
+   * fetch-source.ts), where it is `""` and the raw bytes live on
+   * {@link bodyBytes} instead. EXACTLY ONE of `body` / `bodyBytes` is ever
+   * populated for a given snapshot.
+   *
+   * When {@link bytes} is present, this is those bytes decoded with
+   * {@link declaredCharset} (UTF-8 when none is declared), with a leading
+   * byte-order mark removed. Otherwise it is the text the fetch implementation,
+   * renderer, or transcript source produced.
    */
   body: string;
   /**
@@ -170,11 +175,27 @@ export interface Snapshot {
    */
   bodyBytes?: Uint8Array;
   /**
-   * Lowercase hex SHA-256 — the byte-identity fingerprint. Hash DOMAIN
-   * depends on which of `body`/`bodyBytes` is populated: sha256 of the RAW
-   * bytes (`sha256Bytes` in fetch-source.ts) for a binary snapshot
-   * (`bodyBytes` populated), sha256 of utf8-`body` (`sha256Hex`) otherwise —
-   * byte-identical to pre-#23 behavior for every text snapshot.
+   * The exact bytes of a TEXT response, as received. Present exactly when
+   * {@link declaredCharset} is: on a text snapshot whose response bytes the
+   * fetcher read. `bodyHash` is then the SHA-256 of these bytes and `body` is
+   * derived from them. Same field and meaning as forage's `Snapshot.bytes`.
+   *
+   * Absent on binary snapshots (their bytes are {@link bodyBytes}), rendered
+   * snapshots, transcripts, captures made through a `fetchImpl` without
+   * `arrayBuffer()`, and text snapshots stored before text was hashed by its
+   * bytes. `snapshotHashBasis` reports which basis a snapshot's hash uses.
+   */
+  bytes?: Uint8Array;
+  /** Lower-cased `charset` parameter of `Content-Type`, or `null` when none was usable. Present exactly when {@link bytes} is. */
+  declaredCharset?: string | null;
+  /**
+   * Lowercase hex SHA-256 of the capture. Over the RAW response bytes when the
+   * snapshot carries them ({@link bodyBytes} for binary, {@link bytes} for
+   * text); over the UTF-8 encoding of {@link body} otherwise.
+   * `snapshotHashBasis` reports which.
+   *
+   * The two bases give the same digest for a response that is valid UTF-8 with
+   * no byte-order mark, and different digests for any other text response.
    */
   bodyHash: string;
   /** the redirect chain that led here, if any: the ordered list of URLs visited BEFORE `url`. */
@@ -208,8 +229,8 @@ export interface Snapshot {
    * PRESENCE (never explicit `false`) is the marker — same convention as
    * {@link Snapshot.bodyBytes} marking binary content and
    * {@link Snapshot.notModified} marking a 304. `contentType` is always
-   * `"html"` and `bodyHash` uses the same text (`sha256Hex`) domain as every
-   * other non-binary snapshot when this is set. See
+   * `"html"` and `bodyHash` is over the UTF-8 encoding of `body` (`sha256Hex`)
+   * when this is set, since a serialized DOM has no response bytes. See
    * docs/decisions/rendered-fetch.md.
    */
   rendered?: boolean;
@@ -313,11 +334,15 @@ export interface FetchLikeResponse {
   headers: { get(name: string): string | null };
   text(): Promise<string>;
   /**
-   * OPTIONAL raw-bytes reader, used by `fetchSource` for binary
-   * content-types (see `isBinaryContentType`). The real global `fetch`
-   * `Response` always implements this. A custom `fetchImpl` that omits it
-   * degrades gracefully for binary content — see the fallback branch in
-   * `fetchSource` — rather than being required to implement it.
+   * OPTIONAL raw-bytes reader. When present, `fetchSource` reads every body
+   * through it, hashes those bytes, and decodes a text body with the charset
+   * `Content-Type` declares. The real global `fetch` `Response` always
+   * implements this.
+   *
+   * A custom `fetchImpl` that omits it falls back to `text()`: the hash is
+   * then over the UTF-8 of that text, which differs from the hash of the
+   * response bytes unless they are valid UTF-8 with no byte-order mark, and a
+   * binary content-type is captured as lossy text with a warning.
    */
   arrayBuffer?(): Promise<ArrayBuffer>;
 }

@@ -27,5 +27,6 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [prepared-artifact](./prepared-artifact.md) | current | Prepared artifact |
 | [provider-conformance](./provider-conformance.md) | current | Extraction provider conformance |
 | [rendered-fetch](./rendered-fetch.md) | current | Rendered Fetch |
+| [text-snapshot-bytes](./text-snapshot-bytes.md) | current | Text snapshots are hashed by their response bytes and decoded by declared charset |
 | [transcript-content-type](./transcript-content-type.md) | current | YouTube / transcript (WebVTT) content type |
 | [versioned-extraction-tasks](./versioned-extraction-tasks.md) | current | Versioned extraction tasks |
