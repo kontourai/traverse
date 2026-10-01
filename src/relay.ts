@@ -5,10 +5,9 @@ import {
   type ModelInvocationResult,
   type ModelRuntime,
 } from "@kontourai/relay";
-import { buildExtractionMessages, buildExtractionTool, buildStrictExtractionSchema, parseProposals } from "./anthropic.js";
+import { buildExtractionMessages, buildExtractionTool, buildStrictExtractionSchema, enumValuesUnrestrictedWarnings, parseProposals } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type {
-  ContentType,
   ExtractionProvider,
   ProviderExtractionInput,
   ProviderExtractionOutput,
@@ -41,7 +40,7 @@ export function createRelayExtractionProvider(options: RelayExtractionAdapterOpt
         prepared.request,
         input.signal ? { signal: input.signal } : undefined,
       );
-      return relayOutput(result, prepared.toolName, name, input.contentType);
+      return relayOutput(result, prepared.toolName, name, input);
     },
   };
   if (physicalBatch) {
@@ -73,7 +72,7 @@ export function createRelayExtractionProvider(options: RelayExtractionAdapterOpt
             outcome.value,
             prepared[index].toolName,
             name,
-            inputs[index].contentType,
+            inputs[index],
           ),
         }
         : {
@@ -117,13 +116,13 @@ function relayOutput(
   result: ModelInvocationResult,
   toolName: string,
   providerName: string,
-  contentType: ContentType,
+  input: ProviderExtractionInput,
 ): ProviderExtractionOutput {
   const call = result.toolCalls.find((candidate) => candidate.name === toolName);
   // A call present with no input is an unusable answer, not a missing call.
   const toolInput = call === undefined ? undefined : (call.input ?? null);
-  const parsed = parseProposals(toolInput, providerName, contentType);
-  const warnings = [...parsed.warnings, ...(result.warnings ?? [])];
+  const parsed = parseProposals(toolInput, providerName, input.contentType);
+  const warnings = [...parsed.warnings, ...(result.warnings ?? []), ...enumValuesUnrestrictedWarnings(input.targetSchema)];
   if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
   const truncated = result.stopReason === "max_tokens" || result.stopReason === "max_output_tokens";
   if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");

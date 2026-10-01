@@ -1,4 +1,4 @@
-import { buildExtractionTool, buildStrictExtractionSchema, parseProposals, resolveSdkMaxRetries } from "./anthropic.js";
+import { buildExtractionTool, buildStrictExtractionSchema, enumValuesUnrestrictedWarnings, parseProposals, resolveSdkMaxRetries } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "./types.js";
 
@@ -77,7 +77,7 @@ export function createOpenAIExtractionProvider(opts: OpenAIAdapterOptions = {}):
         catch { rawInput = null; warnings.push("provider returned malformed JSON tool arguments"); }
       } else warnings.push("provider returned no extraction tool call");
       const parsed = parseProposals(rawInput, name, input.contentType);
-      warnings.push(...parsed.warnings);
+      warnings.push(...parsed.warnings, ...enumValuesUnrestrictedWarnings(input.targetSchema));
       const truncated = response.choices[0]?.finish_reason === "length";
       if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");
       return {

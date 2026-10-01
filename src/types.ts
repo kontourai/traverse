@@ -234,6 +234,9 @@ export interface ExtractionProposal {
    * value and `evidenceMatch` describes it; `from` is what the provider wrote.
    * Absent means the value is exactly what the provider returned.
    * Provider-supplied values are ignored. See `src/value-normalization.ts`.
+   * In process only: the portable envelope does not carry it (its readers
+   * reject unknown proposal keys); there the rewrite is the run's
+   * `normalization`/`proposal-normalization` warning classification.
    */
   valueNormalization?: ExtractionValueNormalization;
 }

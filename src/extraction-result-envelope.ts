@@ -28,7 +28,6 @@ import type {
   ExtractionEvidenceMatch,
   ExtractionSchemaMatch,
   ExtractionValueInExcerpt,
-  ExtractionValueNormalization,
   ExtractionProposal,
   ExtractionProviderFailure,
   ExtractionResult,
@@ -37,7 +36,6 @@ import type {
 } from "./types.js";
 import { validatePdfLayout } from "./content-prep.js";
 import { EVIDENCE_MATCH_CHECKER_VERSION, schemaMatch, valueInExcerpt } from "./evidence-match.js";
-import { normalizeCandidateValue } from "./value-normalization.js";
 
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_FORMAT = "traverse-extraction-result";
 export const PORTABLE_EXTRACTION_RESULT_ENVELOPE_VERSION = 1;
@@ -51,7 +49,7 @@ export interface PortableExtractionSource {
   snapshotRef?: string;
 }
 
-export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint" | "producedBy"> {
+export interface PortableExtractionProposal extends Omit<ExtractionProposal, "occurrenceHint" | "producedBy" | "valueNormalization"> {
   /** Carried only when the in-process `producedBy` names its `modelSource`. */
   producedBy?: PortableExtractionProducedBy;
   provenance: {
@@ -171,7 +169,6 @@ const SHA256 = /^sha256:[a-f0-9]{64}$/;
 const HEX_SHA256 = /^[a-f0-9]{64}$/;
 const VALUE_TYPES: ReadonlySet<TargetFieldSchema["type"]> = new Set(["string", "number", "boolean", "date", "enum", "array", "object"]);
 const INFERENCE_TYPES = new Set(["explicit", "inferred"]);
-const VALUE_NORMALIZATION_KINDS = new Set<ExtractionValueNormalization["kind"]>(["string-to-number", "date-to-iso"]);
 const SCHEMA_MATCHES = new Set<ExtractionSchemaMatch>(["ok", "type-mismatch", "enum-mismatch", "format-invalid"]);
 const VALUE_IN_EXCERPT_MATCHES = new Set<ExtractionValueInExcerpt>(["match", "mismatch", "not-evaluated", "not-applicable"]);
 const PARTIAL_REASONS = new Set([
@@ -327,9 +324,6 @@ function portableProposal(proposal: ExtractionProposal): PortableExtractionPropo
         },
       }
       : {}),
-    ...(proposal.valueNormalization !== undefined
-      ? { valueNormalization: { kind: proposal.valueNormalization.kind, from: proposal.valueNormalization.from } }
-      : {}),
   };
 }
 
@@ -368,9 +362,8 @@ function classifyWarning(warning: string): PortableExtractionWarning {
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider returned no extraction (?:tool|function) call/.test(warning)) return { category: "provider", code: "missing-tool-call" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): provider answer unusable/.test(warning)) return { category: "provider", code: "unusable-answer" };
   if (/^chunk \d+\/\d+ \(chars:\d+-\d+\): dropped \d+ of \d+ tool items as malformed$/.test(warning)) return { category: "normalization", code: "malformed-tool-items" };
-  if (/provider call failed|^response truncated|^provider returned|^provider tool call/.test(warning)) return { category: "provider", code: "provider-warning" };
-  if (/^coerced string value to number for |^normalized date value to ISO 8601 for /.test(warning)) return { category: "normalization", code: "value-normalized" };
-  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
+  if (/provider call failed|^response truncated|^provider returned|^provider tool (?:call|schema)/.test(warning)) return { category: "provider", code: "provider-warning" };
+  if (/^dropped .*proposal|^dropped malformed tool item|^clamped |^coerced string value |^normalized date value |^omitted non-numeric confidence|normalization failed/.test(warning)) return { category: "normalization", code: "proposal-normalization" };
   if (/^(?:structural|markdown) prep pruned /.test(warning)) return { category: "preparation", code: "navigation-pruned" };
   // The chunk cap, not the maxContentChars cut: `content-truncated` names only
   // the latter elsewhere in the envelope, so this matches the partial reason.
@@ -514,7 +507,7 @@ function validateResult(input: unknown): PortableExtractionResult {
 
 function validateProposal(input: unknown, path: string, artifact: PreparedArtifact | undefined): PortableExtractionProposal {
   const value = record(input, path);
-  exactKeys(value, ["fieldPath", "candidateValue", "provenance", "extractor"], ["confidence", "pathIndices", "inferenceType", "valueType", "enumValues", "producedBy", "evidenceMatch", "valueNormalization"], path);
+  exactKeys(value, ["fieldPath", "candidateValue", "provenance", "extractor"], ["confidence", "pathIndices", "inferenceType", "valueType", "enumValues", "producedBy", "evidenceMatch"], path);
   const provenance = record(value.provenance, `${path}.provenance`);
   exactKeys(provenance, ["excerpt", "locator", "occurrence"], [], `${path}.provenance`);
   const locator = validateLocator(provenance.locator, `${path}.provenance.locator`);
@@ -534,35 +527,9 @@ function validateProposal(input: unknown, path: string, artifact: PreparedArtifa
     ...(value.enumValues === undefined ? {} : { enumValues: strings(value.enumValues, `${path}.enumValues`) }),
     ...(value.producedBy === undefined ? {} : { producedBy: validateProducedBy(value.producedBy, `${path}.producedBy`) }),
     ...(value.evidenceMatch === undefined ? {} : { evidenceMatch: validateEvidenceMatch(value.evidenceMatch, `${path}.evidenceMatch`) }),
-    ...(value.valueNormalization === undefined ? {} : { valueNormalization: validateValueNormalization(value.valueNormalization, `${path}.valueNormalization`) }),
   };
   if (proposal.evidenceMatch) checkEvidenceMatchConsistency(proposal, `${path}.evidenceMatch`);
-  if (proposal.valueNormalization) checkValueNormalizationConsistency(proposal, `${path}.valueNormalization`);
   return proposal;
-}
-
-function validateValueNormalization(input: unknown, path: string): ExtractionValueNormalization {
-  const value = record(input, path);
-  exactKeys(value, ["kind", "from"], [], path);
-  if (typeof value.from !== "string") fail(`${path}.from must be a string`);
-  return {
-    kind: enumValue(value.kind, VALUE_NORMALIZATION_KINDS, `${path}.kind`) as ExtractionValueNormalization["kind"],
-    from: value.from,
-  };
-}
-
-/**
- * The rewrite is a pure function of `from` and the declared type, so the
- * validator recomputes it and rejects a record whose `candidateValue` is not
- * what `from` rewrites to.
- */
-function checkValueNormalizationConsistency(proposal: PortableExtractionProposal, path: string): void {
-  const recorded = proposal.valueNormalization!;
-  if (proposal.valueType === undefined) fail(`${path} requires the proposal's valueType`);
-  const recomputed = normalizeCandidateValue(recorded.from, { type: proposal.valueType });
-  if (recomputed.normalization?.kind !== recorded.kind || recomputed.value !== proposal.candidateValue) {
-    fail(`${path} does not rewrite its from value to the proposal's candidateValue`);
-  }
 }
 
 /**

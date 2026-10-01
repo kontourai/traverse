@@ -222,35 +222,67 @@ whose nested shape `TargetFieldSchema` does not declare. Outside strict mode a
 variant holding an array path (`schedules[].startDate`) leaves `fieldPath`
 open, so an indexed answer stays possible.
 
+Each variant repeats the item schema (about 0.75 KB), and every distinct enum
+value set needs its own. At most `MAX_ENUM_VALUE_VARIANTS` (8) distinct enum
+sets, in schema order, get a variant. Enum fields past the cap are typed as a
+plain string: their values stay in the tool description and
+`evidenceMatch.schema` still checks them. The adapter then returns the warning
+`provider tool schema left enum values unrestricted for N field(s) …` naming
+them (envelope code `provider`/`provider-warning`), which `extract()` keeps
+once per run. The schema is therefore at most 8 enum variants plus one per
+other value type, whatever the number of fields.
+
 **`extract()` rewrites a value into its declared type in two lossless cases,
 and records each one.** Not every provider enforces a schema, and a custom
 provider has none, so the core also normalizes:
 
-- `string-to-number`: a `number` field answered with a plain decimal string
-  (`"2.1"` becomes `2.1`). Only an optional `-`, digits and at most one point,
-  no leading zero, and only when the number round-trips to the same digits.
-  `"1,234"`, `"007"`, `"2.1 kg"`, `"$5"`, `"1e3"` and a number too long for a
-  double are left as written.
+- `string-to-number`: a `number` field answered with the canonical decimal
+  spelling of a number (`"2.1"` becomes `2.1`). The trimmed string must match
+  an optional `-`, digits and at most one point, and `String(Number(s))` must
+  equal it. So a trailing zero in the fraction is refused (`"1.000"` may be a
+  grouped 1000, `"2.10"` a version), as are `"1,234"`, `"007"`, `"2.1 kg"`,
+  `"$5"`, `"1e3"`, `"-0"` and a number too long for a double. A refused string
+  keeps `type-mismatch`.
 - `date-to-iso`: a `date` field answered with a written English date, the
   whole value being `21 March 2013` or `March 21, 2013` (full or abbreviated
   month, optional ordinal and comma), becomes `2013-03-21`. Numeric forms
   (`03/04/2013`) are day/month ambiguous and are left as written, as are a
-  partial (`March 2013`) or impossible date.
+  partial (`March 2013`) or impossible date and a year outside 1000 to 2999.
 
-A rewritten proposal carries `valueNormalization: { kind, from }`, where
-`from` is the string the provider returned, and the run gets one warning per
-rewrite (`coerced string value to number for "<field>"`,
-`normalized date value to ISO 8601 for "<field>"`; envelope code
-`normalization`/`value-normalized`). `candidateValue` is the rewritten value
-and `evidenceMatch` describes it. A proposal without `valueNormalization`
-carries exactly what the provider returned. Anything not rewritten is left for
-`evidenceMatch.schema` to report as `type-mismatch` or `format-invalid`. The
-rewrite runs before occurrence resolution and dedup, so `"2.1"` and `2.1` for
-one span are one proposal.
+A rewritten proposal carries `valueNormalization: { kind, from }` in process,
+where `from` is the string the provider returned, and the run gets one warning
+per rewrite naming the field and the original
+(`coerced string value "2.1" to number for "<field>"`,
+`normalized date value "21 March 2013" to ISO 8601 for "<field>"`).
+`candidateValue` is the rewritten value and `evidenceMatch` describes it. A
+proposal without `valueNormalization` carries exactly what the provider
+returned. Anything not rewritten is left for `evidenceMatch.schema` to report
+as `type-mismatch` or `format-invalid`.
 
-The checker's rules did not change, so `checkerVersion` stays
-`evidence-match-v4`: `schemaMatch("21 March 2013", date)` is still
-`format-invalid`. What changed is the value `extract()` hands the checker.
+**The portable envelope does not carry `valueNormalization`.** Released
+readers (Survey 8.0.0, Fieldwork 0.13.0, Traverse 4.0.0) reject an unknown
+proposal key, so adding one would break every one of them. In the envelope a
+rewrite appears only as the warning's existing classification,
+`normalization`/`proposal-normalization`; the field and original are in
+`ExtractionResult.warnings` and on the in-process proposal. A per-proposal
+envelope key is deferred until readers accept it. A test imports such an
+envelope under the published Survey reader.
+
+The rewrite runs before occurrence resolution and dedup, so `"2.1"` and `2.1`
+for one span are one proposal. Which duplicate survives does not depend on
+provider order: a proposal whose value came back in its declared type wins
+over a rewritten one, and between two rewritten ones the smaller original (by
+code unit) wins. Rewrite warnings are written after dedup, for returned
+proposals only, so there is never a warning for a record no proposal carries.
+
+**`checkerVersion` stays `evidence-match-v4`.** The checker's rules are
+unchanged: `schemaMatch("21 March 2013", date)` is still `format-invalid` and
+`schemaMatch("2.1", number)` still `type-mismatch`. What changed is the value
+`extract()` hands the checker. The envelope validator recomputes
+`evidenceMatch` from the stored `candidateValue`, `valueType` and excerpt, so
+an envelope written before this change and one written after it are both
+consistent under v4. A bump would name a rule change that did not happen and
+would make every stored v4 envelope fail validation.
 
 An `explicit` `date` field's prompt line asks for the stated date in ISO form
 rather than verbatim; the two could not both be asked for. The excerpt keeps

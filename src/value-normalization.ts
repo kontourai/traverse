@@ -2,12 +2,13 @@
  * Deterministic rewrites of a provider's candidate value into its field's
  * declared type, applied by `extract()` before occurrence resolution, dedup
  * and `evidenceMatch`. Only two rewrites exist, each lossless and each
- * recorded on the proposal as `valueNormalization` and in a warning:
+ * recorded on the in-process proposal as `valueNormalization` and in a warning
+ * that names the field and the original:
  *
- *  - `string-to-number`: a `number` field answered with a plain decimal string
- *    (`"2.1"` -> `2.1`);
+ *  - `string-to-number`: a `number` field answered with the canonical decimal
+ *    spelling of a number (`"2.1"` -> `2.1`; not `"2.10"` or `"1.000"`);
  *  - `date-to-iso`: a `date` field answered with a written English date
- *    (`"21 March 2013"`, `"March 21, 2013"` -> `"2013-03-21"`).
+ *    (`"21 March 2013"`, `"March 21, 2013"` -> `"2013-03-21"`), year 1000-2999.
  *
  * Anything else is left exactly as the provider wrote it, so
  * `evidenceMatch.schema` reports `type-mismatch` or `format-invalid`.
@@ -16,7 +17,7 @@
 import type { ExtractionValueNormalization, TargetFieldSchema } from "./types.js";
 
 /** No sign-only, exponent, grouping, leading zero or unit: `"1,234"`, `"007"`, `"2.1 kg"` and `"1e3"` are left alone. */
-const PLAIN_DECIMAL = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?$/;
+const PLAIN_DECIMAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
 
 const MONTHS: Record<string, number> = {
   jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4, may: 5, jun: 6, june: 6,
@@ -29,6 +30,9 @@ const DAY = "(\\d{1,2})(?:st|nd|rd|th)?";
 const MONTH_FIRST = new RegExp(`^${MONTH_NAME}\\s+${DAY},?\\s+(\\d{4})$`, "i");
 const DAY_FIRST = new RegExp(`^${DAY}\\s+${MONTH_NAME},?\\s+(\\d{4})$`, "i");
 
+const MIN_YEAR = 1000;
+const MAX_YEAR = 2999;
+
 function isCalendarDate(year: number, month: number, day: number): boolean {
   if (!(month >= 1 && month <= 12) || day < 1) return false;
   const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
@@ -36,14 +40,14 @@ function isCalendarDate(year: number, month: number, day: number): boolean {
 }
 
 function plainDecimalToNumber(text: string): number | undefined {
-  const m = PLAIN_DECIMAL.exec(text.trim());
-  if (!m) return undefined;
-  const fraction = (m[3] ?? "").replace(/0+$/, "");
-  const canonical = `${m[1]}${m[2]}${fraction ? `.${fraction}` : ""}`;
-  const value = Number(canonical);
-  // Round-trip: rejects anything a double cannot hold exactly as written
+  const trimmed = text.trim();
+  if (!PLAIN_DECIMAL.test(trimmed)) return undefined;
+  const value = Number(trimmed);
+  // Only the canonical spelling of the number is rewritten. A trailing zero
+  // in the fraction is refused: `"1.000"` may be a grouped 1000 and `"2.10"`
+  // a version. So is anything a double cannot hold as written
   // (`"12345678901234567890"`, `"0.1000000000000000055"`) and `"-0"`.
-  return Number.isFinite(value) && String(value) === canonical ? value : undefined;
+  return Number.isFinite(value) && String(value) === trimmed ? value : undefined;
 }
 
 function writtenDateToIso(text: string): string | undefined {
@@ -54,8 +58,10 @@ function writtenDateToIso(text: string): string | undefined {
   if (monthFirst) [month, day, year] = [MONTHS[monthFirst[1].toLowerCase()], Number(monthFirst[2]), Number(monthFirst[3])];
   else if (dayFirst) [day, month, year] = [Number(dayFirst[1]), MONTHS[dayFirst[2].toLowerCase()], Number(dayFirst[3])];
   else return undefined;
+  // A four-digit run outside this range is more likely a misread than a year.
+  if (year < MIN_YEAR || year > MAX_YEAR) return undefined;
   if (month === undefined || !isCalendarDate(year, month, day)) return undefined;
-  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 /**

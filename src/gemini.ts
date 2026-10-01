@@ -1,4 +1,4 @@
-import { buildExtractionTool, parseProposals } from "./anthropic.js";
+import { buildExtractionTool, enumValuesUnrestrictedWarnings, parseProposals } from "./anthropic.js";
 import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 import type { ExtractionProvider, ProviderExtractionOutput } from "./types.js";
 
@@ -53,7 +53,7 @@ export function createGeminiExtractionProvider(opts: GeminiAdapterOptions = {}):
       const call = response.functionCalls?.find((item) => item.name === TOOL_NAME);
       // A call present with no args is an unusable answer, not a missing call.
       const parsed = parseProposals(call ? (call.args ?? null) : undefined, name, input.contentType);
-      const warnings = [...parsed.warnings];
+      const warnings = [...parsed.warnings, ...enumValuesUnrestrictedWarnings(input.targetSchema)];
       if (!call) warnings.push("provider returned no extraction function call");
       const truncated = response.candidates?.some((candidate) => candidate.finishReason === "MAX_TOKENS") ?? false;
       if (truncated) warnings.push("response truncated at maxTokens; proposals may be incomplete");

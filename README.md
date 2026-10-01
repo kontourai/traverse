@@ -263,12 +263,15 @@ them.
 
 `evidenceMatch` describes the value the proposal carries. `extract()` rewrites
 a provider's value into its field's declared type in two lossless cases only:
-a plain decimal string for a `number` field (`"2.1"` becomes `2.1`) and a
-written English date for a `date` field (`"21 March 2013"` becomes
-`"2013-03-21"`). Each rewrite is recorded as
-`valueNormalization: { kind, from }` on the proposal and as a warning; a
-proposal without it carries exactly what the provider returned. Anything else
-(`"1,234"`, `"03/04/2013"`) is left as written and reported by `schema`.
+the canonical decimal spelling of a number for a `number` field (`"2.1"`
+becomes `2.1`; `"2.10"` and `"1.000"` are refused) and a written English date
+for a `date` field (`"21 March 2013"` becomes `"2013-03-21"`). Each rewrite is
+recorded as `valueNormalization: { kind, from }` on the in-process proposal
+and as a warning naming the field and the original; a proposal without it
+carries exactly what the provider returned. Anything else (`"1,234"`,
+`"03/04/2013"`) is left as written and reported by `schema`. The portable
+envelope does not carry `valueNormalization`; there a rewrite is the
+`normalization`/`proposal-normalization` warning classification.
 
 One field can have several proposals: the prompt asks for one per distinct
 value the content states, so two conflicting values both reach review. When

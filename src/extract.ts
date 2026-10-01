@@ -77,8 +77,9 @@
  *
  * A value is rewritten into its field's declared type in exactly two lossless
  * cases (a plain decimal string for a `number` field, a written English date
- * for a `date` field; src/value-normalization.ts). Each rewrite is recorded on
- * the proposal as `valueNormalization` and in a warning.
+ * for a `date` field; src/value-normalization.ts). Each rewrite a returned
+ * proposal carries is recorded on it as `valueNormalization` (in process only)
+ * and in a warning naming the field and the original.
  *
  * Every surviving proposal also gets `evidenceMatch`, deterministic schema and
  * value-in-excerpt annotations (src/evidence-match.ts) of the value it carries.
@@ -92,7 +93,7 @@
 
 import { prepareAndChunk } from "./chunk.js";
 import { canonicalTaskJson, checkExtractionTaskSpec } from "./task.js";
-import { normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
+import { ENUM_VALUES_UNRESTRICTED_WARNING, normalizeProviderFailure, unsupportedProviderCapability } from "./provider-conformance.js";
 import type { PreparedChunks } from "./chunk.js";
 import { imageBytesRequiredError, pdfBytesRequiredError, prepareImageText, preparePdfText } from "./content-prep.js";
 import { createPreparedArtifact, isWellFormedUnicode } from "./prepared-artifact.js";
@@ -580,7 +581,9 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
       // fallback for providers that do not set it. Whatever decides, the
       // located warning below is written exactly when the loss is recorded,
       // so the envelope's warning codes and its outcome always agree.
-      const adapterWarnings = output.warnings ?? [];
+      // A run-level adapter note repeated on every call is kept once.
+      const adapterWarnings = (output.warnings ?? []).filter((warning) =>
+        !(typeof warning === "string" && warning.startsWith(ENUM_VALUES_UNRESTRICTED_WARNING) && warnings.includes(warning)));
       const missingToolCall = typeof output.missingToolCall === "boolean"
         ? output.missingToolCall
         : adapterWarnings.some((warning) => MISSING_TOOL_CALL_ADAPTER_WARNING.test(warning));
@@ -698,6 +701,16 @@ export async function extract(input: ExtractInput): Promise<ExtractionResult> {
         `dropped ${dropped} duplicate proposal${dropped === 1 ? "" : "s"} (same field + value + source span)`,
       );
     }
+    // One warning per rewrite a returned proposal carries, naming the field
+    // and the original. The portable envelope has no key for the record, so
+    // this warning's classification is how an envelope reader learns of it.
+    for (const proposal of proposals) {
+      const rewrite = proposal.valueNormalization;
+      if (!rewrite) continue;
+      warnings.push(rewrite.kind === "string-to-number"
+        ? `coerced string value ${JSON.stringify(rewrite.from)} to number for "${proposal.fieldPath}"`
+        : `normalized date value ${JSON.stringify(rewrite.from)} to ISO 8601 for "${proposal.fieldPath}"`);
+    }
 
     if (chunks.length > 1) {
       warnings.push(
@@ -785,6 +798,12 @@ function producedByFor(output: ProviderExtractionOutput, requestDigest: string):
  * order, whole, regardless of any self-reported confidence, so the kept
  * proposal's `extractor`, `producedBy` and metadata are deterministic.
  * First-seen key order is preserved.
+ *
+ * One exception keeps the survivor independent of provider order: among
+ * duplicates, a proposal whose value was returned in its declared type wins
+ * over one `extract()` rewrote into it, and between two rewritten ones the
+ * smaller original (by code unit) wins. So a returned proposal carries
+ * `valueNormalization` only if every duplicate of it was rewritten.
  */
 function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionProposal[]; dropped: number } {
   const byKey = new Map<string, ExtractionProposal>();
@@ -805,10 +824,19 @@ function dedupeProposals(input: ExtractionProposal[]): { proposals: ExtractionPr
       order.push(key);
     } else {
       dropped++;
+      if (prefersOverDuplicate(proposal, existing)) byKey.set(key, proposal);
     }
   }
 
   return { proposals: order.map((k) => byKey.get(k) as ExtractionProposal), dropped };
+}
+
+/** Whether `candidate` replaces the kept duplicate `kept` (same field, value and span). */
+function prefersOverDuplicate(candidate: ExtractionProposal, kept: ExtractionProposal): boolean {
+  const [a, b] = [candidate.valueNormalization, kept.valueNormalization];
+  if (!b) return false;
+  if (!a) return true;
+  return a.from < b.from;
 }
 
 /**
@@ -956,12 +984,8 @@ function normalizeChunkProposals(
       extractor,
     };
     if (pathIndices !== undefined) proposal.pathIndices = pathIndices;
-    if (valueNormalization) {
-      proposal.valueNormalization = valueNormalization;
-      warnings.push(valueNormalization.kind === "string-to-number"
-        ? `coerced string value to number for "${effectiveFieldPath}"`
-        : `normalized date value to ISO 8601 for "${effectiveFieldPath}"`);
-    }
+    // The warning for a rewrite is written after dedup, for survivors only.
+    if (valueNormalization) proposal.valueNormalization = valueNormalization;
     if (matchedSchema?.inferenceType !== undefined) proposal.inferenceType = matchedSchema.inferenceType;
     if (matchedSchema?.type !== undefined) proposal.valueType = matchedSchema.type;
     if (matchedSchema?.enumValues?.length) proposal.enumValues = [...matchedSchema.enumValues];

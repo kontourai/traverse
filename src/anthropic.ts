@@ -38,7 +38,7 @@ import type {
   ProviderExtractionOutput,
   TargetFieldSchema,
 } from "./types.js";
-import { EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
+import { ENUM_VALUES_UNRESTRICTED_WARNING, EXTRACTION_CONFORMANCE_CAPABILITIES } from "./provider-conformance.js";
 
 // ---------------------------------------------------------------------------
 // Minimal client interface — mirrors @anthropic-ai/sdk Message API surface.
@@ -251,12 +251,22 @@ type JsonSchemaObject = Record<string, unknown>;
 const DISTINCT_VALUES_RULE =
   "One proposal per DISTINCT value the content states for a field: two different values for one field are two proposals, so a reviewer sees the conflict; the same value stated more than once is ONE proposal.";
 
-/** JSON Schema for one field's `value`: the field's declared type, and its values for an enum. */
-function fieldValueSchema(field: TargetFieldSchema): JsonSchemaObject {
+/**
+ * Most distinct enum value sets given their own item variant. Each one repeats
+ * the whole item schema (about 0.75 KB), so a schema with hundreds of enum
+ * fields would otherwise grow past what a provider accepts. Enum fields past
+ * the cap are typed as a plain string; their values stay in the tool
+ * description, `evidenceMatch.schema` still checks them, and the adapter
+ * warns that the schema did not restrict them.
+ */
+export const MAX_ENUM_VALUE_VARIANTS = 8;
+
+/** JSON Schema for one field's `value`: the field's declared type, and its values for an enum when `restrictEnum`. */
+function fieldValueSchema(field: TargetFieldSchema, restrictEnum: boolean): JsonSchemaObject {
   switch (field.type) {
     case "number": return { type: "number" };
     case "boolean": return { type: "boolean" };
-    case "enum": return field.enumValues?.length ? { type: "string", enum: [...new Set(field.enumValues)] } : { type: "string" };
+    case "enum": return restrictEnum && field.enumValues?.length ? { type: "string", enum: [...new Set(field.enumValues)] } : { type: "string" };
     case "date": return { type: "string", description: "ISO 8601 date, e.g. 2026-06-09." };
     case "array": return { type: "array", items: {} };
     case "object": return { type: "object" };
@@ -273,8 +283,9 @@ function fieldValueSchema(field: TargetFieldSchema): JsonSchemaObject {
  */
 function proposalItemSchema(targetSchema: TargetFieldSchema[], strict: boolean): JsonSchemaObject {
   const groups = new Map<string, { paths: string[]; value: JsonSchemaObject }>();
+  const unrestricted = new Set(enumFieldsLeftUnrestricted(targetSchema));
   for (const field of targetSchema) {
-    const value = fieldValueSchema(field);
+    const value = fieldValueSchema(field, !unrestricted.has(field.path));
     const key = JSON.stringify(value);
     const group = groups.get(key) ?? { paths: [], value };
     groups.set(key, group);
@@ -312,6 +323,31 @@ function proposalItemSchema(targetSchema: TargetFieldSchema[], strict: boolean):
   const variants = [...groups.values()].map((group) => variant(group.paths, group.value));
   if (variants.length === 0) return variant(undefined, { description: "The extracted value." });
   return variants.length === 1 ? variants[0] : { anyOf: variants };
+}
+
+/**
+ * Paths of the enum fields whose values the tool schema does not restrict:
+ * those whose value set is not among the first `MAX_ENUM_VALUE_VARIANTS`
+ * distinct sets in schema order.
+ */
+export function enumFieldsLeftUnrestricted(targetSchema: TargetFieldSchema[]): string[] {
+  const kept = new Set<string>();
+  const paths: string[] = [];
+  for (const field of targetSchema) {
+    if (field.type !== "enum" || !field.enumValues?.length) continue;
+    const key = JSON.stringify([...new Set(field.enumValues)]);
+    if (kept.has(key)) continue;
+    if (kept.size < MAX_ENUM_VALUE_VARIANTS) kept.add(key);
+    else if (!paths.includes(field.path)) paths.push(field.path);
+  }
+  return paths;
+}
+
+/** The warning an adapter returns when `enumFieldsLeftUnrestricted` is not empty. */
+export function enumValuesUnrestrictedWarnings(targetSchema: TargetFieldSchema[]): string[] {
+  const paths = enumFieldsLeftUnrestricted(targetSchema);
+  if (paths.length === 0) return [];
+  return [`${ENUM_VALUES_UNRESTRICTED_WARNING} ${paths.length} field(s) (more than ${MAX_ENUM_VALUE_VARIANTS} distinct enums): ${paths.map((path) => JSON.stringify(path)).join(", ")}`];
 }
 
 /**
@@ -540,6 +576,7 @@ export function createAnthropicExtractionProvider(
       const toolInput = extractToolUseInput(message, TOOL_NAME);
       const { proposals, warnings, unusable, malformedItems, totalItems } = parseProposals(toolInput, name, input.contentType);
       if (toolInput === undefined) warnings.push("provider returned no extraction tool call");
+      warnings.push(...enumValuesUnrestrictedWarnings(input.targetSchema));
 
       if (message.stop_reason === "max_tokens") {
         warnings.push("response truncated at maxTokens; proposals may be incomplete");

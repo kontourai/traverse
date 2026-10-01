@@ -61,3 +61,11 @@ export function normalizeProviderFailure(provider: ExtractionProvider, error: un
     native: error,
   };
 }
+
+/**
+ * Prefix of the adapter warning written when the tool schema could not
+ * restrict every enum field to its values (see `MAX_ENUM_VALUE_VARIANTS` in
+ * src/anthropic.ts). An adapter repeats it on every call; `extract()` keeps
+ * the first.
+ */
+export const ENUM_VALUES_UNRESTRICTED_WARNING = "provider tool schema left enum values unrestricted for";
