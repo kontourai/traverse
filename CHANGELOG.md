@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/kontourai/traverse/compare/v4.0.0...v4.1.0) (2026-10-01)
+
+
+### Features
+
+* type each proposal value by its field, record lossless rewrites, ask for every distinct value ([#200](https://github.com/kontourai/traverse/issues/200)) ([4a7afae](https://github.com/kontourai/traverse/commit/4a7afae8c6f0f97da45423c9f334bc5a97a546f1)), closes [#199](https://github.com/kontourai/traverse/issues/199)
+
 ## [4.0.0](https://github.com/kontourai/traverse/compare/v3.0.1...v4.0.0) (2026-09-29)
 
 
