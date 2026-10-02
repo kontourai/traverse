@@ -267,13 +267,17 @@ describe("filesystem snapshot store and text bytes", () => {
     const store = createFilesystemSnapshotStore({ root: sourceRoot });
     const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
     await store.put(snapshot);
+    await rewriteOnlyRecord(sourceRoot, rewrite);
+    return { store, snapshot };
+  }
+
+  async function rewriteOnlyRecord(sourceRoot: string, rewrite: (record: Record<string, unknown>) => void): Promise<void> {
     const [dir] = await readdir(sourceRoot);
     const [file] = await readdir(path.join(sourceRoot, dir));
     const filePath = path.join(sourceRoot, dir, file);
     const record = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
     rewrite(record);
     await writeFile(filePath, JSON.stringify(record));
-    return { store, snapshot };
   }
 
   async function readOnlyRecord(sourceRoot: string): Promise<Record<string, unknown>> {
@@ -334,16 +338,162 @@ describe("filesystem snapshot store and text bytes", () => {
     assert.equal(await wrongType.store.latest(SOURCE_ID), undefined);
   });
 
-  it("the in-memory store applies the same read rule", async () => {
-    const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
-    const store = createInMemorySnapshotStore();
-    await store.put({ ...snapshot, body: "<h1>TAMPERED</h1>" });
-    assert.equal((await store.latest(SOURCE_ID))!.body, CHARSET_PAGES.latin1.text);
+  it("skips a byte-hashed record rewritten as a body-only record", async () => {
+    // The record keeps the byte hash but loses its bytes: the body it now
+    // carries is all there is, and it does not hash to bodyHash.
+    const stripped = await storeWithRewrittenRecord("stripped-to-body", (record) => {
+      delete record.bytesBase64;
+      delete record.declaredCharset;
+      record.body = "<h1>TAMPERED</h1>";
+    });
+    assert.equal(await stripped.store.latest(SOURCE_ID), undefined);
+    assert.equal(await stripped.store.get(SOURCE_ID, stripped.snapshot.bodyHash), undefined);
 
-    const swapped = createInMemorySnapshotStore();
-    await swapped.put({ ...snapshot, bytes: new TextEncoder().encode("<h1>TAMPERED</h1>") });
-    assert.equal(await swapped.latest(SOURCE_ID), undefined);
-    assert.equal(await swapped.get(SOURCE_ID, snapshot.bodyHash), undefined);
+    const nonString = await storeWithRewrittenRecord("bytes-not-a-string", (record) => {
+      record.bytesBase64 = 7;
+      delete record.declaredCharset;
+      record.body = CHARSET_PAGES.latin1.text;
+    });
+    assert.equal(await nonString.store.latest(SOURCE_ID), undefined);
+  });
+
+  it("skips a record that carries binary bytes together with text", async () => {
+    // The bytes still hash to bodyHash, moved into the binary field, with a body beside them.
+    const moved = await storeWithRewrittenRecord("moved-to-bodybytes", (record) => {
+      record.bodyBytesBase64 = record.bytesBase64;
+      delete record.bytesBase64;
+      delete record.declaredCharset;
+      record.body = "<h1>TAMPERED</h1>";
+    });
+    assert.equal(await moved.store.latest(SOURCE_ID), undefined);
+    assert.equal(await moved.store.get(SOURCE_ID, moved.snapshot.bodyHash), undefined);
+
+    const both = await storeWithRewrittenRecord("bodybytes-and-bytes", (record) => {
+      record.bodyBytesBase64 = record.bytesBase64;
+      record.body = "";
+    });
+    assert.equal(await both.store.latest(SOURCE_ID), undefined);
+  });
+
+  it("skips a body-only record whose body does not hash to its bodyHash", async () => {
+    const sourceRoot = path.join(root, "legacy-tampered");
+    const store = createFilesystemSnapshotStore({ root: sourceRoot });
+    const legacy: Snapshot = {
+      sourceId: SOURCE_ID,
+      url: "https://example.test/plain",
+      fetchedAt: "2026-06-01T00:00:00.000Z",
+      status: 200,
+      contentType: "html",
+      body: "<h1>original</h1>",
+      bodyHash: sha256Hex("<h1>original</h1>"),
+    };
+    await store.put(legacy);
+    assert.deepEqual(await store.latest(SOURCE_ID), legacy);
+
+    await rewriteOnlyRecord(sourceRoot, (record) => { record.body = "<h1>TAMPERED</h1>"; });
+    assert.equal(await store.latest(SOURCE_ID), undefined);
+    assert.equal(await store.get(SOURCE_ID, legacy.bodyHash), undefined);
+  });
+
+  it("skips a binary record whose bodyBytes do not hash to its bodyHash", async () => {
+    const sourceRoot = path.join(root, "binary-tampered");
+    const store = createFilesystemSnapshotStore({ root: sourceRoot });
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const binary: Snapshot = {
+      sourceId: SOURCE_ID,
+      url: "https://example.test/doc.pdf",
+      fetchedAt: "2026-06-01T00:00:00.000Z",
+      status: 200,
+      contentType: "pdf",
+      body: "",
+      bodyBytes: pdf,
+      bodyHash: sha256BytesOf(pdf),
+    };
+    await store.put(binary);
+    assert.deepEqual(await store.latest(SOURCE_ID), binary);
+
+    await rewriteOnlyRecord(sourceRoot, (record) => {
+      record.bodyBytesBase64 = Buffer.from("TAMPERED", "utf8").toString("base64");
+    });
+    assert.equal(await store.latest(SOURCE_ID), undefined);
+  });
+
+  it("round-trips a capture whose Content-Type declares no charset", async () => {
+    const url = "https://example.test/no-label";
+    const body = "<h1>Café</h1>";
+    const result = await fetchSource(
+      { id: SOURCE_ID, url, respectRobots: false, minDelayMs: 0 },
+      { fetch: fakeFetch({ [url]: { headers: { "content-type": "text/html" }, body } }), clock: () => CLOCK },
+    );
+    const snapshot = result.snapshot!;
+    assert.equal(snapshot.declaredCharset, null);
+
+    const sourceRoot = path.join(root, "null-label");
+    const store = createFilesystemSnapshotStore({ root: sourceRoot });
+    await store.put(snapshot);
+    const record = await readOnlyRecord(sourceRoot);
+    assert.equal(record.declaredCharset, null);
+    assert.equal("declaredCharset" in record, true);
+
+    const stored = (await store.latest(SOURCE_ID))!;
+    assert.equal(stored.declaredCharset, null);
+    assert.equal(stored.body, body);
+    assert.deepEqual(stored, snapshot);
+  });
+
+  for (const [storeName, makeStore] of [
+    ["filesystem", (label: string) => createFilesystemSnapshotStore({ root: path.join(root, `reject-${label}`) })],
+    ["in-memory", (_label: string) => createInMemorySnapshotStore()],
+  ] as const) {
+    it(`${storeName}: put() rejects a snapshot that would not read back`, async () => {
+      const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
+      const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+      const bodyOnly: Snapshot = {
+        sourceId: SOURCE_ID, url: "https://example.test/x", fetchedAt: CLOCK, status: 200,
+        contentType: "html", body: "<h1>x</h1>", bodyHash: sha256Hex("<h1>x</h1>"),
+      };
+      const binary: Snapshot = { ...bodyOnly, contentType: "pdf", body: "", bodyBytes: pdf, bodyHash: sha256BytesOf(pdf) };
+      const { declaredCharset: _dropped, ...bytesWithoutCharset } = snapshot;
+
+      const cases: Array<[string, Snapshot, RegExp]> = [
+        ["bytes without declaredCharset", bytesWithoutCharset, /bytes without a declaredCharset/],
+        ["bytes with a hash taken over the text", { ...snapshot, bodyHash: sha256Hex(snapshot.body) }, /bytes does not hash to bodyHash/],
+        ["bytes swapped", { ...snapshot, bytes: new TextEncoder().encode("<h1>TAMPERED</h1>") }, /bytes does not hash to bodyHash/],
+        ["body that is not the decode of bytes", { ...snapshot, body: "<h1>TAMPERED</h1>" }, /body is not the decode of bytes/],
+        ["declaredCharset without bytes", { ...bodyOnly, declaredCharset: "utf-8" }, /declaredCharset without bytes/],
+        ["body-only with another hash", { ...bodyOnly, body: "<h1>TAMPERED</h1>" }, /UTF-8 of body does not hash/],
+        ["bodyBytes with another hash", { ...binary, bodyBytes: new Uint8Array([1, 2, 3]) }, /bodyBytes does not hash/],
+        ["bodyBytes beside a body", { ...binary, body: "<h1>TAMPERED</h1>" }, /binary record \(bodyBytes\) also carries text/],
+      ];
+      for (const [label, bad, message] of cases) {
+        const store = makeStore(label.replace(/[^a-z]+/gi, "-"));
+        await assert.rejects(store.put(bad), (err: unknown) => err instanceof TypeError && message.test(err.message), label);
+        assert.equal(await store.latest(SOURCE_ID), undefined, `${label}: nothing was stored`);
+      }
+
+      // The same snapshots, intact, are accepted.
+      for (const good of [snapshot, bodyOnly, binary]) {
+        const store = makeStore(`good-${good.contentType}-${good.bytes ? "bytes" : "plain"}`);
+        await store.put(good);
+        assert.deepEqual(await store.latest(SOURCE_ID), good);
+      }
+    });
+  }
+
+  it("the in-memory store copies text bytes on put and on read", async () => {
+    const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
+    const mine = { ...snapshot, bytes: new Uint8Array(snapshot.bytes!) };
+    const store = createInMemorySnapshotStore();
+    await store.put(mine);
+
+    mine.bytes.fill(0);
+    const first = (await store.latest(SOURCE_ID))!;
+    assert.deepEqual(Array.from(first.bytes!), Array.from(CHARSET_PAGES.latin1.bytes), "the caller's array is not the stored one");
+
+    first.bytes!.fill(0);
+    const second = (await store.get(SOURCE_ID, snapshot.bodyHash))!;
+    assert.deepEqual(Array.from(second.bytes!), Array.from(CHARSET_PAGES.latin1.bytes), "a returned array is not the stored one");
+    assert.equal(second.body, CHARSET_PAGES.latin1.text);
   });
 });
 

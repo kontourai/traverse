@@ -30,27 +30,46 @@ otherwise. It reads field presence only and verifies nothing.
 
 ## Stored records
 
-The bundled stores keep one copy of a byte-hashed text record's content: the
-bytes. The filesystem store writes `bytesBase64` and `declaredCharset` and
-does not write `body`. On read, both stores check that the bytes hash to
-`bodyHash` and decode `body` from them with `declaredCharset`. A stored record
-therefore cannot return text that disagrees with the bytes its hash covers.
+The bundled stores return a record only if its content hashes to its
+`bodyHash`, on the one basis its fields allow:
 
-A record fails that read when its bytes do not hash to `bodyHash`, when it
-has `bytes` without `declaredCharset` or the reverse, or when
-`declaredCharset` is neither a string nor `null`. `SnapshotStore` returns
-snapshots and has no channel for reporting a record it declined, so a failed
-record is skipped, the same way an unparseable file already was. `get()` by
-its hash then finds nothing. `latest()` returns the newest record that does
-pass, which can be an older capture; nothing tells the caller that happened.
-That is a known limit of the store interface, not a decision that it is
-acceptable.
+- a binary record: SHA-256 of `bodyBytes`. It must have an empty `body` and
+  neither `bytes` nor `declaredCharset`;
+- a byte-hashed text record: SHA-256 of `bytes`, with a `declaredCharset` that
+  is a string or `null`;
+- any other record: SHA-256 of the UTF-8 of `body`, with no `declaredCharset`.
 
-What the read check covers is the bytes. `bodyHash` does not cover the
-charset label, so a record whose `declaredCharset` was altered still reads,
-with its text decoded under the altered label. A binary record's `bodyBytes`
-and the body of a text record without `bytes` are returned as stored, as
-before.
+A byte-hashed text record keeps one copy of its content, the bytes. The
+filesystem store writes `bytesBase64` and `declaredCharset` and does not write
+`body`; `body` is decoded from the bytes on read.
+
+So the text a store returns is always the text its `bodyHash` covers. Rewriting
+a record's content changes what it hashes to, and the record stops reading.
+Rewriting the content and `bodyHash` together produces a record that reads,
+under a different `bodyHash`: it no longer answers to any reference minted for
+the original.
+
+`put()` throws a `TypeError` for a snapshot that would not read back unchanged:
+one that fails the rule above, or a byte-hashed text snapshot whose `body` is
+not the decode of its `bytes`. The in-memory store copies byte arrays on `put()`
+and on every read, so neither the caller's array nor a returned one is the
+stored one. That replaces the reference semantics `binary-snapshot-bodies`
+recorded for the in-memory store.
+
+### Limits
+
+- `SnapshotStore` returns snapshots and has no channel for reporting a record
+  it declined, so a record that fails on read is skipped, the same way an
+  unparseable file already was. `get()` by its hash then finds nothing.
+  `latest()` returns the newest record that does pass, which can be an older
+  capture; nothing tells the caller that happened. That is a known limit of
+  the store interface, not a decision that it is acceptable.
+- The check covers the content. `bodyHash` does not cover the charset label or
+  any other field, so a record whose `declaredCharset` was altered still
+  reads, with its text decoded under the altered label.
+- The warnings the decoder gave at fetch time (unknown label, bytes invalid in
+  the encoding) are on that fetch's `FetchResult.warnings` only. They are not
+  stored, and decoding again on read does not report them.
 
 ## Why
 
@@ -92,9 +111,19 @@ on different bases, so a difference between them does not show the page
 changed. `snapshotHashBasis` lets a caller see that and decline to conclude
 either way. A reference string does not carry its basis.
 
-A verifier that recomputes a text snapshot's hash as sha256 of utf8-`body`
-rejects a new capture of an affected page. It needs to hash `bytes` when the
-snapshot has them.
+Three more things break for a caller, beyond the digest:
+
+- A verifier that recomputes a text snapshot's hash as sha256 of utf8-`body`
+  rejects a new capture of an affected page. It needs to hash `bytes` when the
+  snapshot has them.
+- The stored shape of a text record is not additive. A text record written by
+  this version has no `body` on disk, and the previous release's reader
+  requires one, so it skips the record and its `latest()` returns an older
+  capture. Where two versions share a filesystem store, upgrade every reader
+  before any writer.
+- A record whose `bodyHash` is not the hash of its content no longer reads,
+  and `put()` refuses it. That includes a caller-built snapshot with a
+  placeholder hash.
 
 ## Boundary
 

@@ -86,7 +86,7 @@ export function sha256Bytes(bytes: Uint8Array): string {
  *
  * This is a label, not a check: it looks at field presence and does not hash
  * anything, so it does not show that `bodyHash` matches the bytes or the body.
- * The bundled stores do check a text record's `bytes` against `bodyHash` when
+ * The bundled stores do check every record's content against `bodyHash` when
  * they read it; a snapshot from anywhere else is as trustworthy as its source.
  *
  * Two digests on different bases are not comparable: a difference between them

@@ -40,8 +40,7 @@ function snapshotFileName(snapshot: Snapshot): string {
 /**
  * JSON-serialisable on-disk shape. Each byte field present becomes base64 in a
  * sibling `<field>Base64`. A text record that carries `bytes` is written
- * WITHOUT `body`: the text is derived from the bytes on read, so a stored
- * record cannot hold a body that disagrees with the bytes its hash covers.
+ * WITHOUT `body`: the text is derived from the bytes on read.
  */
 const BYTE_FIELDS = ["bodyBytes", "bytes"] as const;
 
@@ -57,54 +56,107 @@ function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
   return out;
 }
 
-/** Reverse of toDiskShape's base64 step. Files without a base64 sibling field pass through unchanged. */
+/**
+ * Reverse of toDiskShape's base64 step. Files without a base64 sibling field
+ * pass through unchanged; a base64 sibling that is not a string makes the
+ * whole record unreadable (`undefined`).
+ */
 function fromDiskShape(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
   const out: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   for (const field of BYTE_FIELDS) {
-    const encoded = out[`${field}Base64`];
-    if (typeof encoded !== "string") continue;
-    delete out[`${field}Base64`];
+    const key = `${field}Base64`;
+    if (!(key in out)) continue;
+    const encoded = out[key];
+    if (typeof encoded !== "string") return undefined;
+    delete out[key];
     out[field] = new Uint8Array(Buffer.from(encoded, "base64"));
   }
   return out;
 }
 
-/**
- * Bind a text record that carries `bytes` to those bytes.
- *
- * Returns the record with `body` decoded from `bytes` using `declaredCharset`,
- * whatever `body` it arrived with, or `undefined` when the bytes do not hash
- * to `bodyHash` or `declaredCharset` is missing or not a string or `null`. A
- * record without `bytes` is returned as it is, unless it has a
- * `declaredCharset` with no bytes behind it.
- *
- * Only `bytes` is checked. A binary record's `bodyBytes` and the body of a
- * text record without `bytes` are returned as stored.
- */
-function bindTextBytes(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) return value;
-  const v = value as Record<string, unknown>;
-  if (v.bytes === undefined) return v.declaredCharset === undefined ? value : undefined;
-  if (!(v.bytes instanceof Uint8Array)) return undefined;
-  if (v.declaredCharset !== null && typeof v.declaredCharset !== "string") return undefined;
-  if (createHash("sha256").update(v.bytes).digest("hex") !== v.bodyHash) return undefined;
-  return { ...v, body: decodeTextBody(v.bytes, v.declaredCharset).text };
+function sha256Of(input: Uint8Array | string): string {
+  const hash = createHash("sha256");
+  if (typeof input === "string") hash.update(input, "utf8");
+  else hash.update(input);
+  return hash.digest("hex");
 }
 
-function isSnapshot(value: unknown): value is Snapshot {
-  if (typeof value !== "object" || value === null) return false;
+type RecordCheck = { snapshot: Snapshot; reason?: undefined } | { snapshot?: undefined; reason: string };
+
+/**
+ * Decide whether a record is a snapshot this store returns, and build it.
+ *
+ * A record is returned only if its content hashes to its `bodyHash`, on the
+ * one basis its fields allow:
+ *
+ * - `bodyBytes` (binary): SHA-256 of `bodyBytes`. `body` must be `""` and the
+ *   record must carry neither `bytes` nor `declaredCharset`.
+ * - `bytes` (byte-hashed text): SHA-256 of `bytes`. `declaredCharset` must be a
+ *   string or `null`. `body` is decoded from the bytes, whatever the record
+ *   held; the decoder's warnings are not kept.
+ * - neither: SHA-256 of the UTF-8 of `body`. The record must not carry
+ *   `declaredCharset`.
+ *
+ * The check covers the content, not the charset label or any other field.
+ */
+function checkRecord(value: unknown): RecordCheck {
+  if (typeof value !== "object" || value === null) return { reason: "not an object" };
   const v = value as Record<string, unknown>;
-  if (v.bodyBytes !== undefined && !(v.bodyBytes instanceof Uint8Array)) return false;
-  return (
-    typeof v.sourceId === "string" &&
-    typeof v.url === "string" &&
-    typeof v.fetchedAt === "string" &&
-    typeof v.status === "number" &&
-    typeof v.contentType === "string" &&
-    typeof v.body === "string" &&
-    typeof v.bodyHash === "string"
-  );
+  if (
+    typeof v.sourceId !== "string" ||
+    typeof v.url !== "string" ||
+    typeof v.fetchedAt !== "string" ||
+    typeof v.status !== "number" ||
+    typeof v.contentType !== "string" ||
+    typeof v.bodyHash !== "string"
+  ) {
+    return { reason: "a required field is missing or has the wrong type" };
+  }
+  if (v.bodyBytes !== undefined) {
+    if (!(v.bodyBytes instanceof Uint8Array)) return { reason: "bodyBytes is not a Uint8Array" };
+    if (v.bytes !== undefined || v.declaredCharset !== undefined || v.body !== "") {
+      return { reason: "a binary record (bodyBytes) also carries text (body, bytes or declaredCharset)" };
+    }
+    if (sha256Of(v.bodyBytes) !== v.bodyHash) return { reason: "bodyBytes does not hash to bodyHash" };
+    return { snapshot: v as unknown as Snapshot };
+  }
+  if (v.bytes !== undefined) {
+    if (!(v.bytes instanceof Uint8Array)) return { reason: "bytes is not a Uint8Array" };
+    if (v.declaredCharset !== null && typeof v.declaredCharset !== "string") {
+      return { reason: "bytes without a declaredCharset that is a string or null" };
+    }
+    if (sha256Of(v.bytes) !== v.bodyHash) return { reason: "bytes does not hash to bodyHash" };
+    return { snapshot: { ...v, body: decodeTextBody(v.bytes, v.declaredCharset).text } as unknown as Snapshot };
+  }
+  if (v.declaredCharset !== undefined) return { reason: "declaredCharset without bytes" };
+  if (typeof v.body !== "string") return { reason: "body is not a string" };
+  if (sha256Of(v.body) !== v.bodyHash) return { reason: "the UTF-8 of body does not hash to bodyHash" };
+  return { snapshot: v as unknown as Snapshot };
+}
+
+/**
+ * Refuse a snapshot the read path would not return unchanged, so `put()` never
+ * accepts content it then loses. Beyond `checkRecord`, a byte-hashed text
+ * snapshot's `body` must already be the decode of its `bytes`, since `body` is
+ * not what gets stored.
+ */
+function assertStorable(snapshot: Snapshot): void {
+  const checked = checkRecord(snapshot);
+  if (checked.snapshot === undefined) {
+    throw new TypeError(`snapshot cannot be stored, it would not read back: ${checked.reason}`);
+  }
+  if (snapshot.bytes !== undefined && checked.snapshot.body !== snapshot.body) {
+    throw new TypeError("snapshot cannot be stored, it would not read back: body is not the decode of bytes with declaredCharset");
+  }
+}
+
+/** A copy that shares no byte array with `snapshot`. */
+function withOwnBytes(snapshot: Snapshot): Snapshot {
+  const out: Snapshot = { ...snapshot };
+  if (snapshot.bodyBytes !== undefined) out.bodyBytes = new Uint8Array(snapshot.bodyBytes);
+  if (snapshot.bytes !== undefined) out.bytes = new Uint8Array(snapshot.bytes);
+  return out;
 }
 
 export interface FilesystemSnapshotStoreOptions {
@@ -117,10 +169,13 @@ export interface FilesystemSnapshotStoreOptions {
  * or foreign file (unparseable/shape-invalid entries are skipped), so a
  * corrupt file never crashes `latest()`/`list()`.
  *
- * A text record whose `bytes` do not hash to its `bodyHash` is skipped the same
- * way. `SnapshotStore` has no channel to report a skipped record, so the skip
- * is silent: `get()` by that hash finds nothing, and `latest()` returns the
- * newest record that does verify, which may be an older capture.
+ * A record whose content does not hash to its `bodyHash` is skipped the same
+ * way (see `checkRecord`). `SnapshotStore` has no channel to report a skipped
+ * record, so the skip is silent: `get()` by that hash finds nothing, and
+ * `latest()` returns the newest record that does verify, which may be an older
+ * capture.
+ *
+ * `put()` rejects (throws a `TypeError`) a snapshot that would not read back.
  */
 export function createFilesystemSnapshotStore(
   opts: FilesystemSnapshotStoreOptions,
@@ -139,8 +194,8 @@ export function createFilesystemSnapshotStore(
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
       try {
-        const parsed = bindTextBytes(fromDiskShape(JSON.parse(await readFile(path.join(dir, name), "utf8"))));
-        if (isSnapshot(parsed)) out.push(parsed);
+        const checked = checkRecord(fromDiskShape(JSON.parse(await readFile(path.join(dir, name), "utf8"))));
+        if (checked.snapshot !== undefined) out.push(checked.snapshot);
       } catch {
         // skip unreadable/foreign file
       }
@@ -154,6 +209,7 @@ export function createFilesystemSnapshotStore(
 
   return {
     async put(snapshot: Snapshot): Promise<void> {
+      assertStorable(snapshot);
       const dir = path.join(root, sourceDirName(snapshot.sourceId));
       await mkdir(dir, { recursive: true });
       const file = path.join(dir, snapshotFileName(snapshot));
@@ -176,13 +232,15 @@ export function createFilesystemSnapshotStore(
  * An in-memory {@link SnapshotStore} — no persistence. Handy for tests and for
  * a single-process live-with-capture run that only needs replay within the same
  * process. Keeps insertion order per source; `latest()` honors `fetchedAt`.
+ * Applies the same `put()` rejection and read check as the filesystem store.
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
   function sorted(sourceId: string): Snapshot[] {
-    // Same read rule as the filesystem store: text is derived from `bytes`, and
-    // a record whose bytes no longer hash to its `bodyHash` is skipped.
-    const arr = (bySource.get(sourceId) ?? []).map(bindTextBytes).filter(isSnapshot);
+    // Everything here passed `assertStorable` on the way in and was copied, so
+    // nothing outside can have changed it since. Byte arrays are copied again
+    // on the way out, so a returned snapshot's array is not the stored one.
+    const arr = (bySource.get(sourceId) ?? []).map(withOwnBytes);
     arr.sort((a, b) =>
       a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );
@@ -190,8 +248,9 @@ export function createInMemorySnapshotStore(): SnapshotStore {
   }
   return {
     async put(snapshot: Snapshot): Promise<void> {
+      assertStorable(snapshot);
       const arr = bySource.get(snapshot.sourceId) ?? [];
-      arr.push({ ...snapshot });
+      arr.push(withOwnBytes(snapshot));
       bySource.set(snapshot.sourceId, arr);
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {

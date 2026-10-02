@@ -180,7 +180,8 @@ export interface Snapshot {
    * fetcher read. `bodyHash` is then the SHA-256 of these bytes and `body` is
    * derived from them. Same field and meaning as forage's `Snapshot.bytes`.
    * The bundled stores keep only the bytes for such a record and decode
-   * `body` from them on read, after checking they hash to `bodyHash`.
+   * `body` from them on read. They return any record only if its content
+   * hashes to `bodyHash`, and their `put()` throws for one that would not.
    *
    * Absent on binary snapshots (their bytes are {@link bodyBytes}), rendered
    * snapshots, transcripts, captures made through a `fetchImpl` without
@@ -305,7 +306,10 @@ export interface FetchResult {
  * any other (an in-memory store backs the tests).
  */
 export interface SnapshotStore {
-  /** persist a snapshot under its `sourceId`. */
+  /**
+   * persist a snapshot under its `sourceId`. The bundled stores reject (with a
+   * `TypeError`) a snapshot whose content does not hash to its `bodyHash`.
+   */
   put(snapshot: Snapshot): Promise<void>;
   /** the most-recently-fetched snapshot for `sourceId`, or undefined if none. */
   latest(sourceId: string): Promise<Snapshot | undefined>;

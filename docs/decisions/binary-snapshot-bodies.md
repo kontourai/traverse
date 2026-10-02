@@ -48,9 +48,9 @@ for an injected fetch shim.
 as base64 in a sibling on-disk JSON field (`JSON.stringify` cannot round-trip
 a raw `Uint8Array`); an old on-disk snapshot file with no such field still
 loads unchanged (`isSnapshot` validates `bodyBytes` only when present). The
-in-memory store's existing shallow spreads already preserve the same
-`Uint8Array` instance rather than deep-cloning bytes on `put()`/
-`replaySource()`.
+in-memory store originally kept the caller's `Uint8Array` instance; it now
+copies bytes on `put()` and on read, as decided in
+[text-snapshot-bytes](./text-snapshot-bytes.md).
 
 **Consumer seams unblocked.** `fetchAndExtract` (`compose.ts`) forwards
 binary text-extractor seams and passes `snapshot.bodyBytes ?? snapshot.body`
