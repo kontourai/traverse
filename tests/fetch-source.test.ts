@@ -131,6 +131,7 @@ describe("fetchSource() — binary body capture (traverse#23)", () => {
         status: 200,
         headers: { "content-type": "application/pdf" },
         body: "%PDF-1.4 corrupted-as-text",
+        noArrayBuffer: true,
       },
     });
     const result = await fetchSource(

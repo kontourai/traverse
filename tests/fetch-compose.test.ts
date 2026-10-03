@@ -8,7 +8,7 @@ import {
 import { createInMemorySnapshotStore } from "../src/fetch/snapshot-store.js";
 import { sha256Hex } from "../src/fetch/fetch-source.js";
 import { prepareContent } from "../src/content-prep.js";
-import type { SourceConfig } from "../src/fetch/types.js";
+import type { Snapshot, SnapshotStore, SourceConfig } from "../src/fetch/types.js";
 import { readFileSync } from "node:fs";
 import { fakeFetch } from "./fixtures/fake-fetch.js";
 import { createMockExtractionProvider, createRegexScanProvider } from "./fixtures/mock-provider.js";
@@ -109,6 +109,48 @@ describe("fetchAndExtract() — live", () => {
     assert.equal(result.extraction, undefined);
     assert.equal(result.fetch.error!.kind, "http-error");
     assert.equal(provider.calls.length, 0);
+  });
+  it("keeps a fetched snapshot the capture store refuses, with a warning (never throws)", async () => {
+    // The 304 re-serves a prior from a different store, built by the caller
+    // with a placeholder hash. The capture store refuses it; the fetch result
+    // and the extraction must survive that.
+    const prior: Snapshot = {
+      sourceId: "listing-1",
+      url: "https://example.test/listing",
+      fetchedAt: "2026-07-01T00:00:00.000Z",
+      status: 200,
+      contentType: "html",
+      body: PAGE,
+      bodyHash: "a".repeat(64),
+      etag: '"v1"',
+    };
+    const priorStore: SnapshotStore = {
+      async put() {},
+      async latest() { return prior; },
+      async get() { return prior; },
+      async list() { return [prior]; },
+    };
+    const captureStore = createInMemorySnapshotStore();
+    const provider = mockProvider();
+    const result = await fetchAndExtract(cfg({ revalidate: true }), {
+      targetSchema: genericTargetSchema,
+      provider,
+      mode: "live-with-capture",
+      store: captureStore,
+      fetchOptions: {
+        fetch: fakeFetch({ "https://example.test/listing": { status: 304 } }),
+        store: priorStore,
+        sleep: async () => {},
+      },
+    });
+
+    assert.equal(result.fetch.snapshot!.notModified, true);
+    assert.equal(result.fetch.snapshot!.bodyHash, "a".repeat(64));
+    const warnings = result.fetch.warnings ?? [];
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^store\.put failed \(snapshot cannot be stored, it would not read back: the UTF-8 of body does not hash to bodyHash\); fetch result kept, snapshot not persisted$/);
+    assert.equal(result.extraction!.proposals.length, 1);
+    assert.equal(await captureStore.latest("listing-1"), undefined, "nothing was persisted");
   });
 });
 

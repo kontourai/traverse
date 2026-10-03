@@ -6,7 +6,11 @@ import { createMockExtractionProvider } from "./fixtures/mock-provider.js";
 import { genericTargetSchema } from "./fixtures/generic-target-schema.js";
 import { createInMemoryPreparedArtifactStore, resolvePreparedArtifact } from "../src/prepared-artifact.js";
 import { createForageReplayManifest } from "./fixtures/forage-replay.js";
+import { createInMemorySnapshotStore } from "@kontourai/forage";
+import { resolveSnapshotSourceRef } from "@kontourai/forage/fetch";
 import type { CrawlManifest, Page, Seed } from "@kontourai/forage";
+import { parseAnySnapshotSourceRef } from "../src/fetch/forage-interop.js";
+import { CHARSET_HEADING, CHARSET_PAGES, startCharsetServer } from "./fixtures/charset-server.js";
 
 // Build a forage-shaped Page without touching the network. `crawlAndExtract`
 // only reads page.body, page.snapshot.headers, and page.sourceRef, so a minimal
@@ -150,7 +154,73 @@ describe("crawlAndExtract", () => {
     const replayArtifact = replay.pages[0].extraction.preparedArtifact!;
     assert.equal(firstArtifact.ref, replayArtifact.ref);
     assert.equal(firstArtifact.sourceSnapshotRef, manifest.pages[0].sourceRef);
+    // The fixture stands in for a real forage replay only while its ref has
+    // forage's current shape, which names the stored record by its digest.
+    const fixtureRef = parseAnySnapshotSourceRef(manifest.pages[0].sourceRef)!;
+    assert.equal(fixtureRef.scheme, "forage-snapshot");
+    assert.match(fixtureRef.snapshotSha256 ?? "", /^[a-f0-9]{64}$/);
+    assert.equal(first.pages[0].sourceRef, manifest.pages[0].sourceRef);
     const resolved = await resolvePreparedArtifact(replayArtifact, preparedStore);
     assert.equal(resolved.status, "available");
+  });
+
+  it("passes forage's charset decoding and snapshot ref through a real loopback crawl", async () => {
+    const server = await startCharsetServer();
+    try {
+      const store = createInMemorySnapshotStore();
+      const provider = mockProvider(CHARSET_HEADING);
+      // No crawlImpl: forage does the crawl. The latin1 page links to the
+      // byte-order-mark page, so one crawl covers both.
+      const result = await crawlAndExtract(
+        { url: server.origin + CHARSET_PAGES.latin1.path },
+        {
+          targetSchema: genericTargetSchema,
+          provider,
+          policy: {
+            maxPages: 2,
+            robots: false,
+            politeness: { delayMs: 0 },
+            egress: { guarded: true, testOnlyAllowedLoopbackOrigins: [server.origin] },
+            store,
+          },
+        },
+      );
+
+      assert.deepEqual(result.manifest.warnings, []);
+      assert.deepEqual(
+        result.pages.map((p) => p.page.url),
+        [server.origin + CHARSET_PAGES.latin1.path, server.origin + CHARSET_PAGES.bom.path],
+      );
+      assert.equal(provider.calls.length, 2);
+
+      for (const [index, expected] of [CHARSET_PAGES.latin1, CHARSET_PAGES.bom].entries()) {
+        const { page, sourceRef, extraction } = result.pages[index];
+
+        // The text the provider read is the charset-decoded text.
+        const content = provider.calls[index].content;
+        assert.ok(content.includes(CHARSET_HEADING), `provider content carries the heading: ${JSON.stringify(content)}`);
+        assert.equal(content.includes("\uFFFD"), false, "no replacement characters reach the provider");
+        assert.equal(content.includes("\uFEFF"), false, "no byte-order mark reaches the provider");
+        assert.equal(page.body, expected.text);
+        assert.equal(extraction.proposals.length, 1);
+        assert.equal(extraction.proposals[0].candidateValue, CHARSET_HEADING);
+
+        // The digest is of the bytes served, not of the decoded text.
+        assert.equal(page.snapshot.bodyHash, expected.sha256);
+        assert.notEqual(page.snapshot.bodyHash, sha256Hex(expected.text));
+
+        // The ref handed back is forage's own, digest of the stored record
+        // included, and it resolves to that record.
+        const parsed = parseAnySnapshotSourceRef(sourceRef)!;
+        assert.equal(parsed.scheme, "forage-snapshot");
+        assert.equal(parsed.bodyHash, expected.sha256);
+        assert.match(parsed.snapshotSha256 ?? "", /^[a-f0-9]{64}$/);
+        assert.equal(sourceRef, page.sourceRef);
+        const resolved = await resolveSnapshotSourceRef(store, sourceRef);
+        assert.equal(resolved.ok, true);
+      }
+    } finally {
+      await server.close();
+    }
   });
 });
