@@ -418,6 +418,30 @@ describe("filesystem snapshot store and text bytes", () => {
     assert.equal(await store.latest(SOURCE_ID), undefined);
   });
 
+  it("skips a record whose base64 field is not a string, or that has no contentType", async () => {
+    const empty: Snapshot = {
+      sourceId: SOURCE_ID,
+      url: "https://example.test/empty",
+      fetchedAt: "2026-06-01T00:00:00.000Z",
+      status: 200,
+      contentType: "html",
+      body: "",
+      bodyHash: sha256Hex(""),
+    };
+    for (const [label, rewrite] of [
+      // Without its non-string bodyBytesBase64 this would be a valid empty text record.
+      ["non-string-base64", (record: Record<string, unknown>) => { record.bodyBytesBase64 = 5; }],
+      ["no-content-type", (record: Record<string, unknown>) => { delete record.contentType; }],
+    ] as const) {
+      const sourceRoot = path.join(root, label);
+      const store = createFilesystemSnapshotStore({ root: sourceRoot });
+      await store.put(empty);
+      assert.deepEqual(await store.latest(SOURCE_ID), empty, `${label}: the intact record reads`);
+      await rewriteOnlyRecord(sourceRoot, rewrite);
+      assert.equal(await store.latest(SOURCE_ID), undefined, label);
+    }
+  });
+
   it("round-trips a capture whose Content-Type declares no charset", async () => {
     const url = "https://example.test/no-label";
     const body = "<h1>Café</h1>";
@@ -480,21 +504,26 @@ describe("filesystem snapshot store and text bytes", () => {
     });
   }
 
-  it("the in-memory store copies text bytes on put and on read", async () => {
+  it("the in-memory store copies a snapshot on put and on read", async () => {
     const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
-    const mine = { ...snapshot, bytes: new Uint8Array(snapshot.bytes!) };
+    const mine = { ...snapshot, bytes: new Uint8Array(snapshot.bytes!), redirects: ["https://example.test/start"] };
     const store = createInMemorySnapshotStore();
     await store.put(mine);
 
     mine.bytes.fill(0);
+    mine.redirects.push("https://example.test/changed-by-caller");
     const first = (await store.latest(SOURCE_ID))!;
     assert.deepEqual(Array.from(first.bytes!), Array.from(CHARSET_PAGES.latin1.bytes), "the caller's array is not the stored one");
+    assert.deepEqual(first.redirects, ["https://example.test/start"], "the caller's redirects are not the stored ones");
 
     first.bytes!.fill(0);
+    first.redirects!.push("https://example.test/changed-by-reader");
     const second = (await store.get(SOURCE_ID, snapshot.bodyHash))!;
     assert.deepEqual(Array.from(second.bytes!), Array.from(CHARSET_PAGES.latin1.bytes), "a returned array is not the stored one");
+    assert.deepEqual(second.redirects, ["https://example.test/start"], "returned redirects are not the stored ones");
     assert.equal(second.body, CHARSET_PAGES.latin1.text);
   });
+
 });
 
 function sha256BytesOf(bytes: Uint8Array): string {

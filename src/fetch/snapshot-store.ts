@@ -59,7 +59,9 @@ function toDiskShape(snapshot: Snapshot): Record<string, unknown> {
 /**
  * Reverse of toDiskShape's base64 step. Files without a base64 sibling field
  * pass through unchanged; a base64 sibling that is not a string makes the
- * whole record unreadable (`undefined`).
+ * whole record unreadable (`undefined`). A string is decoded leniently
+ * (`Buffer.from(_, "base64")` skips characters outside the alphabet), so a
+ * damaged string is caught only by the hash check in `checkRecord`.
  */
 function fromDiskShape(value: unknown): unknown {
   if (typeof value !== "object" || value === null) return value;
@@ -151,12 +153,9 @@ function assertStorable(snapshot: Snapshot): void {
   }
 }
 
-/** A copy that shares no byte array with `snapshot`. */
-function withOwnBytes(snapshot: Snapshot): Snapshot {
-  const out: Snapshot = { ...snapshot };
-  if (snapshot.bodyBytes !== undefined) out.bodyBytes = new Uint8Array(snapshot.bodyBytes);
-  if (snapshot.bytes !== undefined) out.bytes = new Uint8Array(snapshot.bytes);
-  return out;
+/** A deep copy: shares no byte array, `redirects` list, or any other nested value with `snapshot`. */
+function ownCopy(snapshot: Snapshot): Snapshot {
+  return structuredClone(snapshot);
 }
 
 export interface FilesystemSnapshotStoreOptions {
@@ -232,15 +231,17 @@ export function createFilesystemSnapshotStore(
  * An in-memory {@link SnapshotStore} — no persistence. Handy for tests and for
  * a single-process live-with-capture run that only needs replay within the same
  * process. Keeps insertion order per source; `latest()` honors `fetchedAt`.
- * Applies the same `put()` rejection and read check as the filesystem store.
+ * `put()` applies the same rejection as the filesystem store; the record is
+ * then deep-copied in and deep-copied out, so nothing outside can change what
+ * is stored and the read check does not need repeating.
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
   function sorted(sourceId: string): Snapshot[] {
-    // Everything here passed `assertStorable` on the way in and was copied, so
-    // nothing outside can have changed it since. Byte arrays are copied again
-    // on the way out, so a returned snapshot's array is not the stored one.
-    const arr = (bySource.get(sourceId) ?? []).map(withOwnBytes);
+    // Everything here passed `assertStorable` on the way in and was deep-copied,
+    // so nothing outside can have changed it since. It is deep-copied again on
+    // the way out, so a returned snapshot shares nothing with the stored one.
+    const arr = (bySource.get(sourceId) ?? []).map(ownCopy);
     arr.sort((a, b) =>
       a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );
@@ -250,7 +251,7 @@ export function createInMemorySnapshotStore(): SnapshotStore {
     async put(snapshot: Snapshot): Promise<void> {
       assertStorable(snapshot);
       const arr = bySource.get(snapshot.sourceId) ?? [];
-      arr.push(withOwnBytes(snapshot));
+      arr.push(ownCopy(snapshot));
       bySource.set(snapshot.sourceId, arr);
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {

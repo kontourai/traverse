@@ -49,11 +49,16 @@ Rewriting the content and `bodyHash` together produces a record that reads,
 under a different `bodyHash`: it no longer answers to any reference minted for
 the original.
 
+A record is also unreadable when a base64 field (`bytesBase64`,
+`bodyBytesBase64`) holds something other than a string. A string is decoded
+leniently, skipping characters outside the base64 alphabet, so a damaged
+string is caught by the hash check alone.
+
 `put()` throws a `TypeError` for a snapshot that would not read back unchanged:
 one that fails the rule above, or a byte-hashed text snapshot whose `body` is
-not the decode of its `bytes`. The in-memory store copies byte arrays on `put()`
-and on every read, so neither the caller's array nor a returned one is the
-stored one. That replaces the reference semantics `binary-snapshot-bodies`
+not the decode of its `bytes`. The in-memory store deep-copies a snapshot on `put()`
+and on every read, so neither the caller's snapshot nor a returned one shares
+an array or nested value with the stored one. That replaces the reference semantics `binary-snapshot-bodies`
 recorded for the in-memory store.
 
 ### Limits

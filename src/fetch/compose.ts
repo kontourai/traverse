@@ -138,7 +138,21 @@ async function acquire(config: SourceConfig, opts: FetchAndExtractOptions): Prom
 
   const result = await fetchSource(config, fetchOptions);
   if (mode === "live-with-capture" && result.snapshot && opts.store) {
-    await opts.store.put(result.snapshot);
+    // A put() failure (disk full, a store that rejects the snapshot, such as a
+    // 304 re-serving a prior from another store whose hash does not verify)
+    // degrades to a warning, as in crawlSource: the fetch itself succeeded, so
+    // its snapshot is kept and extraction proceeds, just not persisted.
+    try {
+      await opts.store.put(result.snapshot);
+    } catch (err) {
+      return {
+        ...result,
+        warnings: [
+          ...(result.warnings ?? []),
+          `store.put failed (${err instanceof Error ? err.message : String(err)}); fetch result kept, snapshot not persisted`,
+        ],
+      };
+    }
   }
   return result;
 }
