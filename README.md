@@ -875,6 +875,8 @@ if (result.error) {
   // typed, never thrown: "timeout" | "network" | "http-error" | "robots-denied"
   //   | "too-many-redirects" | "invalid-url" | "invalid-config" | "no-snapshot"
   //   | "dependency-missing" | "adapter-error"  (YouTube adapter — see below)
+  // A store that throws during replay also reports "no-snapshot", with the
+  // store's error in the message.
   console.error(result.error.kind, result.error.message);
 } else {
   const s = result.snapshot!;
@@ -1024,6 +1026,11 @@ const result = await fetchAndExtract(
 const ref = parseSnapshotSourceRef(result.sourceRef!);      // { sourceId, url, bodyHash, fetchedAt }
 const exactBytes = await store.get(ref!.sourceId, ref!.bodyHash); // the snapshot the proposals came from
 ```
+
+`store.get()` finds the snapshot only if it was stored. In `live-with-capture`, a
+`store.put()` that throws does not fail the call: the extraction still runs and
+carries its `sourceRef`, nothing is stored under it, and `result.fetch.warnings`
+gets an entry starting `store.put failed (`.
 
 Use `mode: "replay"` to run the identical extraction against a stored snapshot
 with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a

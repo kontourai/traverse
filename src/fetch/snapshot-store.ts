@@ -21,6 +21,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "../canonical-json.js";
 import { decodeTextBody } from "@kontourai/forage/fetch";
+import { describeThrown } from "./describe-thrown.js";
 import type { FetchResult, Snapshot, SnapshotStore } from "./types.js";
 
 /** Render a caller-owned sourceId into a stable, collision-resistant dir name. */
@@ -153,9 +154,31 @@ function assertStorable(snapshot: Snapshot): void {
   }
 }
 
-/** A deep copy: shares no byte array, `redirects` list, or any other nested value with `snapshot`. */
+/**
+ * A deep copy: shares no byte array, `redirects` list, or any other nested value
+ * with `snapshot`. `structuredClone` would copy a typed array's whole backing
+ * buffer, which for a pooled `Buffer` or a `subarray` view holds bytes that are
+ * not the snapshot's, so the two byte fields, `bytes` and `bodyBytes`, are
+ * instead copied into buffers that hold exactly their own bytes, as the
+ * filesystem store's reads do. A typed array in any other (undeclared) field is
+ * still cloned with its whole backing buffer.
+ *
+ * Throws a `TypeError` when a field cannot be cloned (a function, `URL`,
+ * `Headers`, ...), so `put()` fails the way the `SnapshotStore` docs say.
+ */
 function ownCopy(snapshot: Snapshot): Snapshot {
-  return structuredClone(snapshot);
+  // The byte fields are left out of the clone, so their backing buffers are
+  // never copied whole.
+  const { bodyBytes, bytes, ...rest } = snapshot;
+  let copy: Snapshot;
+  try {
+    copy = structuredClone(rest);
+  } catch (err) {
+    throw new TypeError(`snapshot cannot be stored, it cannot be copied: ${describeThrown(err)}`);
+  }
+  if ("bodyBytes" in snapshot) copy.bodyBytes = bodyBytes === undefined ? undefined : new Uint8Array(bodyBytes);
+  if ("bytes" in snapshot) copy.bytes = bytes === undefined ? undefined : new Uint8Array(bytes);
+  return copy;
 }
 
 export interface FilesystemSnapshotStoreOptions {
@@ -233,7 +256,10 @@ export function createFilesystemSnapshotStore(
  * process. Keeps insertion order per source; `latest()` honors `fetchedAt`.
  * `put()` applies the same rejection as the filesystem store; the record is
  * then deep-copied in and deep-copied out, so nothing outside can change what
- * is stored and the read check does not need repeating.
+ * is stored and the read check does not need repeating. Each byte array is
+ * copied tight, both into the store and out of it, so a returned array's
+ * buffer holds only that snapshot's bytes. `put()` also throws a `TypeError`
+ * for a snapshot with a field that cannot be cloned.
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
