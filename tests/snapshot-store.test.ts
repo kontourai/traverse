@@ -165,12 +165,20 @@ describe("in-memory snapshot store", () => {
     assert.deepEqual((await store.list("src-1")).map((s) => s.body), ["new", "old"]);
   });
 
-  it("keeps REFERENCE semantics for bodyBytes on put() (no defensive deep-clone) (AC4/D4)", async () => {
+  it("copies bodyBytes on put() and on read, so the stored record cannot be changed from outside", async () => {
     const store = createInMemorySnapshotStore();
     const original = snapWithBytes();
+    const expected = Array.from(original.bodyBytes!);
     await store.put(original);
     const latest = await store.latest("src-pdf");
-    assert.strictEqual(latest!.bodyBytes, original.bodyBytes, "same Uint8Array instance, not a clone");
+    assert.notStrictEqual(latest!.bodyBytes, original.bodyBytes, "a copy, not the caller's array");
+    assert.deepEqual(Array.from(latest!.bodyBytes!), expected);
+
+    // Neither the caller's array nor a returned one is the stored one.
+    original.bodyBytes!.fill(0);
+    latest!.bodyBytes!.fill(0);
+    const again = await store.latest("src-pdf");
+    assert.deepEqual(Array.from(again!.bodyBytes!), expected);
   });
 
   it("Snapshot.rendered survives a put -> latest round-trip (traverse#41 AC4)", async () => {
@@ -195,12 +203,13 @@ describe("replaySource()", () => {
     assert.deepEqual({ ...result.snapshot, fromCache: undefined }, { ...s, fromCache: undefined });
   });
 
-  it("keeps REFERENCE semantics for bodyBytes through replaySource() (no defensive deep-clone) (AC4/D4)", async () => {
+  it("replaySource() returns bodyBytes equal to what was put, as a copy", async () => {
     const store = createInMemorySnapshotStore();
     const original = snapWithBytes();
     await store.put(original);
     const result = await replaySource(store, "src-pdf");
-    assert.strictEqual(result.snapshot!.bodyBytes, original.bodyBytes, "same Uint8Array instance, not a clone");
+    assert.notStrictEqual(result.snapshot!.bodyBytes, original.bodyBytes);
+    assert.deepEqual(Array.from(result.snapshot!.bodyBytes!), Array.from(original.bodyBytes!));
   });
 
   it("returns a typed no-snapshot error (never throws) when nothing is stored", async () => {

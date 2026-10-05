@@ -12,7 +12,7 @@
  * into the already-public `extract()`.
  */
 
-export { fetchSource, resolveContentType, sha256Hex } from "./fetch-source.js";
+export { fetchSource, resolveContentType, sha256Hex, snapshotHashBasis } from "./fetch-source.js";
 export { toForageSourceConfig, toForageFetchOptions, parseAnySnapshotSourceRef, isSameSnapshotRef } from "./forage-interop.js";
 export type { ForageInteropPolicy, ParsedAnySnapshotRef } from "./forage-interop.js";
 export {

@@ -29,14 +29,11 @@ behaving unchanged without a type-narrowing rewrite; out-of-line storage
 than the binary-classified content types warrant.
 
 **Hash domain per representation.** `bodyHash` is sha256 over the RAW bytes
-(`sha256Bytes`, new) for a binary snapshot, and remains sha256 of
-utf8-`body` (`sha256Hex`, pre-existing) for every text snapshot — the text
-domain is byte-identical to pre-#23 behavior, so no existing stored
-`bodyHash` / `store.get(sourceId, bodyHash)` lookup is invalidated by this
-change. Widening the text domain to also hash bytes (e.g.
-`sha256Bytes(new TextEncoder().encode(body))`) was rejected: it would
-silently break every existing cache/replay compare with no error, only a
-downstream "cache miss".
+(`sha256Bytes`) for a binary snapshot. This decision originally kept every
+text snapshot on sha256 of utf8-`body` (`sha256Hex`); the text domain is now
+decided in [text-snapshot-bytes](./text-snapshot-bytes.md), which hashes a
+text response by its bytes too and keeps the utf8-`body` domain only for
+snapshots that have no response bytes.
 
 **Optional `arrayBuffer` fallback.** `FetchLikeResponse.arrayBuffer` is
 OPTIONAL, not required, so a custom test/production `fetchImpl` predating
@@ -51,9 +48,9 @@ for an injected fetch shim.
 as base64 in a sibling on-disk JSON field (`JSON.stringify` cannot round-trip
 a raw `Uint8Array`); an old on-disk snapshot file with no such field still
 loads unchanged (`isSnapshot` validates `bodyBytes` only when present). The
-in-memory store's existing shallow spreads already preserve the same
-`Uint8Array` instance rather than deep-cloning bytes on `put()`/
-`replaySource()`.
+in-memory store originally kept the caller's `Uint8Array` instance; it now
+copies bytes on `put()` and on read, as decided in
+[text-snapshot-bytes](./text-snapshot-bytes.md).
 
 **Consumer seams unblocked.** `fetchAndExtract` (`compose.ts`) forwards
 binary text-extractor seams and passes `snapshot.bodyBytes ?? snapshot.body`

@@ -81,9 +81,10 @@ A successful render becomes a normal `Snapshot`:
 
 - `contentType` is always `"html"`.
 - `body` = the rendered HTML (`renderResult.html`) verbatim.
-- `bodyHash = sha256Hex(body)` — the SAME text hash domain every other
-  non-binary snapshot already uses (see `docs/decisions/binary-snapshot-bodies.md`);
-  no new hash domain is introduced for a rendered snapshot.
+- `bodyHash = sha256Hex(body)` — the hash of the UTF-8 of `body`, the basis
+  every snapshot without response bytes uses (see
+  `docs/decisions/text-snapshot-bytes.md`); a serialized DOM has no response
+  bytes to hash.
 - `rendered: true` — an additive, presence-is-the-marker field (never
   explicit `false` on a wire snapshot), mirroring `bodyBytes` marking binary
   content and `notModified` marking a 304.
