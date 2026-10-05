@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, before, after } from "node:test";
@@ -287,6 +288,17 @@ describe("snapshot store put() bounds, both stores", () => {
     ["fetchedAt without a zone", snap({ fetchedAt: "2026-07-02T00:00:00" }), /fetchedAt is not an ISO-8601 instant/],
     ["fetchedAt past the end of its month", snap({ fetchedAt: "2026-02-30T00:00:00.000Z" }), /fetchedAt is not an ISO-8601 instant/],
     ["fetchedAt not a date", snap({ fetchedAt: "yesterday" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt in month 13", snap({ fetchedAt: "2026-13-01T00:00Z" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt in month 0", snap({ fetchedAt: "2026-00-10T00:00Z" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt at hour 99", snap({ fetchedAt: "2026-07-01T99:00Z" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a trailing NUL", snap({ fetchedAt: "2026-07-01T00:00Z\u0000" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a trailing newline", snap({ fetchedAt: "2026-07-01T00:00Z\n" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a 10-digit fraction", snap({ fetchedAt: "2026-07-01T00:00:00.1234567890Z" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a 5000-digit fraction", snap({ fetchedAt: `2026-07-01T00:00:00.${"1".repeat(5000)}Z` }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt as toUTCString writes it", snap({ fetchedAt: new Date(Date.UTC(2026, 6, 2)).toUTCString() }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a space for T", snap({ fetchedAt: "2026-07-02 00:00:00Z" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt with a basic-format offset", snap({ fetchedAt: "2026-07-02T00:00:00+0500" }), /fetchedAt is not an ISO-8601 instant/],
+    ["fetchedAt at second 60", snap({ fetchedAt: "2026-07-02T00:00:60Z" }), /fetchedAt is not an ISO-8601 instant/],
   ];
 
   for (const [label, bad, message] of rejected) {
@@ -310,6 +322,8 @@ describe("snapshot store put() bounds, both stores", () => {
     ["fetchedAt with a UTC offset", snap({ fetchedAt: "2026-07-02T02:00:00.5+02:00" })],
     ["fetchedAt with an extended year", snap({ fetchedAt: new Date(Date.UTC(10000, 0, 1)).toISOString() })],
     ["fetchedAt on a leap day", snap({ fetchedAt: "2028-02-29T00:00:00.000Z" })],
+    ["fetchedAt with a 9-digit fraction", snap({ fetchedAt: "2026-07-02T00:00:00.123456789Z" })],
+    ["fetchedAt at 24:00", snap({ fetchedAt: "2026-07-01T24:00:00Z" })],
     ["status 0", snap({ status: 0 })],
     ["a binary record", ownBinary()],
     ["a byte-hashed text record", snapWithTextBytes()],
@@ -354,6 +368,107 @@ describe("snapshot store put() bounds, both stores", () => {
       assert.equal((await store.latest(sourceId))!.body, `body for ${JSON.stringify(sourceId)}`, sourceId);
     }
     assert.ok(root);
+  });
+
+  it("filesystem: put() refuses a source directory that is a symbolic link out of the root, and writes nothing there", async () => {
+    const { store, outer, root } = await fsStore();
+    await store.put(snap({ sourceId: "linked" }));
+    const [dirName] = await readdir(root);
+    const outside = path.join(outer, "outside");
+    await mkdir(outside);
+    await rm(path.join(root, dirName), { recursive: true });
+    await symlink(outside, path.join(root, dirName), "dir");
+
+    await assert.rejects(
+      store.put(snap({ sourceId: "linked", fetchedAt: "2026-07-03T00:00:00.000Z", body: "escaped" })),
+      (err: unknown) => err instanceof TypeError && /source directory resolves outside the store root/.test(err.message),
+    );
+    assert.deepEqual(await readdir(outside), [], "nothing was written through the link");
+  });
+
+  it("filesystem: put() follows a symbolic link at the root itself", async () => {
+    const { outer } = await fsStore();
+    const real = path.join(outer, "real-root");
+    await mkdir(real);
+    await symlink(real, path.join(outer, "linked-root"), "dir");
+    const store = createFilesystemSnapshotStore({ root: path.join(outer, "linked-root") });
+    await store.put(snap({ sourceId: "via-link" }));
+    assert.equal((await filesUnder(real)).length, 1);
+    assert.deepEqual(await store.latest("via-link"), snap({ sourceId: "via-link" }));
+  });
+
+  it("filesystem: put() does not write through a symbolic link at the record's file name", { skip: fsConstants.O_NOFOLLOW === undefined }, async () => {
+    const { store, outer, root } = await fsStore();
+    const s = snap({ sourceId: "file-link" });
+    await store.put(snap({ sourceId: "file-link", fetchedAt: "2026-07-01T00:00:00.000Z", body: "first" }));
+    const [dirName] = await readdir(root);
+    const target = path.join(outer, "target.txt");
+    await writeFile(target, "untouched");
+    const fileName = `${s.fetchedAt.replace(/:/g, "-")}-${s.bodyHash.slice(0, 12)}.json`;
+    await symlink(target, path.join(root, dirName, fileName));
+
+    await assert.rejects(store.put(s));
+    assert.equal(await readFile(target, "utf8"), "untouched");
+  });
+});
+
+describe("snapshot store ordering by instant, both stores", () => {
+  let base: string;
+  before(async () => { base = await mkdtemp(path.join(os.tmpdir(), "traverse-store-order-")); });
+  after(async () => { await rm(base, { recursive: true, force: true }); });
+
+  // Each pair is [older, newer]. Ordered by text, every one comes out the other way round.
+  const pairs: Array<[string, string]> = [
+    ["2026-07-01T10:00:00+05:00", "2026-07-01T06:00:00Z"],
+    ["2026-07-01T10:00Z", "2026-07-01T10:00:30Z"],
+    ["2026-07-01T10:00:00Z", "2026-07-01T10:00:00.500Z"],
+    ["2026-07-01T10:00:00.0009Z", "2026-07-01T10:00:00.00095Z"],
+    ["2026-07-01T00:00:00.000Z", "+010000-01-01T00:00:00.000Z"],
+    ["2026-07-02T01:00:00+02:00", "2026-07-01T24:00:00Z"],
+  ];
+  let n = 0;
+  const stores = [
+    ["filesystem", () => createFilesystemSnapshotStore({ root: path.join(base, `s-${n++}`) })],
+    ["in-memory", () => createInMemorySnapshotStore()],
+  ] as const;
+
+  for (const [storeName, makeStore] of stores) {
+    for (const [older, newer] of pairs) {
+      it(`${storeName}: ${newer} is newer than ${older}`, async () => {
+        const o = snap({ fetchedAt: older, body: "older" });
+        const w = snap({ fetchedAt: newer, body: "newer" });
+        assert.ok(o.fetchedAt > w.fetchedAt, "fixture: the text order is the wrong way round");
+        for (const order of [[o, w], [w, o]]) {
+          const store = makeStore();
+          for (const s of order) await store.put(s);
+          assert.equal((await store.latest("src-1"))!.body, "newer");
+          assert.deepEqual((await store.list("src-1")).map((s) => s.body), ["newer", "older"]);
+        }
+      });
+    }
+
+    it(`${storeName}: two texts for one instant order by text, whatever the insertion order`, async () => {
+      const a = snap({ fetchedAt: "2026-07-01T10:00:00Z", body: "a" });
+      const b = snap({ fetchedAt: "2026-07-01T10:00:00.000Z", body: "b" });
+      const c = snap({ fetchedAt: "2026-07-01T12:00:00+02:00", body: "c" });
+      for (const order of [[a, b, c], [c, b, a], [b, a, c]]) {
+        const store = makeStore();
+        for (const s of order) await store.put(s);
+        assert.deepEqual((await store.list("src-1")).map((s) => s.body), ["c", "a", "b"]);
+      }
+    });
+  }
+
+  it("filesystem: a record whose fetchedAt is not a date orders after every dated one", async () => {
+    const root = path.join(base, "undated");
+    const store = createFilesystemSnapshotStore({ root });
+    const dated = snap({ sourceId: "undated", fetchedAt: "2026-07-01T00:00:00.000Z", body: "dated" });
+    await store.put(dated);
+    const [dir] = await readdir(root);
+    const undated = { ...snap({ sourceId: "undated", body: "undated" }), fetchedAt: "zz-not-a-date" };
+    await writeFile(path.join(root, dir, "undated.json"), JSON.stringify(undated));
+    assert.deepEqual((await store.list("undated")).map((s) => s.body), ["dated", "undated"]);
+    assert.equal((await store.latest("undated"))!.body, "dated");
   });
 });
 
