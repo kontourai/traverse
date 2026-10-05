@@ -158,8 +158,10 @@ function assertStorable(snapshot: Snapshot): void {
  * A deep copy: shares no byte array, `redirects` list, or any other nested value
  * with `snapshot`. `structuredClone` would copy a typed array's whole backing
  * buffer, which for a pooled `Buffer` or a `subarray` view holds bytes that are
- * not the snapshot's, so each byte field is instead copied into a buffer that
- * holds exactly its own bytes, as the filesystem store's reads do.
+ * not the snapshot's, so the two byte fields, `bytes` and `bodyBytes`, are
+ * instead copied into buffers that hold exactly their own bytes, as the
+ * filesystem store's reads do. A typed array in any other (undeclared) field is
+ * still cloned with its whole backing buffer.
  *
  * Throws a `TypeError` when a field cannot be cloned (a function, `URL`,
  * `Headers`, ...), so `put()` fails the way the `SnapshotStore` docs say.

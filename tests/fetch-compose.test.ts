@@ -257,6 +257,12 @@ describe("fetchAndExtract() — live", () => {
         { kind: "network", message: "[object Object]" },
       ],
       [
+        "fetchImpl (a revoked Proxy)",
+        { retries: 0 },
+        { fetch: async () => { throw revokedProxy(); } },
+        { kind: "network", message: "a thrown value that cannot be printed" },
+      ],
+      [
         "response.arrayBuffer()",
         {},
         { fetch: async () => ({ status: 200, headers: { get: (n: string) => (n.toLowerCase() === "content-type" ? "text/html" : null) }, async text() { return PAGE; }, async arrayBuffer(): Promise<ArrayBuffer> { throw unprintable(); } }) },

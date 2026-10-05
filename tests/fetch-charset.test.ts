@@ -524,6 +524,16 @@ describe("filesystem snapshot store and text bytes", () => {
     assert.equal(second.body, CHARSET_PAGES.latin1.text);
   });
 
+  it("the in-memory store keeps a byte-field key the caller set to undefined", async () => {
+    const { snapshot } = await traverseCapture(CHARSET_PAGES.latin1);
+    const store = createInMemorySnapshotStore();
+    await store.put({ ...snapshot, bodyBytes: undefined });
+    const read = (await store.latest(SOURCE_ID))!;
+    assert.ok(Object.hasOwn(read, "bodyBytes"), "an own bodyBytes key set to undefined is kept, as a clone would keep it");
+    assert.equal(read.bodyBytes, undefined);
+    assert.deepEqual(Array.from(read.bytes!), Array.from(CHARSET_PAGES.latin1.bytes));
+  });
+
   it("the in-memory store returns byte arrays that hold only the snapshot's bytes", async () => {
     // Small Buffers share one pooled ArrayBuffer, so a Buffer made just after
     // this one is a view into the same allocation.

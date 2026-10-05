@@ -221,12 +221,25 @@ async function timedGet(
     });
     return { response };
   } catch (err) {
-    if (timedOut || (err instanceof Error && err.name === "AbortError")) {
+    if (timedOut || isAbortError(err)) {
       return { error: { kind: "timeout", message: `request to ${url} timed out after ${timeoutMs}ms` } };
     }
     return { error: { kind: "network", message: describeThrown(err) } };
   } finally {
     cancel();
+  }
+}
+
+/**
+ * True for an abort rejection. Guarded because `instanceof` and the `name`
+ * read can themselves throw (a revoked Proxy, a throwing getter), and this
+ * runs inside a catch that must not throw.
+ */
+function isAbortError(err: unknown): boolean {
+  try {
+    return err instanceof Error && err.name === "AbortError";
+  } catch {
+    return false;
   }
 }
 
