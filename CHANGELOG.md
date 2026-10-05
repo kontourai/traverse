@@ -1,5 +1,16 @@
 # Changelog
 
+## [5.0.0](https://github.com/kontourai/traverse/compare/v4.1.0...v5.0.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* snapshot refs change for text pages whose bytes are not plain UTF-8 (non-UTF-8 charsets, a UTF-8 byte-order mark, invalid UTF-8). Text records written by this version cannot be read by 4.1.0, so upgrade readers of a shared store before writers. Caller-built records whose bodyHash is not the hash of their content no longer read, and put() rejects records that would not read back.
+
+### Features
+
+* hash text captures by their response bytes and decode by declared charset ([#202](https://github.com/kontourai/traverse/issues/202)) ([1c97032](https://github.com/kontourai/traverse/commit/1c97032d3ec0c5d43ffa1a03e634a698f7c3d74c)), closes [#195](https://github.com/kontourai/traverse/issues/195) [#196](https://github.com/kontourai/traverse/issues/196)
+
 ## [4.1.0](https://github.com/kontourai/traverse/compare/v4.0.0...v4.1.0) (2026-10-01)
 
 
