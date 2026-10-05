@@ -342,6 +342,7 @@ describe("crawlSource() — store.put() throwing a value that cannot be printed"
   for (const [label, thrown, described] of [
     ["a null-prototype object", Object.create(null), /store\.put failed \(\[object Object\]\); /],
     ["an object whose toString throws", { toString() { throw new Error("toString exploded"); } }, /store\.put failed \(\[object Object\]\); /],
+    ["an Error whose message is a Symbol", Object.assign(new Error(), { message: Symbol("m") }), /store\.put failed \(Symbol\(m\)\); /],
   ] as const) {
     it(`still degrades per page when store.put throws ${label}`, async () => {
       const failingStore: SnapshotStore = {

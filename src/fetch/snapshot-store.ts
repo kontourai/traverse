@@ -21,6 +21,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "../canonical-json.js";
 import { decodeTextBody } from "@kontourai/forage/fetch";
+import { describeThrown } from "./describe-thrown.js";
 import type { FetchResult, Snapshot, SnapshotStore } from "./types.js";
 
 /** Render a caller-owned sourceId into a stable, collision-resistant dir name. */
@@ -155,25 +156,26 @@ function assertStorable(snapshot: Snapshot): void {
 
 /**
  * A deep copy: shares no byte array, `redirects` list, or any other nested value
- * with `snapshot`. `structuredClone` copies a typed array's whole backing
+ * with `snapshot`. `structuredClone` would copy a typed array's whole backing
  * buffer, which for a pooled `Buffer` or a `subarray` view holds bytes that are
- * not the snapshot's, so each byte field is then replaced with a copy whose
- * buffer holds exactly its own bytes, as the filesystem store's reads do.
+ * not the snapshot's, so each byte field is instead copied into a buffer that
+ * holds exactly its own bytes, as the filesystem store's reads do.
  *
  * Throws a `TypeError` when a field cannot be cloned (a function, `URL`,
  * `Headers`, ...), so `put()` fails the way the `SnapshotStore` docs say.
  */
 function ownCopy(snapshot: Snapshot): Snapshot {
+  // The byte fields are left out of the clone, so their backing buffers are
+  // never copied whole.
+  const { bodyBytes, bytes, ...rest } = snapshot;
   let copy: Snapshot;
   try {
-    copy = structuredClone(snapshot);
+    copy = structuredClone(rest);
   } catch (err) {
-    throw new TypeError(`snapshot cannot be stored, it cannot be copied: ${err instanceof Error ? err.message : "structuredClone failed"}`);
+    throw new TypeError(`snapshot cannot be stored, it cannot be copied: ${describeThrown(err)}`);
   }
-  for (const field of BYTE_FIELDS) {
-    const value = copy[field];
-    if (value !== undefined) copy[field] = new Uint8Array(value);
-  }
+  if ("bodyBytes" in snapshot) copy.bodyBytes = bodyBytes === undefined ? undefined : new Uint8Array(bodyBytes);
+  if ("bytes" in snapshot) copy.bytes = bytes === undefined ? undefined : new Uint8Array(bytes);
   return copy;
 }
 

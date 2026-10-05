@@ -875,6 +875,8 @@ if (result.error) {
   // typed, never thrown: "timeout" | "network" | "http-error" | "robots-denied"
   //   | "too-many-redirects" | "invalid-url" | "invalid-config" | "no-snapshot"
   //   | "dependency-missing" | "adapter-error"  (YouTube adapter — see below)
+  // A store that throws during replay also reports "no-snapshot", with the
+  // store's error in the message.
   console.error(result.error.kind, result.error.message);
 } else {
   const s = result.snapshot!;
