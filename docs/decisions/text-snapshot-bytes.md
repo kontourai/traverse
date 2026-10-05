@@ -56,7 +56,12 @@ string is caught by the hash check alone.
 
 `put()` throws a `TypeError` for a snapshot that would not read back unchanged:
 one that fails the rule above, or a byte-hashed text snapshot whose `body` is
-not the decode of its `bytes`. The in-memory store deep-copies a snapshot on `put()`
+not the decode of its `bytes`. It also refuses a `status` that JSON would not
+keep (NaN, an infinity, `-0`), a `bytesBase64` or `bodyBytesBase64` key on the
+snapshot (the filesystem store would read it back as a byte field), and a
+`fetchedAt` that is not an ISO-8601 instant, since the filesystem store builds
+the file name from it. Both stores order snapshots by the instant `fetchedAt`
+names rather than by its text. Records already on disk are read as before. The in-memory store deep-copies a snapshot on `put()`
 and on every read, so neither the caller's snapshot nor a returned one shares
 an array or nested value with the stored one. That replaces the reference semantics `binary-snapshot-bodies`
 recorded for the in-memory store.

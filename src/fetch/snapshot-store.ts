@@ -5,10 +5,11 @@
  *   <root>/<sourceDir>/<fetchedAt>-<hashPrefix>.json
  * where `<sourceDir>` is a filesystem-safe rendering of the caller's `sourceId`
  * (the original id is always preserved verbatim inside the JSON), `<fetchedAt>`
- * is the ISO instant with `:` replaced by `-` (so filenames sort chronologically
- * AND are path-safe), and `<hashPrefix>` is the first 12 hex chars of the body
- * SHA-256. `latest()` returns the newest by `fetchedAt`; `get()` resolves a
- * snapshot by full-or-prefix `bodyHash`.
+ * is the ISO instant with `:` replaced by `-` (path-safe; the names are not
+ * what orders snapshots), and `<hashPrefix>` is the first 12 hex chars of the
+ * body SHA-256. `latest()` returns the newest by the instant `fetchedAt` names
+ * (see `sortNewestFirst`); `get()` resolves a snapshot by full-or-prefix
+ * `bodyHash`.
  *
  * `replaySource()` returns the latest snapshot as a `FetchResult` (with
  * `fromCache: true`) — the SAME shape a live `fetchSource()` call returns — so
@@ -16,7 +17,8 @@
  * network.
  */
 
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "../canonical-json.js";
@@ -32,6 +34,62 @@ function sourceDirName(sourceId: string): string {
   const disc = createHash("sha256").update(sourceId, "utf8").digest("hex").slice(0, 8);
   return `${safe}-${disc}`;
 }
+
+/**
+ * An ISO-8601 instant in extended format, as `Date.prototype.toISOString()`
+ * writes it (the library's default clock) or with a UTC offset, seconds or
+ * fraction left out. The fraction has at most 9 digits. Only digits, `T`, `Z`,
+ * `:`, `.`, `+` and `-` can match, so the file name built from it stays a
+ * single, short path segment.
+ */
+const ISO_INSTANT = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function isIsoInstant(value: string): boolean {
+  const match = ISO_INSTANT.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) return false;
+  // Date.parse accepts a day past the end of its month (2026-02-30). A date
+  // that does not exist rolls over into another month, or another year.
+  const [, year, month, day] = match;
+  const date = new Date(0);
+  date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  return date.getUTCMonth() === Number(month) - 1 && date.getUTCDate() === Number(day);
+}
+
+/**
+ * `snapshots` newest first, as a new array. Snapshots are ordered by the
+ * instant `fetchedAt` names, not by its text: `10:00Z` is before `10:00:30Z`,
+ * and `10:00+05:00` is before `06:00Z`. Digits of a fraction past the
+ * millisecond, which `Date.parse` drops, still count. Two snapshots at the
+ * same instant are ordered by `fetchedAt` text, then by `bodyHash`, both
+ * descending. A `fetchedAt` that `Date.parse` cannot read (on a record
+ * written before `put()` checked it) orders after every one it can.
+ */
+function sortNewestFirst(snapshots: readonly Snapshot[]): Snapshot[] {
+  const keyed = snapshots.map((snapshot) => {
+    const ms = Date.parse(snapshot.fetchedAt);
+    return {
+      snapshot,
+      ms: Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms,
+      subMs: /\.\d{3}(\d+)/.exec(snapshot.fetchedAt)?.[1] ?? "",
+    };
+  });
+  keyed.sort((a, b) => {
+    if (a.ms !== b.ms) return b.ms > a.ms ? 1 : -1;
+    const width = Math.max(a.subMs.length, b.subMs.length);
+    const bySubMs = compareCodeUnits(b.subMs.padEnd(width, "0"), a.subMs.padEnd(width, "0"));
+    if (bySubMs !== 0) return bySubMs;
+    const x = a.snapshot, y = b.snapshot;
+    return x.fetchedAt === y.fetchedAt ? compareCodeUnits(y.bodyHash, x.bodyHash) : compareCodeUnits(y.fetchedAt, x.fetchedAt);
+  });
+  return keyed.map((k) => k.snapshot);
+}
+
+/**
+ * Open flags for writing a record: create or truncate, and on platforms that
+ * have `O_NOFOLLOW`, refuse to write through a symbolic link at the file name.
+ */
+const WRITE_NO_FOLLOW =
+  fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0);
 
 function snapshotFileName(snapshot: Snapshot): string {
   const ts = snapshot.fetchedAt.replace(/:/g, "-");
@@ -110,7 +168,7 @@ function checkRecord(value: unknown): RecordCheck {
     typeof v.sourceId !== "string" ||
     typeof v.url !== "string" ||
     typeof v.fetchedAt !== "string" ||
-    typeof v.status !== "number" ||
+    !Number.isFinite(v.status) ||
     typeof v.contentType !== "string" ||
     typeof v.bodyHash !== "string"
   ) {
@@ -148,6 +206,21 @@ function assertStorable(snapshot: Snapshot): void {
   const checked = checkRecord(snapshot);
   if (checked.snapshot === undefined) {
     throw new TypeError(`snapshot cannot be stored, it would not read back: ${checked.reason}`);
+  }
+  // JSON writes NaN and the infinities as null and -0 as 0; checkRecord has
+  // already refused the first two.
+  if (Object.is(snapshot.status, -0)) {
+    throw new TypeError("snapshot cannot be stored, it would not read back: status is -0");
+  }
+  // The filesystem store turns these keys into byte fields on read, so a
+  // snapshot carrying one would read back as a different record.
+  for (const field of BYTE_FIELDS) {
+    if ((snapshot as unknown as Record<string, unknown>)[`${field}Base64`] !== undefined) {
+      throw new TypeError(`snapshot cannot be stored, it would not read back: it carries ${field}Base64, a key the filesystem store reserves`);
+    }
+  }
+  if (!isIsoInstant(snapshot.fetchedAt)) {
+    throw new TypeError("snapshot cannot be stored: fetchedAt is not an ISO-8601 instant");
   }
   if (snapshot.bytes !== undefined && checked.snapshot.body !== snapshot.body) {
     throw new TypeError("snapshot cannot be stored, it would not read back: body is not the decode of bytes with declaredCharset");
@@ -198,14 +271,34 @@ export interface FilesystemSnapshotStoreOptions {
  * capture.
  *
  * `put()` rejects (throws a `TypeError`) a snapshot that would not read back.
+ *
+ * `put()` writes only to `<root>/<sourceDir>/<file>`: the names it builds are
+ * single path segments, the joined paths are checked, the source directory
+ * must resolve (through any symbolic link) to a directory directly inside the
+ * resolved root, and where the platform has `O_NOFOLLOW` the file is not
+ * written through a symbolic link. These guard against names built from
+ * snapshot fields. They do not make a store safe to share with someone who
+ * can write into it: such a writer can change or add records, and reads
+ * follow whatever links are there.
  */
 export function createFilesystemSnapshotStore(
   opts: FilesystemSnapshotStoreOptions,
 ): SnapshotStore {
   const root = path.resolve(opts.root);
 
-  async function readAll(sourceId: string): Promise<Snapshot[]> {
+  /**
+   * `<root>/<sourceDir>`. `sourceDirName` and `isIsoInstant` already keep both
+   * names to one path segment; this checks the joined path string as well.
+   * `put()` also checks the resolved path once the directory exists.
+   */
+  function sourceDir(sourceId: string): string {
     const dir = path.join(root, sourceDirName(sourceId));
+    if (path.dirname(dir) !== root) throw new TypeError("snapshot store path for sourceId resolves outside the store root");
+    return dir;
+  }
+
+  async function readAll(sourceId: string): Promise<Snapshot[]> {
+    const dir = sourceDir(sourceId);
     let names: string[];
     try {
       names = await readdir(dir);
@@ -222,20 +315,26 @@ export function createFilesystemSnapshotStore(
         // skip unreadable/foreign file
       }
     }
-    // newest first by fetchedAt (ISO sorts lexicographically), hash as tiebreak.
-    out.sort((a, b) =>
-      a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
-    );
-    return out;
+    return sortNewestFirst(out);
   }
 
   return {
     async put(snapshot: Snapshot): Promise<void> {
       assertStorable(snapshot);
-      const dir = path.join(root, sourceDirName(snapshot.sourceId));
-      await mkdir(dir, { recursive: true });
+      const dir = sourceDir(snapshot.sourceId);
       const file = path.join(dir, snapshotFileName(snapshot));
-      await writeFile(file, JSON.stringify(toDiskShape(snapshot), null, 2), "utf8");
+      if (path.dirname(file) !== dir) {
+        throw new TypeError("snapshot cannot be stored: its file name from fetchedAt resolves outside its source directory");
+      }
+      await mkdir(dir, { recursive: true });
+      // The checks above compare path strings. A symbolic link already placed
+      // in the root under this source's directory name would still lead
+      // elsewhere, so compare the resolved paths too.
+      const [realRoot, realDir] = await Promise.all([realpath(root), realpath(dir)]);
+      if (path.dirname(realDir) !== realRoot) {
+        throw new TypeError("snapshot cannot be stored: its source directory resolves outside the store root");
+      }
+      await writeFile(file, JSON.stringify(toDiskShape(snapshot), null, 2), { encoding: "utf8", flag: WRITE_NO_FOLLOW });
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {
       return (await readAll(sourceId))[0];
@@ -263,15 +362,14 @@ export function createFilesystemSnapshotStore(
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
+  /**
+   * The stored records for `sourceId`, newest first. These are the store's own
+   * objects: a caller must `ownCopy` whatever it returns. Everything here passed
+   * `assertStorable` on the way in and was deep-copied, so nothing outside can
+   * have changed it since.
+   */
   function sorted(sourceId: string): Snapshot[] {
-    // Everything here passed `assertStorable` on the way in and was deep-copied,
-    // so nothing outside can have changed it since. It is deep-copied again on
-    // the way out, so a returned snapshot shares nothing with the stored one.
-    const arr = (bySource.get(sourceId) ?? []).map(ownCopy);
-    arr.sort((a, b) =>
-      a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
-    );
-    return arr;
+    return sortNewestFirst(bySource.get(sourceId) ?? []);
   }
   return {
     async put(snapshot: Snapshot): Promise<void> {
@@ -281,13 +379,15 @@ export function createInMemorySnapshotStore(): SnapshotStore {
       bySource.set(snapshot.sourceId, arr);
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {
-      return sorted(sourceId)[0];
+      const found = sorted(sourceId)[0];
+      return found === undefined ? undefined : ownCopy(found);
     },
     async get(sourceId: string, bodyHash: string): Promise<Snapshot | undefined> {
-      return sorted(sourceId).find((s) => s.bodyHash === bodyHash || s.bodyHash.startsWith(bodyHash));
+      const found = sorted(sourceId).find((s) => s.bodyHash === bodyHash || s.bodyHash.startsWith(bodyHash));
+      return found === undefined ? undefined : ownCopy(found);
     },
     async list(sourceId: string): Promise<Snapshot[]> {
-      return sorted(sourceId);
+      return sorted(sourceId).map(ownCopy);
     },
   };
 }
