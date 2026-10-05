@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.1](https://github.com/kontourai/traverse/compare/v5.0.0...v5.0.1) (2026-10-05)
+
+
+### Fixes
+
+* copy snapshot bytes tight in the in-memory store and keep fetch composition from throwing ([#206](https://github.com/kontourai/traverse/issues/206)) ([05895a5](https://github.com/kontourai/traverse/commit/05895a5a0362c090eba065365e191333bd2e49dc))
+
 ## [5.0.0](https://github.com/kontourai/traverse/compare/v4.1.0...v5.0.0) (2026-10-05)
 
 
