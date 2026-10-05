@@ -33,6 +33,24 @@ function sourceDirName(sourceId: string): string {
   return `${safe}-${disc}`;
 }
 
+/**
+ * An ISO-8601 instant in extended format, as `Date.prototype.toISOString()`
+ * writes it (the library's default clock) or with a UTC offset, seconds or
+ * fraction left out. Only digits, `T`, `Z`, `:`, `.`, `+` and `-` can match,
+ * so the file name built from it stays a single path segment.
+ */
+const ISO_INSTANT = /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function isIsoInstant(value: string): boolean {
+  const match = ISO_INSTANT.exec(value);
+  if (match === null || Number.isNaN(Date.parse(value))) return false;
+  // Date.parse accepts a day past the end of its month (2026-02-30).
+  const [, year, month, day] = match;
+  const date = new Date(0);
+  date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  return date.getUTCDate() === Number(day);
+}
+
 function snapshotFileName(snapshot: Snapshot): string {
   const ts = snapshot.fetchedAt.replace(/:/g, "-");
   return `${ts}-${snapshot.bodyHash.slice(0, 12)}.json`;
@@ -110,7 +128,7 @@ function checkRecord(value: unknown): RecordCheck {
     typeof v.sourceId !== "string" ||
     typeof v.url !== "string" ||
     typeof v.fetchedAt !== "string" ||
-    typeof v.status !== "number" ||
+    !Number.isFinite(v.status) ||
     typeof v.contentType !== "string" ||
     typeof v.bodyHash !== "string"
   ) {
@@ -148,6 +166,21 @@ function assertStorable(snapshot: Snapshot): void {
   const checked = checkRecord(snapshot);
   if (checked.snapshot === undefined) {
     throw new TypeError(`snapshot cannot be stored, it would not read back: ${checked.reason}`);
+  }
+  // JSON writes NaN and the infinities as null and -0 as 0; checkRecord has
+  // already refused the first two.
+  if (Object.is(snapshot.status, -0)) {
+    throw new TypeError("snapshot cannot be stored, it would not read back: status is -0");
+  }
+  // The filesystem store turns these keys into byte fields on read, so a
+  // snapshot carrying one would read back as a different record.
+  for (const field of BYTE_FIELDS) {
+    if ((snapshot as unknown as Record<string, unknown>)[`${field}Base64`] !== undefined) {
+      throw new TypeError(`snapshot cannot be stored, it would not read back: it carries ${field}Base64, a key the filesystem store reserves`);
+    }
+  }
+  if (!isIsoInstant(snapshot.fetchedAt)) {
+    throw new TypeError("snapshot cannot be stored: fetchedAt is not an ISO-8601 instant");
   }
   if (snapshot.bytes !== undefined && checked.snapshot.body !== snapshot.body) {
     throw new TypeError("snapshot cannot be stored, it would not read back: body is not the decode of bytes with declaredCharset");
@@ -204,8 +237,19 @@ export function createFilesystemSnapshotStore(
 ): SnapshotStore {
   const root = path.resolve(opts.root);
 
-  async function readAll(sourceId: string): Promise<Snapshot[]> {
+  /**
+   * `<root>/<sourceDir>`. `sourceDirName` and `isIsoInstant` already keep both
+   * names to one path segment; this checks the joined paths as well, so a
+   * name that resolves elsewhere is refused rather than written.
+   */
+  function sourceDir(sourceId: string): string {
     const dir = path.join(root, sourceDirName(sourceId));
+    if (path.dirname(dir) !== root) throw new TypeError("snapshot store path for sourceId resolves outside the store root");
+    return dir;
+  }
+
+  async function readAll(sourceId: string): Promise<Snapshot[]> {
+    const dir = sourceDir(sourceId);
     let names: string[];
     try {
       names = await readdir(dir);
@@ -232,9 +276,12 @@ export function createFilesystemSnapshotStore(
   return {
     async put(snapshot: Snapshot): Promise<void> {
       assertStorable(snapshot);
-      const dir = path.join(root, sourceDirName(snapshot.sourceId));
-      await mkdir(dir, { recursive: true });
+      const dir = sourceDir(snapshot.sourceId);
       const file = path.join(dir, snapshotFileName(snapshot));
+      if (path.dirname(file) !== dir) {
+        throw new TypeError("snapshot cannot be stored: its file name from fetchedAt resolves outside its source directory");
+      }
+      await mkdir(dir, { recursive: true });
       await writeFile(file, JSON.stringify(toDiskShape(snapshot), null, 2), "utf8");
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {
@@ -263,15 +310,16 @@ export function createFilesystemSnapshotStore(
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();
+  /**
+   * The stored records for `sourceId`, newest first. These are the store's own
+   * objects: a caller must `ownCopy` whatever it returns. Everything here passed
+   * `assertStorable` on the way in and was deep-copied, so nothing outside can
+   * have changed it since.
+   */
   function sorted(sourceId: string): Snapshot[] {
-    // Everything here passed `assertStorable` on the way in and was deep-copied,
-    // so nothing outside can have changed it since. It is deep-copied again on
-    // the way out, so a returned snapshot shares nothing with the stored one.
-    const arr = (bySource.get(sourceId) ?? []).map(ownCopy);
-    arr.sort((a, b) =>
+    return [...(bySource.get(sourceId) ?? [])].sort((a, b) =>
       a.fetchedAt === b.fetchedAt ? compareCodeUnits(b.bodyHash, a.bodyHash) : compareCodeUnits(b.fetchedAt, a.fetchedAt),
     );
-    return arr;
   }
   return {
     async put(snapshot: Snapshot): Promise<void> {
@@ -281,13 +329,15 @@ export function createInMemorySnapshotStore(): SnapshotStore {
       bySource.set(snapshot.sourceId, arr);
     },
     async latest(sourceId: string): Promise<Snapshot | undefined> {
-      return sorted(sourceId)[0];
+      const found = sorted(sourceId)[0];
+      return found === undefined ? undefined : ownCopy(found);
     },
     async get(sourceId: string, bodyHash: string): Promise<Snapshot | undefined> {
-      return sorted(sourceId).find((s) => s.bodyHash === bodyHash || s.bodyHash.startsWith(bodyHash));
+      const found = sorted(sourceId).find((s) => s.bodyHash === bodyHash || s.bodyHash.startsWith(bodyHash));
+      return found === undefined ? undefined : ownCopy(found);
     },
     async list(sourceId: string): Promise<Snapshot[]> {
-      return sorted(sourceId);
+      return sorted(sourceId).map(ownCopy);
     },
   };
 }
