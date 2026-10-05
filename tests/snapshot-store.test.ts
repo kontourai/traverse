@@ -457,7 +457,27 @@ describe("snapshot store ordering by instant, both stores", () => {
         assert.deepEqual((await store.list("src-1")).map((s) => s.body), ["c", "a", "b"]);
       }
     });
+
+    it(`${storeName}: digits past the millisecond are compared from the left`, async () => {
+      // .00049 is before .0005; padding the shorter digits on the wrong side reverses them.
+      const o = snap({ fetchedAt: "2026-07-01T10:00:00.00049Z", body: "older" });
+      const w = snap({ fetchedAt: "2026-07-01T10:00:00.0005Z", body: "newer" });
+      for (const order of [[o, w], [w, o]]) {
+        const store = makeStore();
+        for (const s of order) await store.put(s);
+        assert.equal((await store.latest("src-1"))!.body, "newer");
+      }
+    });
   }
+
+  it("filesystem: putting a shorter record under the same file name replaces it whole", async () => {
+    const store = createFilesystemSnapshotStore({ root: path.join(base, "rewrite") });
+    const long = snap({ url: `https://example.com/${"x".repeat(200)}` });
+    const short = { ...long, url: "https://example.com/" };
+    await store.put(long);
+    await store.put(short);
+    assert.equal((await store.latest("src-1"))?.url, "https://example.com/");
+  });
 
   it("filesystem: a record whose fetchedAt is not a date orders after every dated one", async () => {
     const root = path.join(base, "undated");
