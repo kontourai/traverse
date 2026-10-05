@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.2](https://github.com/kontourai/traverse/compare/v5.0.1...v5.0.2) (2026-10-05)
+
+
+### Fixes
+
+* keep snapshot store writes inside the root and order snapshots by instant ([#208](https://github.com/kontourai/traverse/issues/208)) ([76bf640](https://github.com/kontourai/traverse/commit/76bf64061d32d5ae98454da2233529295c188577)), closes [#203](https://github.com/kontourai/traverse/issues/203)
+
 ## [5.0.1](https://github.com/kontourai/traverse/compare/v5.0.0...v5.0.1) (2026-10-05)
 
 
