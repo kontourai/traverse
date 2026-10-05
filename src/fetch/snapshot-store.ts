@@ -153,9 +153,28 @@ function assertStorable(snapshot: Snapshot): void {
   }
 }
 
-/** A deep copy: shares no byte array, `redirects` list, or any other nested value with `snapshot`. */
+/**
+ * A deep copy: shares no byte array, `redirects` list, or any other nested value
+ * with `snapshot`. `structuredClone` copies a typed array's whole backing
+ * buffer, which for a pooled `Buffer` or a `subarray` view holds bytes that are
+ * not the snapshot's, so each byte field is then replaced with a copy whose
+ * buffer holds exactly its own bytes, as the filesystem store's reads do.
+ *
+ * Throws a `TypeError` when a field cannot be cloned (a function, `URL`,
+ * `Headers`, ...), so `put()` fails the way the `SnapshotStore` docs say.
+ */
 function ownCopy(snapshot: Snapshot): Snapshot {
-  return structuredClone(snapshot);
+  let copy: Snapshot;
+  try {
+    copy = structuredClone(snapshot);
+  } catch (err) {
+    throw new TypeError(`snapshot cannot be stored, it cannot be copied: ${err instanceof Error ? err.message : "structuredClone failed"}`);
+  }
+  for (const field of BYTE_FIELDS) {
+    const value = copy[field];
+    if (value !== undefined) copy[field] = new Uint8Array(value);
+  }
+  return copy;
 }
 
 export interface FilesystemSnapshotStoreOptions {
@@ -233,7 +252,10 @@ export function createFilesystemSnapshotStore(
  * process. Keeps insertion order per source; `latest()` honors `fetchedAt`.
  * `put()` applies the same rejection as the filesystem store; the record is
  * then deep-copied in and deep-copied out, so nothing outside can change what
- * is stored and the read check does not need repeating.
+ * is stored and the read check does not need repeating. Each byte array is
+ * copied tight, both into the store and out of it, so a returned array's
+ * buffer holds only that snapshot's bytes. `put()` also throws a `TypeError`
+ * for a snapshot with a field that cannot be cloned.
  */
 export function createInMemorySnapshotStore(): SnapshotStore {
   const bySource = new Map<string, Snapshot[]>();

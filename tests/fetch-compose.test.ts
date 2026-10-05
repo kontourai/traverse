@@ -152,6 +152,82 @@ describe("fetchAndExtract() — live", () => {
     assert.equal(result.extraction!.proposals.length, 1);
     assert.equal(await captureStore.latest("listing-1"), undefined, "nothing was persisted");
   });
+
+  it("keeps the fetch's own warnings beside the store.put warning", async () => {
+    // 0xff is not valid UTF-8, so the decoder warns before the put fails.
+    const url = "https://example.test/listing";
+    const failingStore: SnapshotStore = {
+      async put() { throw new Error("disk full"); },
+      async latest() { return undefined; },
+      async get() { return undefined; },
+      async list() { return []; },
+    };
+    const result = await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider: mockProvider(),
+      mode: "live-with-capture",
+      store: failingStore,
+      fetchOptions: {
+        fetch: fakeFetch({ [url]: { headers: { "content-type": "text/html; charset=utf-8" }, bytes: new Uint8Array([0x61, 0xff, 0x62]) } }),
+        sleep: async () => {},
+      },
+    });
+    assert.deepEqual(result.fetch.warnings, [
+      `${url}: body is not valid utf-8; invalid bytes were replaced with U+FFFD`,
+      "store.put failed (disk full); fetch result kept, snapshot not persisted",
+    ]);
+    assert.ok(result.extraction, "extraction still ran");
+  });
+
+  for (const [label, thrown, described] of [
+    ["a null-prototype object", Object.create(null), /^store\.put failed \(\[object Object\]\); /],
+    ["an object whose toString throws", { toString() { throw new Error("toString exploded"); } }, /^store\.put failed \(\[object Object\]\); /],
+  ] as const) {
+    it(`degrades to a warning when store.put throws ${label} (never throws)`, async () => {
+      const failingStore: SnapshotStore = {
+        async put() { throw thrown; },
+        async latest() { return undefined; },
+        async get() { return undefined; },
+        async list() { return []; },
+      };
+      const result = await fetchAndExtract(cfg(), {
+        targetSchema: genericTargetSchema,
+        provider: mockProvider(),
+        mode: "live-with-capture",
+        store: failingStore,
+        fetchOptions: {
+          fetch: fakeFetch({ "https://example.test/listing": { headers: { "content-type": "text/html" }, body: PAGE } }),
+          sleep: async () => {},
+        },
+      });
+      assert.equal(result.fetch.warnings?.length, 1);
+      assert.match(result.fetch.warnings![0], described);
+      assert.equal(result.extraction!.proposals.length, 1);
+    });
+  }
+
+  it("returns a typed error when replay's store.latest() throws (never throws)", async () => {
+    const brokenStore: SnapshotStore = {
+      async put() {},
+      async latest() { throw new Error("store offline"); },
+      async get() { return undefined; },
+      async list() { return []; },
+    };
+    const provider = mockProvider();
+    const result = await fetchAndExtract(cfg(), {
+      targetSchema: genericTargetSchema,
+      provider,
+      mode: "replay",
+      store: brokenStore,
+    });
+    assert.equal(result.extraction, undefined);
+    assert.equal(result.sourceRef, undefined);
+    assert.deepEqual(result.fetch.error, {
+      kind: "no-snapshot",
+      message: 'store.latest failed for sourceId "listing-1" (store offline); no snapshot to replay',
+    });
+    assert.equal(provider.calls.length, 0);
+  });
 });
 
 describe("fetchAndExtract() — capture + replay parity", () => {

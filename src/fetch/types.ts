@@ -308,7 +308,8 @@ export interface FetchResult {
 export interface SnapshotStore {
   /**
    * persist a snapshot under its `sourceId`. The bundled stores reject (with a
-   * `TypeError`) a snapshot whose content does not hash to its `bodyHash`.
+   * `TypeError`) a snapshot whose content does not hash to its `bodyHash`; the
+   * in-memory store also rejects one with a field it cannot clone.
    */
   put(snapshot: Snapshot): Promise<void>;
   /** the most-recently-fetched snapshot for `sourceId`, or undefined if none. */

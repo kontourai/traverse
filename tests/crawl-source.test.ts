@@ -338,6 +338,33 @@ describe("crawlSource() — review fix: store.put() failure degrades per-page, n
   });
 });
 
+describe("crawlSource() — store.put() throwing a value that cannot be printed", () => {
+  for (const [label, thrown, described] of [
+    ["a null-prototype object", Object.create(null), /store\.put failed \(\[object Object\]\); /],
+    ["an object whose toString throws", { toString() { throw new Error("toString exploded"); } }, /store\.put failed \(\[object Object\]\); /],
+  ] as const) {
+    it(`still degrades per page when store.put throws ${label}`, async () => {
+      const failingStore: SnapshotStore = {
+        async put() { throw thrown; },
+        async latest() { return undefined; },
+        async get() { return undefined; },
+        async list() { return []; },
+      };
+      const manifest = await crawlSource(seedCfg(), {
+        maxPages: 10,
+        maxDepth: 2,
+        store: failingStore,
+        mode: "live-with-capture",
+        fetchOptions: fastFetchOptions({ fetch: fakeFetch(siteRoutes()) }),
+      });
+      assert.deepEqual(manifest.pages.map((p) => p.url), EXPECTED_URLS);
+      const putWarnings = manifest.warnings.filter((w) => /store\.put failed/.test(w));
+      assert.equal(putWarnings.length, EXPECTED_URLS.length);
+      assert.ok(putWarnings.every((w) => described.test(w)), JSON.stringify(putWarnings));
+    });
+  }
+});
+
 describe("crawlSource() — review fix: seed URL fragment-stripping", () => {
   it("a seed URL carrying a fragment is stripped before seeding queue/seen — no duplicate self-fetch, and the recorded page url is fragment-less", async () => {
     const fetch = fakeFetch(siteRoutes());

@@ -10,10 +10,17 @@
  *   traverse-snapshot:<sourceId>?url=<final-url>&sha256=<bodyHash>&fetchedAt=<iso>
  *
  * Given any extraction produced here, `parseSnapshotSourceRef(result.sourceRef)`
- * yields `{ sourceId, url, bodyHash, fetchedAt }`, and
+ * yields `{ sourceId, url, bodyHash, fetchedAt }`. When the snapshot is in
+ * `store` (a `replay`, or a `live-with-capture` whose `store.put()` succeeded),
  * `store.get(sourceId, bodyHash)` returns the byte-identical snapshot the
  * proposals were drawn from. This is the fetch-side analogue of the extraction
  * side's enforced excerpt provenance.
+ *
+ * A `live` run persists nothing, so its `sourceRef` resolves only in a store the
+ * caller fills. In `live-with-capture`, a `store.put()` that throws does not fail
+ * the run: the extraction still carries a `sourceRef`, but nothing is stored
+ * under it, and the only signal is a `fetch.warnings` entry starting
+ * `store.put failed (`.
  *
  * Modes:
  *  - `live`             — fetch over the network; do not persist.
@@ -32,6 +39,7 @@ import type {
 } from "../types.js";
 import type { PreparedArtifactStore } from "../prepared-artifact.js";
 import { fetchSource } from "./fetch-source.js";
+import { describeThrown } from "./describe-thrown.js";
 import { replaySource } from "./snapshot-store.js";
 import type { FetchResult, FetchSourceOptions, Snapshot, SnapshotStore, SourceConfig } from "./types.js";
 
@@ -126,7 +134,18 @@ async function acquire(config: SourceConfig, opts: FetchAndExtractOptions): Prom
     if (!opts.store) {
       return { error: { kind: "invalid-config", message: "mode 'replay' requires a store" } };
     }
-    return replaySource(opts.store, config.id);
+    // replaySource does not catch a store that throws; keep this call's
+    // never-throws contract with the same typed error a missing snapshot gets.
+    try {
+      return await replaySource(opts.store, config.id);
+    } catch (err) {
+      return {
+        error: {
+          kind: "no-snapshot",
+          message: `store.latest failed for sourceId "${config.id}" (${describeThrown(err)}); no snapshot to replay`,
+        },
+      };
+    }
   }
   // Thread the composition-level `store` into fetchSource's options when the
   // caller didn't set one explicitly, so a `SourceConfig.revalidate` conditional
@@ -149,7 +168,7 @@ async function acquire(config: SourceConfig, opts: FetchAndExtractOptions): Prom
         ...result,
         warnings: [
           ...(result.warnings ?? []),
-          `store.put failed (${err instanceof Error ? err.message : String(err)}); fetch result kept, snapshot not persisted`,
+          `store.put failed (${describeThrown(err)}); fetch result kept, snapshot not persisted`,
         ],
       };
     }

@@ -1025,6 +1025,11 @@ const ref = parseSnapshotSourceRef(result.sourceRef!);      // { sourceId, url, 
 const exactBytes = await store.get(ref!.sourceId, ref!.bodyHash); // the snapshot the proposals came from
 ```
 
+`store.get()` finds the snapshot only if it was stored. In `live-with-capture`, a
+`store.put()` that throws does not fail the call: the extraction still runs and
+carries its `sourceRef`, nothing is stored under it, and `result.fetch.warnings`
+gets an entry starting `store.put failed (`.
+
 Use `mode: "replay"` to run the identical extraction against a stored snapshot
 with no network — the CI path. The bundled `createInMemorySnapshotStore()` is a
 handy non-persistent store for tests and single-process capture-then-replay.

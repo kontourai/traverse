@@ -524,6 +524,72 @@ describe("filesystem snapshot store and text bytes", () => {
     assert.equal(second.body, CHARSET_PAGES.latin1.text);
   });
 
+  it("the in-memory store returns byte arrays that hold only the snapshot's bytes", async () => {
+    // Small Buffers share one pooled ArrayBuffer, so a Buffer made just after
+    // this one is a view into the same allocation.
+    const unrelated = Buffer.from("SECRET-TOKEN-do-not-leak");
+    const html = "<h1>tight</h1>";
+    const pooled = Buffer.from(html, "utf8");
+    assert.ok(pooled.buffer.byteLength > pooled.byteLength, "fixture: the Buffer is a view into a larger pool");
+    assert.ok(Buffer.from(pooled.buffer).includes(unrelated), "fixture: the pool holds the unrelated Buffer's bytes");
+    const text: Snapshot = {
+      sourceId: "tight-text", url: "https://example.test/tight", fetchedAt: CLOCK, status: 200,
+      contentType: "html", body: html, bytes: pooled, declaredCharset: "utf-8", bodyHash: sha256BytesOf(pooled),
+    };
+
+    const large = new Uint8Array(1 << 20).fill(0x7a);
+    const view = large.subarray(4096, 4104);
+    view.set([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+    const binary: Snapshot = {
+      sourceId: "tight-binary", url: "https://example.test/tight.pdf", fetchedAt: CLOCK, status: 200,
+      contentType: "pdf", body: "", bodyBytes: view, bodyHash: sha256BytesOf(view),
+    };
+
+    const store = createInMemorySnapshotStore();
+    await store.put(text);
+    await store.put(binary);
+
+    const reads = async (sourceId: string) => [
+      (await store.latest(sourceId))!,
+      (await store.get(sourceId, sha256BytesOf(sourceId === "tight-text" ? pooled : view)))!,
+      ...(await store.list(sourceId)),
+    ];
+    for (const got of await reads("tight-text")) {
+      const bytes = got.bytes!;
+      assert.equal(bytes.buffer.byteLength, bytes.byteLength, "bytes owns a buffer of exactly its length");
+      assert.equal(bytes.byteOffset, 0);
+      assert.deepEqual(Array.from(new Uint8Array(bytes.buffer)), Array.from(Buffer.from(html, "utf8")));
+      assert.equal(Buffer.from(bytes.buffer).includes("SECRET-TOKEN"), false, "no unrelated bytes are reachable");
+    }
+    for (const got of await reads("tight-binary")) {
+      const bytes = got.bodyBytes!;
+      assert.equal(bytes.buffer.byteLength, bytes.byteLength, "bodyBytes owns a buffer of exactly its length");
+      assert.equal(bytes.byteOffset, 0);
+      assert.deepEqual(Array.from(new Uint8Array(bytes.buffer)), [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+    }
+  });
+
+  it("the in-memory store refuses, with a TypeError, a snapshot carrying a value it cannot copy", async () => {
+    const bodyOnly: Snapshot = {
+      sourceId: SOURCE_ID, url: "https://example.test/x", fetchedAt: CLOCK, status: 200,
+      contentType: "html", body: "<h1>x</h1>", bodyHash: sha256Hex("<h1>x</h1>"),
+    };
+    const extras: Array<[string, unknown]> = [
+      ["a function", () => 1],
+      ["a URL", new URL("https://example.test/x")],
+      ["a Headers", new Headers({ etag: '"v1"' })],
+    ];
+    for (const [label, extra] of extras) {
+      const store = createInMemorySnapshotStore();
+      await assert.rejects(
+        store.put({ ...bodyOnly, extra } as unknown as Snapshot),
+        (err: unknown) => err instanceof TypeError && /^snapshot cannot be stored, it cannot be copied: /.test(err.message),
+        label,
+      );
+      assert.equal(await store.latest(SOURCE_ID), undefined, `${label}: nothing was stored`);
+    }
+  });
+
 });
 
 function sha256BytesOf(bytes: Uint8Array): string {

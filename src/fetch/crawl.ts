@@ -35,6 +35,7 @@
 
 import { parseHTML } from "linkedom";
 import { fetchSource } from "./fetch-source.js";
+import { describeThrown } from "./describe-thrown.js";
 import { replaySource } from "./snapshot-store.js";
 import { buildSnapshotSourceRef } from "./compose.js";
 import type { FetchResult, FetchSourceOptions, RobotsRules, SnapshotStore, SourceConfig } from "./types.js";
@@ -256,7 +257,7 @@ export async function crawlSource(seed: SourceConfig, opts: CrawlOptions = {}): 
           await opts.store.put(fetchResult.snapshot);
         } catch (err) {
           warnings.push(
-            `[depth ${depth}] ${url}: store.put failed (${err instanceof Error ? err.message : String(err)}); page fetch result kept, snapshot not persisted`,
+            `[depth ${depth}] ${url}: store.put failed (${describeThrown(err)}); page fetch result kept, snapshot not persisted`,
           );
         }
       }
@@ -301,7 +302,7 @@ export async function crawlSource(seed: SourceConfig, opts: CrawlOptions = {}): 
     return {
       seed: seedRef,
       pages: [],
-      warnings: [`crawlSource: unexpected error (${err instanceof Error ? err.message : String(err)}); returning partial manifest`],
+      warnings: [`crawlSource: unexpected error (${describeThrown(err)}); returning partial manifest`],
       truncated: false,
     };
   }
