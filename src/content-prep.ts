@@ -249,7 +249,7 @@ export function htmlToText(html: string, maxChars: number = DEFAULT_MAX_CHARS): 
 
 /**
  * WebVTT caption track -> clean transcript text. This is the cleanup proven on
- * three real videos in the 2026-07-04 knowledge-kit dogfood (kontourai/ops#72),
+ * three real videos in the 2026-07-04 knowledge-kit dogfood,
  * promoted here from a one-off session script (issue #31). It is CUE-AWARE: only
  * text INSIDE a cue payload (the lines after a `-->` timing line, up to the next
  * blank line) is kept as transcript; everything OUTSIDE a cue — the `WEBVTT`
