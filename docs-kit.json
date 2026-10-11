@@ -154,8 +154,13 @@
     },
     {
       "id": "extraction-result",
-      "title": "ExtractionResult and ExtractionProposal fields",
+      "title": "ExtractionResult fields",
       "source": "docs/reference.md#extractionresult"
+    },
+    {
+      "id": "extraction-proposal",
+      "title": "ExtractionProposal fields",
+      "source": "docs/reference.md#extractionproposal"
     },
     {
       "id": "normalization",
@@ -196,11 +201,6 @@
       "id": "pdf-and-ocr",
       "title": "PDF and image content preparation",
       "source": "README.md#pdf-content-prep-opt-in-seam-no-bundled-parser"
-    },
-    {
-      "id": "js-rendered-pages",
-      "title": "SPA and JS-rendered pages",
-      "source": "README.md#spa--js-rendered-pages"
     },
     {
       "id": "troubleshooting",

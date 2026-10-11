@@ -123,20 +123,32 @@ verified excerpt.
 
 The `@kontourai/traverse/fetch` subpath fetches a page, captures a snapshot, and
 can replay that snapshot later without the network. `fetchAndExtract()` does
-fetch and extraction in one call and gives every proposal a `sourceRef` that
-names the exact snapshot bytes:
+fetch and extraction in one call. It passes a snapshot-anchored `sourceRef` into
+the extraction, so the result's `sourceRef` names the exact snapshot bytes:
 
 ```ts
+import type { TargetFieldSchema } from "@kontourai/traverse";
+import { createAnthropicExtractionProvider } from "@kontourai/traverse/anthropic";
 import { createFilesystemSnapshotStore, fetchAndExtract } from "@kontourai/traverse/fetch";
 
+const targetSchema: TargetFieldSchema[] = [
+  { path: "title", type: "string", required: true, description: "The event name." },
+];
+const provider = createAnthropicExtractionProvider();
 const store = createFilesystemSnapshotStore({ root: ".snapshots" });
-const { fetch, extraction, sourceRef } = await fetchAndExtract(
+
+const result = await fetchAndExtract(
   { id: "spring-workshop", url: "https://example.com/events/spring" },
   { targetSchema, provider, store, mode: "live-with-capture" },
 );
+
+result.fetch;                   // the snapshot, or a typed fetch error
+result.extraction?.proposals;   // absent when the fetch failed
+result.sourceRef;               // "traverse-snapshot:spring-workshop?url=…&sha256=…&fetchedAt=…"
+result.extraction?.sourceRef;   // the same ref, carried on the ExtractionResult
 ```
 
-Run the same call with `mode: "replay"` in CI to extract from the stored
+Proposals themselves carry no `sourceRef`; read it from the result. Run the same call with `mode: "replay"` in CI to extract from the stored
 snapshot with no network. See
 [Fetching & snapshots](../README.md#fetching--snapshots-kontouraitraversefetch).
 

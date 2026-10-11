@@ -107,6 +107,8 @@ Optional input:
 | `inferenceType`, `valueType`, `enumValues` | Copied from the matching schema field. |
 | `evidenceMatch` | Deterministic `schema`, `valueInExcerpt`, and `tokenBoundary` checks. |
 | `producedBy` | The model that served this proposal's own provider call. |
+| `valueNormalization` | `{ kind, from }`, present only when `extract()` rewrote the provider's value losslessly: `string-to-number` (`"2.1"` to `2.1`) or `date-to-iso` (`"21 March 2013"` to `"2013-03-21"`). `from` is the original string. The portable envelope does not carry it. |
+| `occurrenceHint` | Input only. A provider may return a 1-based hint for which exact match its excerpt means. It is used only when it is an integer within the matches in the provider's chunk, and `extract()` never copies it to its output; read `provenance.occurrence` for the selection made. |
 
 The rules that decide which proposals survive are in
 [Normalization semantics](../README.md#normalization-semantics).
@@ -121,13 +123,22 @@ All from `@kontourai/traverse`:
 | `htmlToMarkdown()`, `htmlToText()`, `vttToText()` | The individual preparation steps. |
 | `preparePdfText()`, `prepareImageText()` | Run a PDF or OCR extractor standalone. |
 | `prepareAndChunk()` | Prepare and split content into chunks. |
+| `DEFAULT_CHUNK_SIZE`, `DEFAULT_CHUNK_OVERLAP`, `DEFAULT_MAX_CHUNKS` | The chunking defaults: `12_000`, `200`, and `40`. |
 | `resolvePdfPage(pdfPageOffsets, offset)` | Map a locator offset to a 1-based PDF page. |
 | `resolvePdfLayoutSpan(pdfLayout, locator)` | Find the PDF layout elements and table cells a locator overlaps. |
 | `harvestEmbeddedState()`, `detectJsShell()`, `inspectHtml()` | Embedded-state harvest and shell detection. |
-| `createInMemoryPreparedArtifactStore()`, `resolvePreparedArtifact()` | Keep and later resolve the exact prepared text. |
+| `createInMemoryPreparedArtifactStore()` | An in-memory `PreparedArtifactStore` to pass as `preparedArtifact.store`. |
+| `resolvePreparedArtifact(artifact, store)` | Validate an artifact and fetch its text. Returns a typed status: `available`, `unavailable`, `storage-error`, `invalid-artifact`, `identity-mismatch`, or `digest-mismatch`. |
+| `createPreparedArtifact(text, options)` | Build an artifact identity for prepared text. Throws on ill-formed Unicode or an invalid preparation mode. |
+| `validatePreparedArtifact(input)`, `parsePreparedArtifactRef(ref)` | Check an artifact's fields, and parse a `traverse-prepared-artifact:v1:sha256:<hex>` reference. |
+| `preparationVersionFor(mode)` | The preparation version `extract()` would record for a mode, for keying a cache. |
+| `isWellFormedUnicode(text)` | The Unicode check artifacts apply. |
 | `serializePortableExtractionResult()`, `deserializePortableExtractionResult()`, `validatePortableExtractionResultEnvelope()` | The versioned JSON envelope for moving a result between processes. |
 | `createExtractionTaskSpec()`, `validateExtractionTaskSpec()` | Versioned guidance and few-shot examples. |
 | `enumerateExactOccurrences()`, `sameResolvedOccurrence()` | Exact-occurrence lookup and comparison. |
+| `normalizeProviderFailure(provider, error)` | Classify a thrown provider error into an `ExtractionProviderFailure` (`kind`, `retryable`, optional `code`) and keep the native error. |
+| `unsupportedProviderCapability(input)` | The first required capability the input's provider does not declare, or `undefined`. A provider without a `capabilities` declaration is not checked. |
+| `EXTRACTION_CONFORMANCE_CAPABILITIES` | The capability declaration the bundled adapters use. |
 
 ## Provider contract
 
@@ -151,7 +162,7 @@ it.
 `capabilities.supported` lists any of `structured-output`, `exact-excerpts`,
 `task-specifications`, `usage`, and `warnings`. `maxConcurrency` and
 `maxBatchSize` cap `concurrency` and `batchSize`. An unsupported capability
-that the run needs fails before any provider call. See the
+that the run needs fails before any provider call: `structured-output` and `exact-excerpts` always, and `task-specifications` when a `taskSpec` is given. See the
 [provider conformance decision](decisions/provider-conformance.md).
 
 ## Provider adapters
@@ -180,10 +191,17 @@ failure; errors come back as a typed `FetchError` with a `kind`.
 | `createFilesystemSnapshotStore({ root })`, `createInMemorySnapshotStore()` | Snapshot stores. |
 | `replaySource(store, sourceId)` | Return the latest stored snapshot in the same shape as a live fetch. |
 | `fetchAndExtract(config, opts)` | Fetch (`live`, `replay`, or `live-with-capture`) and extract, with a snapshot-anchored `sourceRef`. |
-| `parseSnapshotSourceRef(ref)` | Parse that `sourceRef` back into `{ sourceId, url, bodyHash, fetchedAt }`. |
+| `buildSnapshotSourceRef(snapshot)` | Build the `traverse-snapshot:<id>?url=…&sha256=…&fetchedAt=…` reference that `fetchAndExtract()` uses. |
+| `parseSnapshotSourceRef(ref)` | Parse a `traverse-snapshot:` reference back into `{ sourceId, url, bodyHash, fetchedAt }`. |
+| `isSameSnapshotRef(a, b)`, `parseAnySnapshotSourceRef(ref)` | Compare or parse references in either the `traverse-snapshot:` or Forage scheme. Use `isSameSnapshotRef` instead of `===`, because the same capture can be named in both schemes. |
+| `resolveContentType(hint, header)` | The `ContentType` for a response. The hint wins; otherwise HTML, PDF, PNG, and JPEG are detected from the `Content-Type` header, and anything else is `text`. |
+| `snapshotHashBasis(snapshot)` | Whether a snapshot's `bodyHash` covers raw `bytes` or `decoded-utf8` text. |
+| `toForageSourceConfig(config, policy)`, `toForageFetchOptions(options)` | Translate a Traverse source config and fetch options into Forage's shapes. |
 | `crawlSource(seed, opts?)` | Bounded same-host breadth-first crawl. `maxPages` defaults to 20 (at most 500); `maxDepth` to 2 (at most 10). |
 | `crawlAndExtract(seed, opts)` | Crawl with Forage and extract every page. |
 | `fetchYouTube(config, opts?)` | Captions and metadata through `yt-dlp`, as a `transcript` snapshot. |
+| `parseYouTubeUrl(input)` | Parse a YouTube URL into `{ videoId, canonicalUrl }` and an optional `timestampSeconds`, or `undefined`. Tracking parameters are dropped. |
+| `parseRobots(text, userAgent)`, `isPathAllowed(rules, pathname)` | The robots.txt matcher `fetchSource()` uses. |
 
 `fetchSource()` defaults: 1,000 ms minimum delay per host, 15,000 ms timeout,
 2 retries (at most 5), at most 5 redirects, and robots.txt respected. Error
@@ -201,7 +219,9 @@ kinds are `timeout`, `network`, `http-error`, `robots-denied`,
   the mapping.
 - **Forage.** The fetch subpath sends its requests through Forage's
   SSRF-guarded egress by default, and `crawlAndExtract()` uses Forage's crawl
-  frontier. Its `sourceRef` values are Forage snapshot references.
+  frontier. Only `crawlAndExtract()` produces Forage snapshot references
+  (`forage-snapshot:`); `fetchAndExtract()` produces `traverse-snapshot:`
+  references. `isSameSnapshotRef()` compares the two.
 - **Relay.** `@kontourai/traverse/relay` accepts any Relay `ModelRuntime`.
   Routing, budgets, fallbacks, and receipts belong to the runtime; Traverse
   keeps the prompt, tool schema, parsing, and provenance rules.
