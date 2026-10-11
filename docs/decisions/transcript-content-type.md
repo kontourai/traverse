@@ -34,7 +34,7 @@ recalls and must not grow its own fetch stack (issue #31).
   mirroring the raw-HTML → Markdown split, so a proposal's `chars:<start>-<end>`
   locator anchors to the CLEANED transcript exactly as it anchors to an html
   page's Markdown. Promoted from the one-off session script proven on three real
-  videos in the 2026-07-04 knowledge-kit dogfood (kontourai/ops#72).
+  videos in the 2026-07-04 knowledge-kit dogfood (an internal tracking issue).
 
 ## Boundary (ADR 0001)
 
