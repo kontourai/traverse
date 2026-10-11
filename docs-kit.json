@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "product": "traverse",
+  "title": "Traverse",
+  "tagline": "Schema-directed extraction that turns content into provenance-bearing, review-ready proposals",
+  "repo": "kontourai/traverse",
+  "landing": "README.md",
+  "documents": [
+    {
+      "source": "docs/getting-started.md",
+      "section": "Start Here"
+    },
+    {
+      "source": "CONTEXT.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/adr/0001-proposals-only.md",
+      "section": "Concepts"
+    },
+    {
+      "source": "docs/parity-methodology.md",
+      "section": "Guides"
+    },
+    {
+      "source": "docs/reference.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/index.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/binary-snapshot-bodies.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/content-preparation.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/crawl-frontier.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/exact-occurrence-resolution.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/extraction-cost-guard.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/extraction-proposals.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/fetch-and-snapshot.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/field-path-normalization.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/format-specific-raw-source-locator-profiles.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/grounded-extraction-benchmark.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/http-validators.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/image-content-preparation.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/multipass-context-evaluation.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/portable-extraction-result-envelope.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/prepared-artifact.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/provider-conformance.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/rendered-fetch.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/text-snapshot-bytes.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/transcript-content-type.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/decisions/versioned-extraction-tasks.md",
+      "section": "Reference"
+    },
+    {
+      "source": "docs/adr/index.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/adr/0002-fetch-snapshot-slice2.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/adr/0003-indexed-path-normalization.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/adr/0004-large-page-chunking.md",
+      "section": "Contribute"
+    },
+    {
+      "source": "docs/adr/0005-embedded-state-sidecar.md",
+      "section": "Contribute"
+    }
+  ],
+  "topics": [
+    {
+      "id": "getting-started",
+      "title": "Getting started: install and first extraction",
+      "source": "docs/getting-started.md#your-first-extraction"
+    },
+    {
+      "id": "glossary",
+      "title": "Traverse vocabulary",
+      "source": "CONTEXT.md#term-glossary"
+    },
+    {
+      "id": "provenance-contract",
+      "title": "The provenance contract: excerpts and chars locators",
+      "source": "README.md#the-provenance-contract"
+    },
+    {
+      "id": "extract-api",
+      "title": "extract() options",
+      "source": "docs/reference.md#extract"
+    },
+    {
+      "id": "extraction-result",
+      "title": "ExtractionResult and ExtractionProposal fields",
+      "source": "docs/reference.md#extractionresult"
+    },
+    {
+      "id": "normalization",
+      "title": "Which proposals survive normalization",
+      "source": "README.md#normalization-semantics"
+    },
+    {
+      "id": "evidence-match",
+      "title": "Evidence annotations and value normalization",
+      "source": "README.md#evidence-annotations-evidencematch"
+    },
+    {
+      "id": "chunking",
+      "title": "Large pages and chunking",
+      "source": "README.md#large-pages--chunking"
+    },
+    {
+      "id": "cost-guards",
+      "title": "Cost guards: maxProviderCalls and maxTotalTokens",
+      "source": "README.md#cost-guards"
+    },
+    {
+      "id": "provider-adapters",
+      "title": "Bundled provider adapters and their defaults",
+      "source": "docs/reference.md#provider-adapters"
+    },
+    {
+      "id": "fetch-subpath",
+      "title": "Fetch subpath: fetch, snapshots, replay, crawl",
+      "source": "docs/reference.md#fetch-subpath"
+    },
+    {
+      "id": "kontour-integrations",
+      "title": "Integration with Survey, Forage, and Relay",
+      "source": "docs/reference.md#integration-with-other-kontour-products"
+    },
+    {
+      "id": "pdf-and-ocr",
+      "title": "PDF and image content preparation",
+      "source": "README.md#pdf-content-prep-opt-in-seam-no-bundled-parser"
+    },
+    {
+      "id": "js-rendered-pages",
+      "title": "SPA and JS-rendered pages",
+      "source": "README.md#spa--js-rendered-pages"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting warnings and errors",
+      "source": "docs/getting-started.md#troubleshooting"
+    }
+  ],
+  "exclude": [
+    "docs/slice-3-candidates.md"
+  ]
+}
