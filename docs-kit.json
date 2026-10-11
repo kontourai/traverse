@@ -203,6 +203,11 @@
       "source": "README.md#pdf-content-prep-opt-in-seam-no-bundled-parser"
     },
     {
+      "id": "js-rendered-pages",
+      "title": "SPA and JS-rendered pages",
+      "source": "README.md#spa--js-rendered-pages"
+    },
+    {
       "id": "troubleshooting",
       "title": "Troubleshooting warnings and errors",
       "source": "docs/getting-started.md#troubleshooting"

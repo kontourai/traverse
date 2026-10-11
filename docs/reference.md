@@ -193,7 +193,7 @@ failure; errors come back as a typed `FetchError` with a `kind`.
 | `fetchAndExtract(config, opts)` | Fetch (`live`, `replay`, or `live-with-capture`) and extract, with a snapshot-anchored `sourceRef`. |
 | `buildSnapshotSourceRef(snapshot)` | Build the `traverse-snapshot:<id>?url=…&sha256=…&fetchedAt=…` reference that `fetchAndExtract()` uses. |
 | `parseSnapshotSourceRef(ref)` | Parse a `traverse-snapshot:` reference back into `{ sourceId, url, bodyHash, fetchedAt }`. |
-| `isSameSnapshotRef(a, b)`, `parseAnySnapshotSourceRef(ref)` | Compare or parse references in either the `traverse-snapshot:` or Forage scheme. Use `isSameSnapshotRef` instead of `===`, because the same capture can be named in both schemes. |
+| `isSameSnapshotRef(a, b)`, `parseAnySnapshotSourceRef(ref)` | Compare or parse references in either the `traverse-snapshot:` or Forage scheme. Use `isSameSnapshotRef` instead of `===`, because the same capture can be named in both schemes. It still returns false when the two digests were taken on different hash bases (raw bytes versus decoded text) and the body is not BOM-free valid UTF-8. A reference does not record its basis; `snapshotHashBasis` reads it from the stored snapshot. |
 | `resolveContentType(hint, header)` | The `ContentType` for a response. The hint wins; otherwise HTML, PDF, PNG, and JPEG are detected from the `Content-Type` header, and anything else is `text`. |
 | `snapshotHashBasis(snapshot)` | Whether a snapshot's `bodyHash` covers raw `bytes` or `decoded-utf8` text. |
 | `toForageSourceConfig(config, policy)`, `toForageFetchOptions(options)` | Translate a Traverse source config and fetch options into Forage's shapes. |

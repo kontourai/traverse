@@ -148,6 +148,8 @@ result.sourceRef;               // "traverse-snapshot:spring-workshop?url=…&sh
 result.extraction?.sourceRef;   // the same ref, carried on the ExtractionResult
 ```
 
+This snippet uses the Anthropic adapter, so it needs `@anthropic-ai/sdk` installed and either `ANTHROPIC_API_KEY` set or an `apiKey` option passed. Any other provider works the same way.
+
 Proposals themselves carry no `sourceRef`; read it from the result. Run the same call with `mode: "replay"` in CI to extract from the stored
 snapshot with no network. See
 [Fetching & snapshots](../README.md#fetching--snapshots-kontouraitraversefetch).
