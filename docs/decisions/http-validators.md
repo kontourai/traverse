@@ -14,7 +14,7 @@ evidence:
 
 `Snapshot` stores the response `ETag` and `Last-Modified` validators, and
 `fetchSource` supports an opt-in CONDITIONAL GET (issue #31, completing the
-"URL recheck" story of kontourai/ops#75).
+"URL recheck" story of an internal tracking issue).
 
 - A `200` captures `etag` / `lastModified` (verbatim) onto the snapshot when the
   server sends them; absent headers leave the fields unset.

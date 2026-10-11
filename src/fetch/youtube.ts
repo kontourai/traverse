@@ -12,7 +12,7 @@
  * only. It stages no knowledge, owns no review, defines no field vocabulary — it
  * hands back a snapshot + metadata and stops. The knowledge store keeps the
  * manifest record and copies staged bytes into its own CAS; this snapshot store
- * stays operational / replayable / prunable (kontourai/ops#72).
+ * stays operational / replayable / prunable.
  *
  * OPTIONAL DEPENDENCY, same posture as the Anthropic SDK: `yt-dlp` is an optional
  * external binary, NOT a bundled dependency. Its presence is DETECTED

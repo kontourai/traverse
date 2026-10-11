@@ -90,7 +90,7 @@ export interface SourceConfig {
    * `bodyHash` for the CALLER to compare with any prior. `fetchSource` does not
    * perform the prior-hash comparison.
    * Default `false` — behavior is byte-identical to before this option existed.
-   * See docs/decisions/http-validators.md and kontourai/ops#75.
+   * See docs/decisions/http-validators.md.
    */
   revalidate?: boolean;
   /**
