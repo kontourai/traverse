@@ -26,6 +26,9 @@ Every proposal is a reviewable record with an excerpt and locator.
 - Library/types changes: `npm test` (build + Node tests against `dist/`).
 - Package-shape/exports changes: `npm run check:pack`.
 - Docs or fixture changes: `npm run check:content-boundary`.
+- Docs are published with docs-kit: `docs-kit.json` lists the published docs
+  and the MCP topics, and `npm run docs:check` is the gate. When you change
+  code that a document `covers`, update that document.
 - Anything before push: `npm run verify` (content-boundary + typecheck + test +
   pack sanity — the exact chain CI's `verify` job runs).
 - Install with `pnpm install`; the pnpm version is pinned in `package.json`

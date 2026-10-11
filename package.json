@@ -59,7 +59,9 @@
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "check:pack": "node scripts/check-package-contents.mjs",
     "workflow:sidecar": "flow-agents-workflow-sidecar",
-    "workflow:validate-artifacts": "flow-agents-validate-artifacts"
+    "workflow:validate-artifacts": "flow-agents-validate-artifacts",
+    "docs:check": "npx -y github:kontourai/docs-kit#482fb2e691fe7686f79a9a4da8bc2247384b85c3 docs-kit check",
+    "docs:build": "npx -y github:kontourai/docs-kit#482fb2e691fe7686f79a9a4da8bc2247384b85c3 docs-kit build"
   },
   "dependencies": {
     "@kontourai/forage": "^1.0.0",
