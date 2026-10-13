@@ -1,5 +1,18 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "purpose": "Turn prepared content into source-grounded proposals that callers can review under their own policy.",
+  "builtOn": [
+    {
+      "product": "forage",
+      "via": "@kontourai/forage",
+      "for": "Guard acquisition, crawl sites, and decode stored snapshot text."
+    },
+    {
+      "product": "relay",
+      "via": "@kontourai/relay",
+      "for": "Invoke extraction models through single and batched runtime calls."
+    }
+  ],
   "product": "traverse",
   "title": "Traverse",
   "tagline": "Schema-directed extraction that turns content into provenance-bearing, review-ready proposals",
