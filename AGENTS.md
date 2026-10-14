@@ -29,8 +29,14 @@ Every proposal is a reviewable record with an excerpt and locator.
 - Docs are published with Corpus: `corpus.json` lists the published docs
   and the MCP topics, and `npm run docs:check` is the gate. When you change
   code that a document `covers`, update that document.
-- Anything before push: `npm run verify` (content-boundary + typecheck + test +
-  pack sanity — the exact chain CI's `verify` job runs).
+- Decisions: one living record per subject in `docs/decisions/<slug>.md`, in
+  the [Corpus decision-record format](https://github.com/kontourai/corpus/blob/main/docs/decisions.md).
+  Numbered ADRs in `docs/adr/` are frozen history; never add one. After
+  editing a record, run `npm run gen:decisions-index`. `npm run check:decisions`
+  validates the records and the index, and refuses ADR files added since
+  `$DECISIONS_BASE` (default `origin/main`; CI sets it to the pull request base).
+- Anything before push: `npm run verify` (content-boundary + decisions +
+  typecheck + test + pack sanity — the exact chain CI's `verify` job runs).
 - Install with `pnpm install`; the pnpm version is pinned in `package.json`
   (`packageManager`). Dependency install scripts are blocked by default, and a
   package that needs one is named under `allowBuilds` in `pnpm-workspace.yaml`,

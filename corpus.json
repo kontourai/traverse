@@ -228,5 +228,10 @@
   ],
   "exclude": [
     "docs/slice-3-candidates.md"
-  ]
+  ],
+  "decisions": {
+    "adr": {
+      "dir": "docs/adr"
+    }
+  }
 }

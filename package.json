@@ -54,14 +54,13 @@
     "eval:multipass-context:live": "npm run build --silent && node evals/grounded-extraction/live-multipass-context.mjs",
     "verify": "npm run check:content-boundary && npm run check:decisions && npm run typecheck && npm test && npm run check:pack",
     "check:content-boundary": "node --test tests/content-boundary-script.test.cjs && node scripts/check-content-boundary.cjs",
-    "check:decisions": "node scripts/check-decisions.cjs check",
-    "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
-    "freeze:adrs": "node scripts/freeze-adrs.mjs",
+    "check:decisions": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions check --base ${DECISIONS_BASE:-origin/main}",
+    "gen:decisions-index": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus decisions index",
     "check:pack": "node scripts/check-package-contents.mjs",
     "workflow:sidecar": "flow-agents-workflow-sidecar",
     "workflow:validate-artifacts": "flow-agents-validate-artifacts",
-    "docs:check": "npx -y github:kontourai/corpus#340b66fc8f723c1babe35fce8240c82cd196b0db corpus check",
-    "docs:build": "npx -y github:kontourai/corpus#340b66fc8f723c1babe35fce8240c82cd196b0db corpus build"
+    "docs:check": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus check",
+    "docs:build": "npx -y --package=https://codeload.github.com/kontourai/corpus/tar.gz/08c62ccd72880ff4bd4c378ae252ad437b4b4fb5 -- corpus build"
   },
   "dependencies": {
     "@kontourai/forage": "^1.0.0",
