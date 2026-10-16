@@ -20,6 +20,8 @@ offers a bounded same-host crawl — see "Fetching & snapshots" below — but
 extraction itself still never crawls). See
 [`docs/adr/0001-proposals-only.md`](docs/adr/0001-proposals-only.md).
 
+With Node.js 22 or newer and a TypeScript project, [install the package](#install), then follow the [Quickstart](#quickstart) to extract a title from short HTML with a mock provider and inspect the proposal’s excerpt and locator. The example needs no API key or provider SDK; it demonstrates proposal and locator mechanics, and your application still owns review.
+
 ## Install
 
 ```sh
