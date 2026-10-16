@@ -1,5 +1,16 @@
 # Changelog
 
+## [5.0.3](https://github.com/kontourai/traverse/compare/v5.0.2...v5.0.3) (2026-10-16)
+
+
+### Documentation
+
+* adopt docs-kit gate, Pages site, and MCP bundle ([#211](https://github.com/kontourai/traverse/issues/211)) ([1baf8a0](https://github.com/kontourai/traverse/commit/1baf8a048a4eefac9036bcc1eca1e3770e9d74d5))
+* declare purpose and building blocks in Corpus v2 ([#216](https://github.com/kontourai/traverse/issues/216)) ([c7b67fd](https://github.com/kontourai/traverse/commit/c7b67fd0be30378fc0b380181a4a3c1437858845))
+* drop references to private repositories and local paths ([#213](https://github.com/kontourai/traverse/issues/213)) ([9684300](https://github.com/kontourai/traverse/commit/9684300f25148de4df932e8048d35f830052253b))
+* **readme:** add badges and documentation link to the header ([#215](https://github.com/kontourai/traverse/issues/215)) ([496acf9](https://github.com/kontourai/traverse/commit/496acf950d392ae3e4df30f5c0167167ccac9b16))
+* route new readers to the existing quickstart ([#219](https://github.com/kontourai/traverse/issues/219)) ([5cdb49e](https://github.com/kontourai/traverse/commit/5cdb49e4115c53f3197651aae697a0a090c31287))
+
 ## [5.0.2](https://github.com/kontourai/traverse/compare/v5.0.1...v5.0.2) (2026-10-05)
 
 
