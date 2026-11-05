@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@kontourai/forage':
         specifier: ^1.0.0
-        version: 1.0.0
+        version: 1.0.2
       linkedom:
         specifier: ^0.18.12
         version: 0.18.15
@@ -22,17 +22,17 @@ importers:
         specifier: ^0.133.0
         version: 0.133.0(zod@4.4.3)
       '@kontourai/flow-agents':
-        specifier: 9.5.0
-        version: 9.5.0(@kontourai/bearing@0.2.0)(typescript@7.0.2)(zod@4.4.3)
+        specifier: 9.11.0
+        version: 9.11.0(@kontourai/bearing@0.2.0)(typescript@7.0.2)(zod@4.4.3)
       '@kontourai/relay':
         specifier: ^0.7.0
-        version: 0.7.0(@anthropic-ai/sdk@0.133.0(zod@4.4.3))
+        version: 0.7.1(@anthropic-ai/sdk@0.133.0(zod@4.4.3))
       '@kontourai/survey':
         specifier: ^8.0.0
-        version: 8.0.0(typescript@7.0.2)
+        version: 8.2.1(typescript@7.0.2)
       '@kontourai/veritas':
         specifier: 1.12.1
-        version: 1.12.1(@kontourai/survey@8.0.0(typescript@7.0.2))
+        version: 1.12.1(@kontourai/survey@8.2.1(typescript@7.0.2))
       '@types/node':
         specifier: ^26.1.2
         version: 26.2.0
@@ -41,7 +41,7 @@ importers:
         version: 5.0.6
       openai:
         specifier: ^7.32.0
-        version: 7.50.0(zod@4.4.3)
+        version: 7.47.0(zod@4.4.3)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -250,8 +250,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/dispatch@0.7.1':
-    resolution: {integrity: sha512-W+KgYYzrQphqhJFBEncdrqiU1o7jS/KusgsFn+7IGVlb/XhsU6Qfj25KNEw7mb44X4KySmjxcUpAQkzWlLT+pg==}
+  '@kontourai/dispatch@0.8.0':
+    resolution: {integrity: sha512-c/G78FZ1kQMi7OxpWCOtMhmvTqSgAMBlsWSOJyv1lJpG/5AgghPgOj9K3Mg78U8HOs373v+0EE94i8NQv/goLA==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -266,13 +266,13 @@ packages:
       '@kontourai/datum':
         optional: true
 
-  '@kontourai/flow-agents@9.5.0':
-    resolution: {integrity: sha512-D7mBhCMCg+Yfc+SKo0Hl9yfg0vvYSwmtYAwX+GoFkXZvWjGWQiLlpCzeeAg6l8APQEP21O85XE0kKOxvi6vzRw==}
+  '@kontourai/flow-agents@9.11.0':
+    resolution: {integrity: sha512-4IJNLz6Gzi45KNySKdfQPTQhp8qYf7TvWM/bAT5OUoO7kE9CDYSNWZGB8RKKZEJ01pjAIcZUw1xO7POLpfaMjg==}
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/flow@5.2.0':
-    resolution: {integrity: sha512-tJ/XFrcKaLPnvv/2EIX9Db1cLEsnS4vbHMjULcVQHKMGz1cMNbvj/i1IXJVD4YWZ2I/0a6skN//NWUrlKX7F+w==}
+  '@kontourai/flow@5.4.0':
+    resolution: {integrity: sha512-jGimrSdVxzEuI2NvQ++t2xmEEAXoXCXtHat2pfBTSsOAdXzn2OQbHO9WskpmuE6F7zvPrJrky7GUAVOtixDFRg==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -285,8 +285,8 @@ packages:
       playwright:
         optional: true
 
-  '@kontourai/forage@1.0.0':
-    resolution: {integrity: sha512-4OinV0u5Hyo98WiQOxXMAh03X5eZVigtzZ8b1U6xvN/rf8C51NPbUGbvoo8BMbFFg32a7qldnDo+6mPgQG+rNQ==}
+  '@kontourai/forage@1.0.2':
+    resolution: {integrity: sha512-KJ/g2mRKMvG6LHX42jRqOQyNLPWbWR0JulKYmubq0ZsAlOgykutDNxOv1L//dg8ruAFO6zpE9XiV+8UE9tIKUg==}
     engines: {node: '>=22'}
     peerDependencies:
       playwright: '>=1.40.0'
@@ -298,16 +298,6 @@ packages:
     resolution: {integrity: sha512-LiYmwDpsBiAjeHFSqbtA51CGjdOKY0l+r/tneqV9aPdT4Ct+5zq7o6fH5NbRhoTW2h9sqiIZL0SOA69CSGJlnA==}
     engines: {node: '>=22'}
     hasBin: true
-
-  '@kontourai/relay@0.7.0':
-    resolution: {integrity: sha512-OncSgoOQSWZZeEZSo3fFrqT6DrRGer+fwy/q8Q1FXzJ6vQAetx9OM7xk1gclBSTLGD1p8rcVdc5IasQLksTRkQ==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      '@ai-sdk/provider': '>=3.0.0'
-      '@anthropic-ai/sdk': '>=0.40.0'
-    peerDependenciesMeta:
-      '@anthropic-ai/sdk':
-        optional: true
 
   '@kontourai/relay@0.7.1':
     resolution: {integrity: sha512-/qc/dK5fe3mClq1/qtSeV88UBiq4Q7PHHGZyhQtUVKAygZAJ21F5T3NIZhvLqOi+udPg074Alh4VEWN7RADOUg==}
@@ -334,8 +324,8 @@ packages:
     engines: {node: '>=22'}
     hasBin: true
 
-  '@kontourai/survey@8.0.0':
-    resolution: {integrity: sha512-4cs94lxDoB+FQ34n1mP5I96/glVFF0GVDJ2o34thQ3HGL2d+xGmcn+4x48RdM59eH1prApbsOsOccyEuFZ+Udw==}
+  '@kontourai/survey@8.2.0':
+    resolution: {integrity: sha512-7bDjdLKxR38POHumHzQXRS7nu6Ftu0nbwpCsnkEvOYL/xd8i8np94x+V3ftsd8tt4ZvNjbhdlf1tjZzFu8QfVQ==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -344,8 +334,8 @@ packages:
       typescript:
         optional: true
 
-  '@kontourai/survey@8.2.0':
-    resolution: {integrity: sha512-7bDjdLKxR38POHumHzQXRS7nu6Ftu0nbwpCsnkEvOYL/xd8i8np94x+V3ftsd8tt4ZvNjbhdlf1tjZzFu8QfVQ==}
+  '@kontourai/survey@8.2.1':
+    resolution: {integrity: sha512-oQgnhhMjSG72kM+/z37jRqxWU7pqCrojiKO2OsuA1N64vdqQwjZ6u1eZliN3RhgDQEnPAZ1iUdH0ecBE4qeczw==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1037,8 +1027,8 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  openai@7.50.0:
-    resolution: {integrity: sha512-VFBqvO4pL3sXY1y3L1qo+9yUkE+sHOov044/mWAHThG+XUgUrMmQsigwY0ONfYBzLE7Rx4222mM6I+CTNw+Gsw==}
+  openai@7.47.0:
+    resolution: {integrity: sha512-BYa2RYgocAv9WjPUJmNu8fICuA1fFhkTBEpiR3sC5L1K6v8Hnhc8pcnQEhu8l/+W1XKA+JUaBa7HpT+AK1s77w==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
@@ -1402,7 +1392,7 @@ snapshots:
     transitivePeerDependencies:
       - playwright
 
-  '@kontourai/dispatch@0.7.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.0)':
+  '@kontourai/dispatch@0.8.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.0)':
     dependencies:
       '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
     optionalDependencies:
@@ -1411,12 +1401,12 @@ snapshots:
     transitivePeerDependencies:
       - '@anthropic-ai/sdk'
 
-  '@kontourai/flow-agents@9.5.0(@kontourai/bearing@0.2.0)(typescript@7.0.2)(zod@4.4.3)':
+  '@kontourai/flow-agents@9.11.0(@kontourai/bearing@0.2.0)(typescript@7.0.2)(zod@4.4.3)':
     dependencies:
       '@kontourai/conduit': 0.7.1
       '@kontourai/datum': 0.8.0
-      '@kontourai/dispatch': 0.7.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.0)
-      '@kontourai/flow': 5.2.0
+      '@kontourai/dispatch': 0.8.0(@anthropic-ai/sdk@0.116.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.0)
+      '@kontourai/flow': 5.4.0
       '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))
       '@kontourai/surface': 5.0.0
       '@kontourai/survey': 8.2.0(typescript@7.0.2)
@@ -1433,7 +1423,7 @@ snapshots:
       - typescript
       - zod
 
-  '@kontourai/flow@5.2.0':
+  '@kontourai/flow@5.4.0':
     dependencies:
       '@kontourai/surface': 2.14.0
       ajv: 8.20.0
@@ -1445,17 +1435,17 @@ snapshots:
 
   '@kontourai/forage@0.4.1': {}
 
-  '@kontourai/forage@1.0.0': {}
+  '@kontourai/forage@1.0.2': {}
 
   '@kontourai/plumb@0.2.0': {}
-
-  '@kontourai/relay@0.7.0(@anthropic-ai/sdk@0.133.0(zod@4.4.3))':
-    optionalDependencies:
-      '@anthropic-ai/sdk': 0.133.0(zod@4.4.3)
 
   '@kontourai/relay@0.7.1(@anthropic-ai/sdk@0.116.0(zod@4.4.3))':
     optionalDependencies:
       '@anthropic-ai/sdk': 0.116.0(zod@4.4.3)
+
+  '@kontourai/relay@0.7.1(@anthropic-ai/sdk@0.133.0(zod@4.4.3))':
+    optionalDependencies:
+      '@anthropic-ai/sdk': 0.133.0(zod@4.4.3)
 
   '@kontourai/surface@2.13.0':
     optionalDependencies:
@@ -1481,27 +1471,29 @@ snapshots:
       - kerberos
       - supports-color
 
-  '@kontourai/survey@8.0.0(typescript@7.0.2)':
-    dependencies:
-      '@kontourai/surface': 2.13.0
-      '@modelcontextprotocol/server': 2.0.0
-      zod: 4.4.3
-    optionalDependencies:
-      typescript: 7.0.2
-    transitivePeerDependencies:
-      - supports-color
-
   '@kontourai/survey@8.2.0(typescript@7.0.2)':
     dependencies:
-      '@kontourai/surface': 2.13.0
+      '@kontourai/surface': 2.14.0
       '@modelcontextprotocol/server': 2.0.0
       zod: 4.4.3
     optionalDependencies:
       typescript: 7.0.2
     transitivePeerDependencies:
+      - kerberos
       - supports-color
 
-  '@kontourai/veritas@1.12.1(@kontourai/survey@8.0.0(typescript@7.0.2))':
+  '@kontourai/survey@8.2.1(typescript@7.0.2)':
+    dependencies:
+      '@kontourai/surface': 2.14.0
+      '@modelcontextprotocol/server': 2.0.0
+      zod: 4.4.3
+    optionalDependencies:
+      typescript: 7.0.2
+    transitivePeerDependencies:
+      - kerberos
+      - supports-color
+
+  '@kontourai/veritas@1.12.1(@kontourai/survey@8.2.1(typescript@7.0.2))':
     dependencies:
       '@kontourai/plumb': 0.2.0
       '@kontourai/surface': 2.13.0
@@ -1512,7 +1504,7 @@ snapshots:
       hachure: 0.15.0
       picomatch: 4.0.7
     optionalDependencies:
-      '@kontourai/survey': 8.0.0(typescript@7.0.2)
+      '@kontourai/survey': 8.2.1(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
       - supports-color
@@ -2299,7 +2291,7 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@7.50.0(zod@4.4.3):
+  openai@7.47.0(zod@4.4.3):
     optionalDependencies:
       zod: 4.4.3
 
