@@ -37,7 +37,10 @@
     },
     {
       "source": "docs/reference.md",
-      "section": "Reference"
+      "section": "Reference",
+      "covers": [
+        "src/**"
+      ]
     },
     {
       "source": "docs/decisions/index.md",
