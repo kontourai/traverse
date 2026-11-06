@@ -1,5 +1,12 @@
 # Changelog
 
+## [5.0.4](https://github.com/kontourai/traverse/compare/v5.0.3...v5.0.4) (2026-11-06)
+
+
+### Documentation
+
+* track implementation changes in canonical references ([#226](https://github.com/kontourai/traverse/issues/226)) ([7b995fb](https://github.com/kontourai/traverse/commit/7b995fb69fcb05e4f41bb45d3ba5b94a0c5b7223))
+
 ## [5.0.3](https://github.com/kontourai/traverse/compare/v5.0.2...v5.0.3) (2026-10-16)
 
 
