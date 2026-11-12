@@ -3,12 +3,12 @@
   "cases": {
     "html-listing": {
       "preparationMode": "markdown",
-      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.4",
+      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.5",
       "digest": "1e142fd5d568584cb1f2a624d5897d1eb6443d32fd079f286f3b1836153b5fa4"
     },
     "html-detail": {
       "preparationMode": "markdown",
-      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.4",
+      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.5",
       "digest": "123450f3c6ff208baa80fdfae213ff54a5b76b5d05ee699442727dc4bf6d71d5"
     },
     "html-as-text": {
@@ -28,7 +28,7 @@
     },
     "html-chrome": {
       "preparationMode": "markdown",
-      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.4",
+      "preparationVersion": "3+linkedom@0.18.15+turndown@7.2.5",
       "digest": "3841a779e748d2d858e38265d7ef4fc765ece397ae6ec9083e9c78ccaba14e0e"
     }
   }
