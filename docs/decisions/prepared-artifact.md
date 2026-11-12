@@ -64,7 +64,10 @@ the same input. It is the base version of Traverse's own preparation code
 bumped when any pinned input's prepared-text digest changes. For HTML Markdown
 preparation it also names the installed versions of the libraries that shape
 that output, read through static JSON imports:
-`<base>+linkedom@<version>+turndown@<version>`. A library version that is not a
+`<base>+linkedom@<version>+turndown@<version>`. The Turndown 7.2.5 update retains
+all six frozen prepared-text digests; only the three HTML Markdown version labels
+advance from 7.2.4. Identical text still gets a different reference when the
+declared preparation tool version changes. A library version that is not a
 stable token throws instead of producing a placeholder two versions could share.
 The version lives in the existing string, so the artifact keeps its fields and
 its reference binding. A caller-supplied `preparationVersion` is used as given.
