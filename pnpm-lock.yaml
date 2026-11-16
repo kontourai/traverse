@@ -20,13 +20,13 @@ importers:
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: ^1.6.0
-        version: 1.6.0(zod@4.4.3)
+        version: 1.8.0(zod@4.4.3)
       '@kontourai/flow-agents':
         specifier: 9.14.0
         version: 9.14.0(@kontourai/bearing@0.2.0)(typescript@7.0.2)(zod@4.4.3)
       '@kontourai/relay':
         specifier: ^0.7.0
-        version: 0.7.1(@anthropic-ai/sdk@1.6.0(zod@4.4.3))
+        version: 0.7.1(@anthropic-ai/sdk@1.8.0(zod@4.4.3))
       '@kontourai/survey':
         specifier: ^8.0.0
         version: 8.4.0(typescript@7.0.2)
@@ -41,15 +41,15 @@ importers:
         version: 5.0.6
       openai:
         specifier: ^7.32.0
-        version: 7.53.0(zod@4.4.3)
+        version: 7.56.0(zod@4.4.3)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
 
 packages:
 
-  '@anthropic-ai/sdk@1.6.0':
-    resolution: {integrity: sha512-XqiO/46n8S6So8jQ/6/uNCkHntyW6QHHs1gZ+hlwTx1fWDr929g4VmwIXfdMVk7SuBWNdQvAlwyi1G3t6SEIuQ==}
+  '@anthropic-ai/sdk@1.8.0':
+    resolution: {integrity: sha512-yDOArk2+Qpd/djEKmZjrv7JZ+pn5iBHARJ9PAdvfhGf4H5wNqTgY/2K0/yDKdQdm8G8hrNQchMlBAHpPK7yBfg==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -978,8 +978,8 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  openai@7.53.0:
-    resolution: {integrity: sha512-PXiIZraFYMb2QYgTtWqDA16Oszj4fWRZNn7qLIAddmiJxM5uQPWBFaxp9O8MhLfTUOQ+iQsnFSRJhLPecsGovQ==}
+  openai@7.56.0:
+    resolution: {integrity: sha512-viGsb+pfPxaRqnap556J4vScLNXPzRRFAQ7dbWKvDaeyY5rleW3vEKnw7Mo4gnnee2kYOhppHXZS1b5JH42HCw==}
     engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
@@ -1210,7 +1210,7 @@ packages:
 
 snapshots:
 
-  '@anthropic-ai/sdk@1.6.0(zod@4.4.3)':
+  '@anthropic-ai/sdk@1.8.0(zod@4.4.3)':
     dependencies:
       '@opentelemetry/api': 1.10.0
       json-schema-to-ts: 3.1.1
@@ -1324,9 +1324,9 @@ snapshots:
     transitivePeerDependencies:
       - playwright
 
-  '@kontourai/dispatch@0.8.0(@anthropic-ai/sdk@1.6.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.1)':
+  '@kontourai/dispatch@0.8.0(@anthropic-ai/sdk@1.8.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.1)':
     dependencies:
-      '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@1.6.0(zod@4.4.3))
+      '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@1.8.0(zod@4.4.3))
     optionalDependencies:
       '@kontourai/bearing': 0.2.0
       '@kontourai/datum': 0.8.1
@@ -1343,17 +1343,17 @@ snapshots:
     dependencies:
       '@kontourai/conduit': 0.7.1
       '@kontourai/datum': 0.8.1
-      '@kontourai/dispatch': 0.8.0(@anthropic-ai/sdk@1.6.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.1)
+      '@kontourai/dispatch': 0.8.0(@anthropic-ai/sdk@1.8.0(zod@4.4.3))(@kontourai/bearing@0.2.0)(@kontourai/datum@0.8.1)
       '@kontourai/ferry': 0.6.0
       '@kontourai/flow': 5.4.0
-      '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@1.6.0(zod@4.4.3))
+      '@kontourai/relay': 0.7.1(@anthropic-ai/sdk@1.8.0(zod@4.4.3))
       '@kontourai/surface': 5.0.0
       '@kontourai/surface-knowledge': '@kontourai/surface@6.3.0'
       '@kontourai/survey': 8.4.0(typescript@7.0.2)
       '@kontourai/thread': 0.5.0
       esbuild: 0.28.2
     optionalDependencies:
-      '@anthropic-ai/sdk': 1.6.0(zod@4.4.3)
+      '@anthropic-ai/sdk': 1.8.0(zod@4.4.3)
       neo4j-driver: 6.3.0
     transitivePeerDependencies:
       - '@ai-sdk/provider'
@@ -1380,9 +1380,9 @@ snapshots:
 
   '@kontourai/plumb@0.2.0': {}
 
-  '@kontourai/relay@0.7.1(@anthropic-ai/sdk@1.6.0(zod@4.4.3))':
+  '@kontourai/relay@0.7.1(@anthropic-ai/sdk@1.8.0(zod@4.4.3))':
     optionalDependencies:
-      '@anthropic-ai/sdk': 1.6.0(zod@4.4.3)
+      '@anthropic-ai/sdk': 1.8.0(zod@4.4.3)
 
   '@kontourai/surface@2.14.0':
     optionalDependencies:
@@ -2124,7 +2124,7 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openai@7.53.0(zod@4.4.3):
+  openai@7.56.0(zod@4.4.3):
     optionalDependencies:
       zod: 4.4.3
 
